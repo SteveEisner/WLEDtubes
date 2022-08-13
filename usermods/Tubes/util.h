@@ -2,7 +2,7 @@
 
 #include "wled.h"
 
-// Is this the tube that can control others?
+// Is this a tube that can control WLED?
 #define MASTER_TUBE
 
 uint8_t scaled16to8( uint16_t v, uint16_t lowest=0, uint16_t highest=65535) {

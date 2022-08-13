@@ -132,8 +132,6 @@ class PatternController : public MessageReceiver {
 
     this->updateTimer.start(STATUS_UPDATE_PERIOD); // Ready to send an update as soon as we're able to
     Serial.println("Patterns: ok");
-
-    WS2812FX::load_pattern(FX_MODE_EXTERNAL);
   }
 
   void do_pattern_changes() {

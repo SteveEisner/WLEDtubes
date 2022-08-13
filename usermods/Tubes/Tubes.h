@@ -71,18 +71,13 @@ class TubesUsermod : public Usermod {
 
       // uint8_t segment_id = strip.getMainSegmentId();
       uint16_t length = strip.getLengthTotal();
-      auto external_buffer = strip.get_external_buffer();
 
       uint8_t fade = sin8(millis() / 40); // amount that Tubes overwrites WLED, 0-255
       
       if (fade > 0) {
         for (int i = 0, p = 0; i < length; i++, p++) {
-          if (p >= EXTERNAL_BUFFER_SIZE) {
-            p = 0;
-          }
-
           CRGB color1 = strip.getPixelColor(i);
-          CRGB color2 = external_buffer[p];
+          CRGB color2 = controller.led_strip->getPixelColor(i);
 
           uint8_t r = blend8(color1.r, color2.r, fade);
           uint8_t g = blend8(color1.g, color2.g, fade);
