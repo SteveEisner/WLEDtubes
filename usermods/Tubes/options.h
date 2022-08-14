@@ -1,6 +1,6 @@
 #pragma once
 
-typedef enum SyncMode {
+typedef enum SyncMode: uint8_t {
   All=0,
   SinDrift=1,
   Pulse=2,
@@ -20,6 +20,13 @@ typedef enum Energy: uint8_t {
   MediumEnergy=10,
   HighEnergy=20,
 } Energy;
+
+typedef enum Fader: uint8_t {
+  AUTO = 0,  // Does a sin pattern
+  LEFT = 1,  // All left (internal)
+  MIDDLE = 2,  // 50% internal, 50% WLED
+  RIGHT = 3  // All right (WLED)
+} Fader;
 
 typedef struct ControlParameters {
   public:
