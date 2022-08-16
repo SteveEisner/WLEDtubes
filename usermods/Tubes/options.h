@@ -17,17 +17,12 @@ typedef enum Duration: uint8_t {
 } Duration;
 
 typedef enum Energy: uint8_t {
-  LowEnergy=0,
-  MediumEnergy=10,
-  HighEnergy=20,
+  Boring=0,
+  LowEnergy=10,
+  MediumEnergy=20,
+  HighEnergy=230
 } Energy;
 
-typedef enum Fader: uint8_t {
-  AUTO = 0,  // Does a sin pattern
-  LEFT = 1,  // All left (internal)
-  MIDDLE = 2,  // 50% internal, 50% WLED
-  RIGHT = 3  // All right (WLED)
-} Fader;
 
 typedef struct ControlParameters {
   public:
