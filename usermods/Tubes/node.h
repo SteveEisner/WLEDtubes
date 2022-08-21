@@ -129,11 +129,14 @@ class LightNode {
     }
 
     void configure_ap() {
+#ifdef DEFAULT_WIFI
+        strcpy(multiWiFi[0].clientSSID, DEFAULT_WIFI);
+        strcpy(multiWiFi[0].clientPass, DEFAULT_WIFI_PASSWORD);
+#else
         // Don't connect to any networks.
-        // strcpy(multiWiFi[0].clientSSID, "Fish Tank");
-        // strcpy(multiWiFi[0].clientPass, "Fish Tank");
         strcpy(multiWiFi[0].clientSSID, "");
         strcpy(multiWiFi[0].clientPass, "");
+#endif
 
         // Try to hide the access point unless this is the "root" node
         if (this->is_following()) {
