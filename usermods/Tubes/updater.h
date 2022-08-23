@@ -15,9 +15,10 @@ String getHeaderValue(String header, String headerName) {
 
 typedef enum UpdateWorkflowStatus: uint8_t {
   Idle=0,
-  Started=1,
-  Connected=2,
-  Received=4,  
+  Ready=10,
+  Started=50,
+  Connected=60,
+  Received=80,  
   Complete=100,
   Failed=101,
 } UpdateWorkflowStatus;
@@ -42,20 +43,31 @@ class AutoUpdater {
 
     String _storedSSID = "";
     String _storedPass = "";
+    String _storedAPSSID = "";
+    String _storedAPPass = "";
 
     int progress = 0;
 
     WiFiClient _client;
     UpdateWorkflowStatus status = Idle;
     Timer timeoutTimer;
-    Timer progressTimer;
+    Timer displayStatusTimer;
 
     void update() {
         switch (this->status) {
             case Complete:
-            case Failed:
-                if (this->progressTimer.ended())
+                if (this->displayStatusTimer.ended()) {
+                    doReboot = true;
                     this->status = Idle;
+                }
+                return;
+
+            case Failed:
+                if (this->displayStatusTimer.ended())
+                    this->status = Idle;
+                return;
+
+            case Ready:
             case Idle:
             case Received:
                 return;
@@ -87,17 +99,31 @@ class AutoUpdater {
 #if WLED_WATCHDOG_TIMEOUT > 0
         WLED::instance().disableWatchdog();
 #endif
+        _storedAPSSID = String(apSSID);
+        _storedAPPass = String(apPass);
+        otaLock = false;
         if (new_version) {
             memcpy((byte*)&this->current_version, new_version, sizeof(this->current_version));
         }
         log("starting autoupdate");
         this->status = Started;
+        this->displayStatusTimer.stop();
+    }
+
+    void ready() {
+        log("ready for update - turning on updater AP");
+        strcpy(apSSID, "WLED-UPDATE");
+        strcpy(apPass, "update1234");
+        WLED::instance().initAP(true);
+        this->status = Ready;
     }
 
     void stop() {
         this->_client.stop();
         strcpy(multiWiFi[0].clientSSID, _storedSSID.c_str());
         strcpy(multiWiFi[0].clientPass, _storedPass.c_str());
+        strcpy(apSSID, _storedAPSSID.c_str());
+        strcpy(apPass, _storedAPPass.c_str());
         WiFi.disconnect(false, true);
 #if WLED_WATCHDOG_TIMEOUT > 0
         WLED::instance().enableWatchdog();
@@ -105,6 +131,39 @@ class AutoUpdater {
         this->status = Idle;
     }
 
+    void handleOverlayDraw() {
+        CRGB c;
+        switch (this->status) {
+            case Ready:
+                c = CRGB::Purple;
+                break;
+
+            case Started:
+            case Connected:
+            case Received:
+                c = CRGB::Yellow;
+                if (millis() % 1000 < 500) {
+                    c = CRGB::Black;
+                }
+                break;
+
+            case Failed:
+                c = CRGB::Red;
+                break;
+
+            case Complete:
+                c = CRGB::Green;
+                break;
+
+            case Idle:
+            default:
+                return;
+        }
+        for (int i = 0; i < 20; i++) {
+            strip.setPixelColor(i, c);
+        }
+    } 
+    
   private:
     void log(const char *message) {
         Serial.printf("OTA: %s\n", message);
@@ -116,9 +175,9 @@ class AutoUpdater {
 
     void abort(const char *message) {
         log(message);
-        this->status = Failed;
-        this->progressTimer.start(10000);
         this->stop();
+        this->status = Failed;
+        this->displayStatusTimer.start(30000);
     }
 
     void do_connect() {
@@ -250,7 +309,7 @@ class AutoUpdater {
 #endif
         this->progress = 0;
         vTaskDelay(500);
-        uint8_t buf[512];
+        uint8_t buf[4096];
         int lr;
         while ((lr = client.read(buf, sizeof(buf))) > 0) {
             size_t written = Update.write(buf, lr);
@@ -276,10 +335,10 @@ class AutoUpdater {
             return;
         }
         
-        doReboot = true;
         log("update successfully completed. Rebooting.");
-        this->status = Complete;
-        this->progressTimer.start(10000);
         this->stop();
+        this->status = Complete;
+        this->displayStatusTimer.start(10000);
     }
+
 };
