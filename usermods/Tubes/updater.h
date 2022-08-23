@@ -6,7 +6,7 @@
 #include <Update.h>
 #include "timer.h"
 
-#define RELEASE_VERSION 3
+#define RELEASE_VERSION 4
 
 // Utility to extract header value from headers
 String getHeaderValue(String header, String headerName) {
@@ -70,13 +70,13 @@ class AutoUpdater {
         }
     }
 
-    void start(AutoUpdateOffer *new_version) {
+    void start(AutoUpdateOffer *new_version = nullptr) {
         if (this->status != Idle) {
             log("update already in progress.");
             return;
         }
 
-        if (new_version->version <= current_version.version) {
+        if (new_version && new_version->version <= current_version.version) {
             log("don't need to update to that version.");
             return;
         }
@@ -87,8 +87,9 @@ class AutoUpdater {
 #if WLED_WATCHDOG_TIMEOUT > 0
         WLED::instance().disableWatchdog();
 #endif
-        memcpy((byte*)&this->current_version, new_version, sizeof(this->current_version));
-        
+        if (new_version) {
+            memcpy((byte*)&this->current_version, new_version, sizeof(this->current_version));
+        }
         log("starting autoupdate");
         this->status = Started;
     }
@@ -164,6 +165,9 @@ class AutoUpdater {
     }
 
     void do_request() {
+#if WLED_WATCHDOG_TIMEOUT > 0
+        WLED::instance().disableWatchdog();
+#endif
         log("connecting");
         if (!this->_client.connect(this->host_name.c_str(), this->port)) { //  this->current_version.host
             abort("connect failed");
@@ -241,9 +245,12 @@ class AutoUpdater {
             return;
         };
 
+#if WLED_WATCHDOG_TIMEOUT > 0
+        WLED::instance().disableWatchdog();
+#endif
         this->progress = 0;
         vTaskDelay(500);
-        uint8_t buf[2048];
+        uint8_t buf[512];
         int lr;
         while ((lr = client.read(buf, sizeof(buf))) > 0) {
             size_t written = Update.write(buf, lr);
