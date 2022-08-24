@@ -136,6 +136,10 @@ class TubesUsermod : public Usermod {
         this->controller.togglePowerSave();
         return true;
       }
+      if (b == 101) {
+        this->controller.cancelOverrides();
+        return true;
+      }
 
       return false;
     }
