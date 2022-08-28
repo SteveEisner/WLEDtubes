@@ -259,6 +259,23 @@ class PatternController : public MessageReceiver {
     return !this->selectTimer.ended();
   }
 
+  bool isSelected() {
+    return this->updater.status == Ready;
+  }
+
+  void select(bool selected = true) {
+    if (selected)
+      this->updater.ready();
+    else {
+      this->updater.stop();
+      WiFi.softAPdisconnect(true);
+    }
+  }
+
+  void deselect() {
+    select(false);
+  }
+
   void set_palette_override(uint8_t value) {
     if (value == this->paletteOverride)
       return;
@@ -1109,10 +1126,14 @@ class PatternController : public MessageReceiver {
         return;
 
       case 'X':
+        if (!this->isSelected())
+          return;
         doReboot = true;
         return;
 
       case 'R':
+        if (!this->isSelected())
+          return;
         setRole((ControllerRole)(action->arg));
         return;
 
@@ -1145,19 +1166,15 @@ class PatternController : public MessageReceiver {
         this->cancelOverrides();
         break;
 
-      case 'S':
+      case '*':
+      case '(':
         Serial.println("enter select mode");
         this->enterSelectMode();
         break;
 
-      case '*':
-      case '(':
-        this->enterSelectMode();
-        break;
-
       case ')':
-        this->updater.stop();
-        WiFi.softAPdisconnect(true);
+        Serial.println("exit select mode");
+        this->deselect();
         break;
 
       case 'V':
@@ -1165,13 +1182,13 @@ class PatternController : public MessageReceiver {
         if (this->updater.current_version.version >= action->arg)
           break;
 
-        this->updater.ready();
+        this->select();
         break;
 
       case 'U':
-        if (this->updater.status == Ready) {
-          this->updater.start();
-        }
+        if (!this->isSelected())
+          return;
+        this->updater.start();
         break;
 
     }
