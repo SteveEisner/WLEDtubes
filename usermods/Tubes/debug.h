@@ -77,7 +77,7 @@ class DebugController {
       );
 
       Serial.printf("=== Controller: ");
-      if (this->controller->isMaster()) {
+      if (controller->isMasterRole()) {
         Serial.print("PRIMARY ");
       }
       if (this->controller->sound.active) {
@@ -139,4 +139,3 @@ class DebugController {
     
   }
 };
-

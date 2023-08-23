@@ -164,8 +164,8 @@ class PatternController : public MessageReceiver {
     }
   }
 
-  bool isMaster() {
-    return this->role >= MasterRole;
+  bool isMasterRole() {
+    return role >= MasterRole;
   }
 
   void setup()
@@ -553,7 +553,9 @@ class PatternController : public MessageReceiver {
   }
 
   void load_options(ControllerOptions &options) {
-    strip.setBrightness(options.brightness);
+    // Power-saving devices retain their WLED brightness
+    if (!power_save)
+      strip.setBrightness(options.brightness);
   }
 
   void load_pattern(TubeState &tube_state) {
@@ -771,15 +773,23 @@ class PatternController : public MessageReceiver {
   void setBrightness(uint8_t brightness) {
     Serial.printf("brightness: %d\n", brightness);
 
-    this->options.brightness = brightness;
-    this->broadcast_options();
+    options.brightness = brightness;
+    load_options(options);
+
+    // The master controls all followers
+    if (!node->is_following())
+      broadcast_options();
   }
 
   void setDebugging(bool debugging) {
     Serial.printf("debugging: %d\n", debugging);
 
-    this->options.debugging = debugging;
-    this->broadcast_options();
+    options.debugging = debugging;
+    load_options(options);
+
+    // The master controls all followers
+    if (!node->is_following())
+      broadcast_options();
   }
   
   void togglePowerSave() {
@@ -1117,7 +1127,7 @@ class PatternController : public MessageReceiver {
   }
 
   void broadcast_options() {
-    this->node->sendCommand(COMMAND_OPTIONS, &this->options, sizeof(this->options));
+    node->sendCommand(COMMAND_OPTIONS, &options, sizeof(options));
   }
 
   void broadcast_autoupdate() {
@@ -1163,7 +1173,15 @@ class PatternController : public MessageReceiver {
         return;
 
       case COMMAND_ACTION:
-        this->onAction((Action*)data);
+        onAction((Action*)data);
+        return;
+
+      case COMMAND_BEATS:
+        // the master control ignores this request, it has its own
+        // beat measuring.
+        if (isMasterRole())
+          return;
+        set_tapped_bpm(*(accum88*)data, 0);
         return;
     }
   
@@ -1249,5 +1267,113 @@ class PatternController : public MessageReceiver {
 
     }
   }
+
+#define WIZMOTE_BUTTON_ON          1
+#define WIZMOTE_BUTTON_OFF         2
+#define WIZMOTE_BUTTON_NIGHT       3
+#define WIZMOTE_BUTTON_ONE         16
+#define WIZMOTE_BUTTON_TWO         17
+#define WIZMOTE_BUTTON_THREE       18
+#define WIZMOTE_BUTTON_FOUR        19
+#define WIZMOTE_BUTTON_BRIGHT_UP   9
+#define WIZMOTE_BUTTON_BRIGHT_DOWN 8
+
+  virtual bool onButton(uint8_t button_id) {
+    bool isMaster = !this->node->is_following();
+
+    switch (button_id) {
+      case WIZMOTE_BUTTON_ON:
+        WLED::instance().initAP(true);
+        setDebugging(true);
+        acknowledge();
+        return true;
+
+      case WIZMOTE_BUTTON_OFF:
+        WiFi.softAPdisconnect(true);
+        WiFi.disconnect(false, true);
+        apActive = false;
+        apBehavior = AP_BEHAVIOR_BUTTON_ONLY;
+        setDebugging(false);
+        acknowledge();
+        return true;
+
+      case WIZMOTE_BUTTON_ONE:
+        // Make it interesting - switch to a good pattern and sync mode
+        // Only the master will respond to this
+        if (!isMaster)
+          return false;
+
+        Serial.println("WizMote preset 1: de-sync");
+
+        while (next_state.pattern_sync_id == All)
+          set_next_pattern(0);
+
+        this->force_next();
+        return true;
+
+      case WIZMOTE_BUTTON_TWO:
+        // Apply an interesting effect & sync layer
+        // Only the master will respond to this
+        if (!isMaster)
+          return false;
+        
+        Serial.println("WizMote preset 2: add an effect");
+
+        while (next_state.effect_params.effect == None)
+          set_next_effect(0);
+
+        this->force_next();
+        return true;
+
+      case WIZMOTE_BUTTON_THREE:
+        // Turn on flames
+        // Only the master will respond to this
+        if (!isMaster)
+          return false;
+
+        Serial.println("WizMote preset 3: flames!");
+        next_state.pattern_id = 63; // Fire
+        next_state.pattern_sync_id = SyncMode::All;
+
+        this->force_next();
+        return true;
+
+      case WIZMOTE_BUTTON_FOUR:
+        // Make it an interesting combo
+        // Only the master will respond to this
+        if (!isMaster)
+          return false;
+
+        // 38: Noise 3
+        Serial.println("WizMote preset 4: interesting pattern");
+        set_next_pattern(0);
+        next_state.pattern_id = 38; // overwrite with: Noise 3
+
+        this->force_next();
+        return true;
+
+      case WIZMOTE_BUTTON_BRIGHT_UP:
+        // Brighten (ignored if in power save mode)
+        Serial.println("WizMote: brightness up");
+        if (options.brightness <= 230)
+          setBrightness(options.brightness + 25);
+        return true;
+
+      case WIZMOTE_BUTTON_BRIGHT_DOWN:
+        // Dim (ignored if in power save mode)
+        Serial.println("WizMote: brightness down");
+
+        if (options.brightness >= 25)
+          setBrightness(options.brightness - 25);
+        return true;
+
+      // case WIZMOTE_BUTTON_NIGHT:
+
+      default:
+        Serial.printf("Button %d master=%d\n", button_id, isMaster);
+        return false;
+    }
+  }
+
 
 };
