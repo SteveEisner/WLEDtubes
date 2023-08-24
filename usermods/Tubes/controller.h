@@ -28,8 +28,8 @@ const static uint8_t DEFAULT_TANK_BRIGHTNESS = 240;
 #define ROLE_EEPROM_LOCATION 2559
 #define BOOT_OPTIONS_EEPROM_LOCATION 2557
 
-#define IDENTIFY_STUCK_PATTERNS
-#define IDENTIFY_STUCK_PALETTES
+// #define IDENTIFY_STUCK_PATTERNS
+// #define IDENTIFY_STUCK_PALETTES
 
 typedef struct {
   bool debugging;
@@ -1278,6 +1278,18 @@ class PatternController : public MessageReceiver {
 #define WIZMOTE_BUTTON_BRIGHT_UP   9
 #define WIZMOTE_BUTTON_BRIGHT_DOWN 8
 
+  void force_next_pattern() {
+    next_state.pattern_phrase = current_state.beat_frame >> 12;
+    if (next_state.palette_phrase == next_state.pattern_phrase)
+      next_state.palette_phrase += random8(0, 5);
+    force_next();
+  }
+
+  void force_next_effect() {
+    next_state.effect_phrase = current_state.beat_frame >> 12;
+    force_next();
+  }
+
   virtual bool onButton(uint8_t button_id) {
     bool isMaster = !this->node->is_following();
 
@@ -1290,8 +1302,11 @@ class PatternController : public MessageReceiver {
 
       case WIZMOTE_BUTTON_OFF:
         WiFi.softAPdisconnect(true);
-        WiFi.disconnect(false, true);
         apActive = false;
+        WiFi.disconnect(false, true);
+#if WLED_WATCHDOG_TIMEOUT > 0
+        WLED::instance().enableWatchdog();
+#endif
         apBehavior = AP_BEHAVIOR_BUTTON_ONLY;
         setDebugging(false);
         acknowledge();
@@ -1305,10 +1320,11 @@ class PatternController : public MessageReceiver {
 
         Serial.println("WizMote preset 1: de-sync");
 
+        set_next_pattern(0);
         while (next_state.pattern_sync_id == All)
           set_next_pattern(0);
 
-        this->force_next();
+        this->force_next_pattern();
         return true;
 
       case WIZMOTE_BUTTON_TWO:
@@ -1319,23 +1335,26 @@ class PatternController : public MessageReceiver {
         
         Serial.println("WizMote preset 2: add an effect");
 
+        set_next_effect(0);
         while (next_state.effect_params.effect == None)
           set_next_effect(0);
 
-        this->force_next();
+        this->force_next_effect();
         return true;
 
       case WIZMOTE_BUTTON_THREE:
-        // Turn on flames
+        // Turn on flames.  Also up the tempo to 125
         // Only the master will respond to this
         if (!isMaster)
           return false;
 
+        // Switch to house mode
+        set_tapped_bpm(125<<8);
+
         Serial.println("WizMote preset 3: flames!");
         next_state.pattern_id = 63; // Fire
         next_state.pattern_sync_id = SyncMode::All;
-
-        this->force_next();
+        this->force_next_pattern();
         return true;
 
       case WIZMOTE_BUTTON_FOUR:
@@ -1346,10 +1365,11 @@ class PatternController : public MessageReceiver {
 
         // 38: Noise 3
         Serial.println("WizMote preset 4: interesting pattern");
+
         set_next_pattern(0);
         next_state.pattern_id = 38; // overwrite with: Noise 3
 
-        this->force_next();
+        this->force_next_pattern();
         return true;
 
       case WIZMOTE_BUTTON_BRIGHT_UP:
@@ -1367,7 +1387,19 @@ class PatternController : public MessageReceiver {
           setBrightness(options.brightness - 25);
         return true;
 
-      // case WIZMOTE_BUTTON_NIGHT:
+      case WIZMOTE_BUTTON_NIGHT:
+        // Chill mode
+        // Only the master will respond to this
+        if (!isMaster)
+          return false;
+
+        Serial.println("WizMote: chill");
+
+        // Switch to deep house mode
+        set_tapped_bpm(120<<8);
+
+        this->force_next();
+        return true;
 
       default:
         Serial.printf("Button %d master=%d\n", button_id, isMaster);
