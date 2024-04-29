@@ -418,18 +418,8 @@ class PatternController : public MessageReceiver {
 
   void handleOverlayDraw() {
     // In manual mode WLED is always active
-    if (this->patternOverride) {
-      this->wled_fader = 0xFFFF;
-      transition_mode_point = 0;
-    } else if (wled_fader == 0xFFFF) {
-      // When fading down...
-      // Wait until the transition has completely changed
-      // before switching to new mode
-      transition_mode_point = 0xFFFFU;
-    } else if (wled_fader == 0) {
-      // When fading up...
-      // Transition to new mode immediately
-      transition_mode_point = 0;
+    if (patternOverride) {
+      wled_fader = 0xFFFF;
     }
 
     uint16_t length = strip.getLengthTotal();
@@ -746,16 +736,11 @@ class PatternController : public MessageReceiver {
   }
 
   void set_wled_palette(uint8_t palette_id) {
-    if (this->paletteOverride)
-      palette_id = this->paletteOverride;
-      
-    for (uint8_t i=0; i < strip.getSegmentsNum(); i++) {
-      Segment& seg = strip.getSegment(i);
-      if (seg.palette == palette_id) continue;
-      if (!seg.isActive()) continue;
-      seg.startTransition(strip.getTransition());
-      seg.palette = palette_id;
-    }
+    if (paletteOverride)
+      palette_id = paletteOverride;
+
+    Segment& seg = strip.getMainSegment();
+    seg.setPalette(palette_id);
     stateChanged = true;
     stateUpdated(CALL_MODE_DIRECT_CHANGE);
   }
@@ -766,21 +751,10 @@ class PatternController : public MessageReceiver {
     else if (pattern_id == 0)
       pattern_id = DEFAULT_WLED_FX; // Never set it to solid
 
-    // When fading IN, make the pattern transition immediate if possible
-    bool fadeIn = this->wled_fader < 2000;
-    for (uint8_t i=0; i < strip.getSegmentsNum(); i++) {
-      Segment& seg = strip.getSegment(i);
-      if (!seg.isActive()) continue;
-      if (seg.mode == pattern_id) continue;
-      if (fadeIn) {
-        seg.startTransition(0);
-      } else {
-        seg.startTransition(strip.getTransition());
-      }
-      seg.speed = speed;
-      seg.intensity = intensity;
-      strip.setMode(i, pattern_id);
-    }
+    Segment& seg = strip.getMainSegment();
+    seg.speed = speed;
+    seg.intensity = intensity;
+    seg.setMode(pattern_id);
     stateChanged = true;
     stateUpdated(CALL_MODE_DIRECT_CHANGE);
   }
