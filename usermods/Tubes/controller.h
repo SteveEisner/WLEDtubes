@@ -197,9 +197,9 @@ class PatternController : public MessageReceiver {
         break;
     }
 
-    if (this->role <= CampRole)
-      BusManager::setMilliampsMax(700);  // Really limit for batteries
-    else if (this->role <= InstallationRole)
+    if (role <= CampRole)
+      BusManager::setMilliampsMax(min(ABL_MILLIAMPS_DEFAULT,700));  // Really limit for batteries
+    else if (role <= InstallationRole)
       BusManager::setMilliampsMax(1000);
     else
       BusManager::setMilliampsMax(1400);
