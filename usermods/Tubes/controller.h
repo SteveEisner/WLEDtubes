@@ -173,7 +173,6 @@ class PatternController : public MessageReceiver {
 
   void setup()
   {
-    node->setup();
     EEPROM.begin(EEPSIZE);
     role = (ControllerRole)EEPROM.read(ROLE_EEPROM_LOCATION);
     if (role == 255) {
@@ -204,6 +203,8 @@ class PatternController : public MessageReceiver {
       strip.ablMilliampsMax = 1000;
     else
       strip.ablMilliampsMax = 1400;
+
+    node->setup();
 
     if (role >= MasterRole) {
       node->reset(3850 + role); // MASTER ID
@@ -406,7 +407,7 @@ class PatternController : public MessageReceiver {
     // Update current status
     if (updateTimer.every(STATUS_UPDATE_PERIOD)) {
       // Transmit less often when following
-      if (!node->is_following() || random(0, 4) == 0) {
+      if (!node->isFollowing() || random(0, 4) == 0) {
         send_update();
       }
     }
@@ -524,7 +525,7 @@ class PatternController : public MessageReceiver {
     if (new_bpm == 0)
       new_bpm = current_state.bpm>>8 >= 123 ? 120<<8 : 125<<8;
 
-    if (node->is_following()) {
+    if (node->isFollowing()) {
       // Send a request up to ROOT
       broadcast_bpm(new_bpm);
     } else {
@@ -792,7 +793,7 @@ class PatternController : public MessageReceiver {
     load_options(options);
 
     // The master controls all followers
-    if (!node->is_following())
+    if (!node->isFollowing())
       broadcast_options();
   }
 
@@ -803,7 +804,7 @@ class PatternController : public MessageReceiver {
     load_options(options);
 
     // The master controls all followers
-    if (!node->is_following())
+    if (!node->isFollowing())
       broadcast_options();
   }
   
@@ -1126,7 +1127,7 @@ class PatternController : public MessageReceiver {
   }
 
   void broadcast_action(Action& action) {
-    if (!node->is_following()) {
+    if (!node->isFollowing()) {
       onAction(&action);
     }
     node->sendCommand(COMMAND_ACTION, &action, sizeof(Action));
@@ -1311,7 +1312,7 @@ class PatternController : public MessageReceiver {
   }
 
   virtual bool onButton(uint8_t button_id) {
-    bool isMaster = !this->node->is_following();
+    bool isMaster = !this->node->isFollowing();
 
     switch (button_id) {
       case WIZMOTE_BUTTON_ON:
