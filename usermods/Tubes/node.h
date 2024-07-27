@@ -193,52 +193,81 @@ class LightNode {
         apBehavior = AP_BEHAVIOR_BUTTON_ONLY; // Must press button for 6 seconds to get AP
     }
 
+    void setupESPNow() {
+        // To enable ESPNow, we need to be in WIFI_STA mode
+        if ( !WiFi.mode(WIFI_STA) ) {
+            Serial.println("WiFi.mode() failed");
+        }
+        // and not have the WiFi connect
+        // Calling discount with tigger an async Wifi Event
+        if ( !WiFi.disconnect(false, true) ) {
+            Serial.println("WiFi.disconnect() failed");
+        }
+    }
+
     void startESPNow() {
         status = NODE_STATUS_STARTING;
 
         Serial.println("starting ESPNow");
 
-        if ( !WiFi.mode(WIFI_STA) ) {
-            Serial.println("WiFi.mode() failed");
+        if ( WiFi.mode(WIFI_STA) ) {
+            if ( WiFi.status() == WL_DISCONNECTED ) {
+                if (esp_wifi_start() == ESP_OK) {
+                    if (esp_now_init() == ESP_OK) {
+                        if (esp_now_register_recv_cb(onESPNowRxCallback) == ESP_OK) {
+                            static esp_now_peer_info_t peer = {
+                                BROADCAST_ADDR_ARRAY_INITIALIZER,
+                                {0},
+                                ESPNOW_WIFI_CHANNEL,
+                                WIFI_IF_STA,
+                                false,
+                                NULL
+                                };
+
+                            if (esp_now_add_peer(&peer) == ESP_OK) {
+                                status = NODE_STATUS_STARTED;
+                                rebroadcastTimer.stop();
+                                Serial.println("ESPNow started");
+                                return;
+
+                            } else {
+#ifdef NODE_DEBUGGING
+                                Serial.println("esp_now_add_peer failed");
+#endif
+                            }
+                        } else {
+#ifdef NODE_DEBUGGING
+                            Serial.println("esp_now_register_recv_cb failed");
+#endif
+                        }
+                    } else {
+#ifdef NODE_DEBUGGING
+                        Serial.println("esp_now_init_init failed");
+#endif
+                    }
+                } else {
+#ifdef NODE_DEBUGGING
+                    Serial.println("esp_wifi_start failed");
+#endif
+                }
+            } else {
+#ifdef NODE_DEBUGGING
+                Serial.println("WiFi.status not disconnected");
+#endif
+            }
+        } else {
+#ifdef NODE_DEBUGGING
+            Serial.println("WiFi.mode failed");
+#endif
         }
 
-        Serial.println("WiFi checking for disconnected status");
-        auto wifi = WiFi.status();
-        while (wifi != WL_DISCONNECTED) {
-            delay(200);
-            Serial.printf("%d ", wifi);
-            wifi = WiFi.status();
-        }
-        Serial.println("WiFi status disconnected");
 
-        auto err = esp_wifi_start();
-        if (err != ESP_OK) {
-            Serial.println("ESP_NOW_Class::begin wifi not started");
-        }
-
-        err = esp_now_init();
-        if (err != ESP_OK) {
-            Serial.println("esp_now_init_init failed");
-        }
-
-        //err = esp_now_register_recv_cb(esp_now_recv_cb_t(_esp_now_rx_cb));
-        err = esp_now_register_recv_cb(onESPNowRxCallback);
-        if (err != ESP_OK) {
-            Serial.println("esp_now_register_recv_cb failed");
-        }
-
-        static esp_now_peer_info_t peer = { BROADCAST_ADDR_ARRAY_INITIALIZER, {0}, ESPNOW_WIFI_CHANNEL, WIFI_IF_STA, false, NULL };
-        err = esp_now_add_peer(&peer);
-        if (err != ESP_OK) {
-            Serial.println("esp_now_add_peer failed");
-        }
-
-        Serial.println("ESPNow started");
-
-        status = NODE_STATUS_STARTED;
-        rebroadcastTimer.stop();
+        Serial.println("restarting ESPNow");
+        status = NODE_STATUS_QUIET;
+        setupESPNow();
 
     }
+
 
     void onPeerPing(const MeshNodeHeader& node) {
         // When receiving a message, if the IDs match, it's a conflict
@@ -457,15 +486,7 @@ class LightNode {
         WiFi.onEvent(queueWiFiEvent, ARDUINO_EVENT_WIFI_STA_STOP);
         WiFi.onEvent(queueWiFiEvent, ARDUINO_EVENT_WIFI_AP_START);
 
-        // To enable ESPNow, we need to be in WIFI_STA mode
-        if ( !WiFi.mode(WIFI_STA) ) {
-            Serial.println("WiFi.mode() failed");
-        }
-        // and not have the WiFi connect
-        // Calling discount with tigger an async Wifi Event
-        if ( !WiFi.disconnect(false, true) ) {
-            Serial.println("WiFi.disconnect() failed");
-        }
+        setupESPNow();
 
         Serial.println("setup: ok");
     }
