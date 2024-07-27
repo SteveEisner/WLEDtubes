@@ -28,13 +28,6 @@ SSD1306Wire display(0x3c, 21, 22);   ins for Dig2Go
 
 #define CURRENT_NODE_VERSION 2
 
-#define UPLINK_TIMEOUT 20000      // Time at which uplink is presumed lost
-#define REBROADCAST_TIME 30000    // Time at which followers are presumed re-uplinked
-#define WIFI_CHECK_RATE 2000      // Time at which we should check wifi status again
-
-#define MAX_QUEUED_NETWORK_MESSAGES 20 // number of messages to queue from WiFi Task to our core thread
-
-
 #pragma pack(push,4) // set packing for consist transport across network
 // ideally this would have been pack 1, so we're actually wasting a
 // number of bytes across the network, but we've already shipped...
@@ -133,6 +126,7 @@ class LightNode {
     typedef enum{
         NODE_STATUS_QUIET=0,
         NODE_STATUS_STARTING,
+        NODE_STATUS_RECEIVING,
         NODE_STATUS_STARTED,
         NODE_STATUS_MAX,
     } NodeStatus;
@@ -144,6 +138,8 @@ class LightNode {
             return " (quiet)";
         case NODE_STATUS_STARTING:
             return " (starting)";
+        case NODE_STATUS_RECEIVING:
+            return " (receiving)";
         case NODE_STATUS_STARTED:
             return "";
         default:
@@ -151,12 +147,7 @@ class LightNode {
         }
     }
 
-
     char node_name[20];
-
-    //Timer statusTimer;  // Use this timer to initialize and check wifi status
-    Timer uplinkTimer; // When this timer ends, assume uplink is lost.
-    Timer rebroadcastTimer; // Until this timer ends, re-broadcast messages from uplink
 
     LightNode(MessageReceiver *r) : receiver(r) {
         instance = this;
@@ -165,6 +156,17 @@ class LightNode {
     }
 
   protected:
+    const size_t MAX_QUEUED_NETWORK_MESSAGES = 20; // number of messages to queue from WiFi Task to our core thread
+
+    const uint32_t STATUS_CHECK_RATE =   200;    // Time at which we should check wifi status again
+    const uint32_t UPLINK_TIMEOUT    = 20000;    // Time at which uplink is presumed lost
+    const uint32_t REBROADCAST_TIME  = 30000;    // Time at which followers are presumed re-uplinked
+
+    Timer statusTimer;      // Use this timer to initialize and check wifi status
+    Timer uplinkTimer;      // When this timer ends, assume uplink is lost.
+    Timer rebroadcastTimer; // Until this timer ends, re-broadcast messages from uplink
+
+
 
     RingbufHandle_t _wifiEvents;
     RingbufHandle_t _networkRxMessages;
@@ -206,6 +208,7 @@ class LightNode {
     }
 
     void startESPNow() {
+        statusTimer.stop();
         status = NODE_STATUS_STARTING;
 
         Serial.println("starting ESPNow");
@@ -225,9 +228,12 @@ class LightNode {
                                 };
 
                             if (esp_now_add_peer(&peer) == ESP_OK) {
-                                status = NODE_STATUS_STARTED;
+                                // Initialization timer: wait for a bit before trying to broadcast.
+                                // If this node's ID is high, it's more likely to be the leader, so wait less.
+                                status = NODE_STATUS_RECEIVING;
+                                statusTimer.start(3000 - header.id / 2);
+                                Serial.println("ESPNow receiving");
                                 rebroadcastTimer.stop();
-                                Serial.println("ESPNow started");
                                 return;
 
                             } else {
@@ -405,8 +411,14 @@ class LightNode {
         // Don't broadcast anything if this node isn't active.
 
         if (status != NODE_STATUS_STARTED) {
-            Serial.printf("broadcastMessage() - not started - %s\n", status_code());
-            return;
+            if (status == NODE_STATUS_RECEIVING && statusTimer.every(STATUS_CHECK_RATE)) {
+                Serial.println("ESPNow started: receiving and broadcasting");
+                status = NODE_STATUS_STARTED;
+                statusTimer.stop();
+            } else {
+                Serial.printf("broadcastMessage() - not started - %s\n", status_code());
+                return;
+            }
         }
         message->timebase = strip.timebase + millis();
         
@@ -421,13 +433,15 @@ class LightNode {
         static const uint8_t broadcast[] = BROADCAST_ADDR_ARRAY_INITIALIZER;
 
         auto err = esp_now_send(broadcast, (const uint8_t*)message, sizeof(*message));
+
+#ifdef NODE_DEBUGGING
         if (err != ESP_OK) {
             Serial.printf("esp_now_send() failed: %d\n", err);
         } else {
-#ifdef NODE_DEBUGGING
             Serial.println("successful broadcast");
-#endif
         }
+#endif
+
     }
 
   public:
@@ -506,8 +520,9 @@ class LightNode {
     }
 
     void reset(MeshId id = 0) {
-        if (id == 0)
+        if (id == 0) {
             id = random(256, 4000);  // Leave room at bottom and top of 12 bits
+        }
         header.id = id;
         follow(NULL);
     }
@@ -544,7 +559,9 @@ class LightNode {
 protected:
 
     static void queueWiFiEvent(WiFiEvent_t event) {
+#ifdef NODE_DEBUGGING
         Serial.printf("WiFiEvent( %S )\n", WiFi.eventName(event) );
+#endif
         switch(event) {
             case ARDUINO_EVENT_WIFI_STA_START:
             case ARDUINO_EVENT_WIFI_STA_STOP:
@@ -559,7 +576,6 @@ protected:
         auto *event = (WiFiEvent_t *)xRingbufferReceive(_wifiEvents, &item_size, 0);
         if (event) {
             if (item_size == sizeof(*event)) {
-                Serial.printf("WiFiEvent( %s )\n", WiFi.eventName(*event) );
                 switch(*event) {
                     case ARDUINO_EVENT_WIFI_STA_START:
                         Serial.printf("onStartESPNow() - %s\n", status_code());
@@ -579,7 +595,9 @@ protected:
                         break;
                 }
             } else {
+#ifdef NODE_DEBUGGING
                 Serial.printf("wrong size WiFiEvent_t received %d\n", item_size);
+#endif
             }
             vRingbufferReturnItem(_wifiEvents, (void *)event);
         }
@@ -607,7 +625,9 @@ protected:
                 onPeerData(msg->mac, &(msg->msg), msg->len, 0, true);
                 onWizmote(msg->mac, (wizmote_message*)(&(msg->msg)), msg->len);
             } else {
+#ifdef NODE_DEBUGGING
                 Serial.printf("wrong size QueueNodeMessage received %d\n", item_size);
+#endif
             }
             vRingbufferReturnItem(_networkRxMessages, (void *)msg);
         }
@@ -625,7 +645,9 @@ protected:
                 Serial.println("Failed to aquire ring buffer.  Dropping network message");
             }
         } else {
+#ifdef NODE_DEBUGGING
             Serial.printf("Receive to large of packet %d bytes. ignoring...\n", len);
+#endif
         }
     }
 };
