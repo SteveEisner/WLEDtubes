@@ -30,29 +30,16 @@ class DebugController {
     uint32_t lastPhraseTime;
     uint32_t lastFrame;
 
-  DebugController(PatternController *controller) {
-    this->controller = controller;
-    this->led_strip = controller->led_strip;
-    this->node = controller->node;
+  DebugController(PatternController *c) : controller(c)
+  {
+    led_strip = controller->led_strip;
+    node = controller->node;
   }
   
   void setup()
   {
-    this->lastPhraseTime = globalTimer.now_micros;
-    this->lastFrame = (uint32_t)-1;
-  }
-
-  std::string status_code(NodeStatus status) {
-    switch (status) {
-      case NODE_STATUS_QUIET:
-        return std::string(" (quiet)");
-      case NODE_STATUS_STARTING:
-        return std::string(" (starting)");
-      case NODE_STATUS_STARTED:
-        return std::string("");
-      default:
-        return std::string("??");
-    }
+    lastPhraseTime = globalTimer.now_micros;
+    lastFrame = (uint32_t)-1;
   }
 
   void update()
@@ -62,8 +49,8 @@ class DebugController {
       auto knownSsid = apActive ? WiFi.softAPSSID() : WiFi.SSID();
       auto knownIp = apActive ? IPAddress(4, 3, 2, 1) : WiFi.localIP();
       Serial.printf("\n=== %s%s    WiFi[ch%d] %s IP: %u.%u.%u.%u   Free memory: %d  space: %u/%u  Uptime: %s\n",
-        this->controller->node->node_name,
-        status_code(this->controller->node->status).c_str(),
+        controller->node->node_name,
+        controller->node->status_code(),
         WiFi.channel(),
         knownSsid.c_str(),
         knownIp[0],
@@ -71,8 +58,8 @@ class DebugController {
         knownIp[2],
         knownIp[3],
         freeMemory(),
-        LITTLEFS.usedBytes(),
-        LITTLEFS.totalBytes(),
+        WLED_FS.usedBytes(),
+        WLED_FS.totalBytes(),
         formatted_time(millis()).c_str()
       );
 
@@ -80,12 +67,12 @@ class DebugController {
       if (controller->isMasterRole()) {
         Serial.print("PRIMARY ");
       }
-      if (this->controller->sound.active) {
+      if (controller->sound.active) {
         Serial.print("SOUND ");
       }
       Serial.printf("role=%d power_save=%d\n",
-        this->controller->role,
-        this->controller->power_save
+        controller->role,
+        controller->power_save
       );
 
       // Dump WLED status
@@ -94,24 +81,32 @@ class DebugController {
       auto seg = strip.getMainSegment();
       extractModeName(seg.mode, JSON_mode_names, mode_name, 50);
       extractModeName(seg.palette, JSON_palette_names, palette_name, 50);
-      Serial.printf("=== WLED: %s(%u) %s(%u) speed:%u intensity:%u  at %d\n",
+      Serial.printf("=== WLED: %s(%u) %s(%u) speed:%u intensity:%u",
         mode_name,
         seg.mode,
         palette_name,
         seg.palette,
         seg.speed,
-        seg.intensity,
-        this->controller->wled_fader
+        seg.intensity
       );
+      if (controller->patternOverride) {
+        Serial.printf(" (PATTERN %d)", controller->patternOverride);
+      } else {
+        Serial.printf(" at %d", controller->wled_fader);
+      }
+      if (controller->paletteOverride) {
+        Serial.printf(" (PALETTE %d)", controller->paletteOverride);
+      }
+      Serial.println();
 
       Serial.printf("=== firmware: v%d from SSID %s %u.%u.%u.%u OTA=%d\n\n",
-        this->controller->updater.current_version.version,
-        this->controller->updater.current_version.ssid,
-        this->controller->updater.current_version.host[0],
-        this->controller->updater.current_version.ssid[1],
-        this->controller->updater.current_version.ssid[2],
-        this->controller->updater.current_version.ssid[3],
-        this->controller->updater.status
+        controller->updater.current_version.version,
+        controller->updater.current_version.ssid,
+        controller->updater.current_version.host[0],
+        controller->updater.current_version.ssid[1],
+        controller->updater.current_version.ssid[2],
+        controller->updater.current_version.ssid[3],
+        controller->updater.status
       );
 
     }
@@ -120,16 +115,16 @@ class DebugController {
   void handleOverlayDraw() 
   {
     // Show the beat on the master OR if debugging
-    if (this->controller->options.debugging) {
+    if (controller->options.debugging) {
       uint16_t num_leds = strip.getLengthTotal();
 
-      uint8_t p1 = (this->controller->current_state.beat_frame >> 8) % 16;
+      uint8_t p1 = (controller->current_state.beat_frame >> 8) % 16;
       strip.setPixelColor(p1, CRGB::White);
 
-      uint8_t p2 = scale8(this->controller->node->header.id>>4, num_leds-1);
+      uint8_t p2 = scale8(controller->node->header.id>>4, num_leds-1);
       strip.setPixelColor(p2, CRGB::Yellow);
 
-      uint8_t p3 = scale8(this->controller->node->header.uplinkId>>4, num_leds-1);
+      uint8_t p3 = scale8(controller->node->header.uplinkId>>4, num_leds-1);
       if (p3 == p2) {
         strip.setPixelColor(p3, CRGB::Green);
       } else {
@@ -139,3 +134,4 @@ class DebugController {
     
   }
 };
+
