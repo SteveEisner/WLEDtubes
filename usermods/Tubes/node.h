@@ -38,6 +38,10 @@ typedef enum{
     RECIPIENTS_INFO=2, // Send to all neighbors "FYI"; none will ignore
 } MessageRecipients;
 
+#pragma pack(push,4) // set packing for consist transport across network
+// ideally this would have been pack 1, so we're actually wasting a
+// number of bytes across the network, but we've already shipped...
+
 typedef uint16_t MeshId;
 
 typedef struct {
@@ -61,6 +65,8 @@ typedef struct {
     uint8_t len;
     NodeMessage msg;
 } QueuedNodeMessage;
+
+#pragma pack(pop)
 
 typedef struct {
     uint8_t status;
@@ -100,22 +106,6 @@ class MessageReceiver {
     }  
 };
 
-typedef struct wizmote_message {
-  uint8_t program;      // 0x91 for ON button, 0x81 for all others
-  uint8_t seq[4];       // Incremetal sequence number 32 bit unsigned integer LSB first
-  uint8_t byte5 = 32;   // Unknown
-  uint8_t button;       // Identifies which button is being pressed
-  uint8_t byte8 = 1;    // Unknown, but always 0x01
-  uint8_t byte9 = 100;  // Unnkown, but always 0x64
-
-  uint8_t byte10;  // Unknown, maybe checksum
-  uint8_t byte11;  // Unknown, maybe checksum
-  uint8_t byte12;  // Unknown, maybe checksum
-  uint8_t byte13;  // Unknown, maybe checksum
-} wizmote_message;
-
-
-
 class LightNode {
   public:
     static LightNode* instance;
@@ -128,22 +118,22 @@ class LightNode {
         NODE_STATUS_STARTING,
         NODE_STATUS_RECEIVING,
         NODE_STATUS_STARTED,
-        NODE_STATUS_MAX,
+        NODE_STATUS_MAX,        
     } NodeStatus;
     NodeStatus status = NODE_STATUS_QUIET;
 
-    const char* status_code() {
+    PGM_P status_code() {
         switch (status) {
         case NODE_STATUS_QUIET:
-            return " (quiet)";
+            return PSTR(" (quiet)");
         case NODE_STATUS_STARTING:
-            return " (starting)";
+            return PSTR(" (starting)");
         case NODE_STATUS_RECEIVING:
-            return " (receiving)";
+            return PSTR(" (receiving)");
         case NODE_STATUS_STARTED:
-            return "";
+            return PSTR("");
         default:
-            return "??";
+            return PSTR("??");
         }
     }
 
@@ -603,6 +593,20 @@ protected:
         }
     }
 
+    typedef struct wizmote_message {
+    uint8_t program;      // 0x91 for ON button, 0x81 for all others
+    uint8_t seq[4];       // Incremetal sequence number 32 bit unsigned integer LSB first
+    uint8_t byte5 = 32;   // Unknown
+    uint8_t button;       // Identifies which button is being pressed
+    uint8_t byte8 = 1;    // Unknown, but always 0x01
+    uint8_t byte9 = 100;  // Unnkown, but always 0x64
+
+    uint8_t byte10;  // Unknown, maybe checksum
+    uint8_t byte11;  // Unknown, maybe checksum
+    uint8_t byte12;  // Unknown, maybe checksum
+    uint8_t byte13;  // Unknown, maybe checksum
+    } wizmote_message;
+
     void onWizmote(const uint8_t* address, const wizmote_message* data, uint8_t len) {
         // First make sure this is a WizMote message.
         if (len != sizeof(wizmote_message) || data->byte8 != 1 || data->byte9 != 100 || data->byte5 != 32)
@@ -653,5 +657,4 @@ protected:
 };
 
 LightNode* LightNode::instance = nullptr;
-
 
