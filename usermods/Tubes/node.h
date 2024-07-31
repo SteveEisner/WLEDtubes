@@ -38,10 +38,6 @@ typedef enum{
     RECIPIENTS_INFO=2, // Send to all neighbors "FYI"; none will ignore
 } MessageRecipients;
 
-#pragma pack(push,4) // set packing for consist transport across network
-// ideally this would have been pack 1, so we're actually wasting a
-// number of bytes across the network, but we've already shipped...
-
 typedef uint16_t MeshId;
 
 typedef struct {
@@ -65,8 +61,6 @@ typedef struct {
     uint8_t len;
     NodeMessage msg;
 } QueuedNodeMessage;
-
-#pragma pack(pop)
 
 typedef struct {
     uint8_t status;
