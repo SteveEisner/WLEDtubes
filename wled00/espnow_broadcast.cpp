@@ -14,6 +14,8 @@
 #error "Unsupported platform"
 #endif //ESP32
 
+#define BROADCAST_ADDR_ARRAY_INITIALIZER {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
+#define WLED_ESPNOW_WIFI_CHANNEL 1
 
 typedef struct {
     uint8_t mac[6];
@@ -24,17 +26,9 @@ static_assert(WLED_ESPNOW_MAX_MESSAGE_LENGTH <= ESP_NOW_MAX_DATA_LEN, "WLED_ESPN
 
 ESPNOWBroadcast espnowBroadcast;
 
-#define BROADCAST_ADDR_ARRAY_INITIALIZER {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
-
-#define ESPNOW_WIFI_CHANNEL 0
-
-
-//    typedef esp_err_t err_t;
-
 ESPNOWBroadcast::ESPNOWBroadcast() {    
     _networkRxMessages = xRingbufferCreateNoSplit(sizeof(QueuedNetworkMessage), WLED_ESPNOW_MAX_QUEUED_MESSAGES);
 }
-
 
 bool ESPNOWBroadcast::setup() {
 
@@ -127,7 +121,7 @@ void ESPNOWBroadcast::start() {
                         static esp_now_peer_info_t peer = {
                             BROADCAST_ADDR_ARRAY_INITIALIZER,
                             {0},
-                            ESPNOW_WIFI_CHANNEL,
+                            WLED_ESPNOW_WIFI_CHANNEL,
                             WIFI_IF_STA,
                             false,
                             NULL
