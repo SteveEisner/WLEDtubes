@@ -21,7 +21,7 @@
 #define WLED_ESPNOW_MAX_REGISTERED_CALLBACKS WLED_MAX_USERMODS+1
 #endif
 
-class ESPNOWBroadcast {
+class ESPNOWBroadcastClass {
 
   public:
     bool setup();
@@ -53,6 +53,8 @@ class ESPNOWBroadcast {
 
     void start();
 
+    static esp_err_t onSystemEvent(void *ctx, system_event_t *event);
+
     static void onWiFiEvent(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
 
     static void onESPNowRxCallback(const uint8_t *mac_addr, const uint8_t *data, int len);
@@ -62,6 +64,6 @@ class ESPNOWBroadcast {
 
 };
 
-extern ESPNOWBroadcast espnowBroadcast;
+extern ESPNOWBroadcastClass ESPNOWBroadcast;
 
 #endif

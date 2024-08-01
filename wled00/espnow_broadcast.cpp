@@ -15,19 +15,20 @@
 #include <esp_wifi.h>
 #include <esp_wifi_types.h>
 #include <esp_now.h>
+#include <esp_idf_version.h>
 #include <freertos/ringbuf.h>
 
-#ifndef WIFI_EVENT_STA_START // Legacy Event Loop
-ESP_EVENT_DECLARE_BASE(WIFI_EVENT);
+#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(4, 0, 0)
+// Legacy Event Loop
+ESP_EVENT_DEFINE_BASE(SYSTEM_EVENT);
+#define WIFI_EVENT SYSTEM_EVENT
 #define WIFI_EVENT_STA_START SYSTEM_EVENT_STA_START
 #define WIFI_EVENT_STA_STOP SYSTEM_EVENT_STA_STOP
 #define WIFI_EVENT_AP_START SYSTEM_EVENT_AP_START
-#define wifi_event_handler_register(eventId, eventHandler) esp_event_handler_register(WIFI_EVENT, eventId, eventHandler, nullptr)
-#else
-#define wifi_event_handler_register(eventId, eventHandler) esp_event_handler_instance_register(WIFI_EVENT, eventId, eventHandler, nullptr, nullptr)
 #endif
 
-esp_event_base_t x;
+//#define ESPNOW_DEBUGGING
+
 #define BROADCAST_ADDR_ARRAY_INITIALIZER {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
 #define WLED_ESPNOW_WIFI_CHANNEL 1
 
@@ -49,16 +50,31 @@ class QueuedNetworkRingBuffer {
     }
 
     bool push(const uint8_t* mac, const uint8_t* data, uint8_t len) {
+#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(4, 0, 0)
+        QueuedNetworkMessage msg[1];
+        if (len <= sizeof(msg->data)) {
+            memcpy(msg->mac, mac, sizeof(msg->mac));
+            memcpy(&(msg->data), data, len);
+            msg->len = len;
+
+            if (pdTRUE == xRingbufferSend(buf, (void**)&msg, sizeof(*msg), 0)) {
+                return true;
+            }
+        }
+        return false;
+#else
         QueuedNetworkMessage* msg = nullptr;
-        if (len <= sizeof(msg->data) &&
-            pdTRUE == xRingbufferSendAcquire(buf, (void**)&msg, sizeof(*msg), 0)) {
+        if (len <= sizeof(msg->data)) {
+            if (pdTRUE == xRingbufferSendAcquire(buf, (void**)&msg, sizeof(*msg), 0)) {
                 memcpy(msg->mac, mac, sizeof(msg->mac));
                 memcpy(&(msg->data), data, len);
                 msg->len = len;
                 xRingbufferSendComplete(buf, msg);
                 return true;
+            }
         }
         return false;
+#endif
     }
 
     QueuedNetworkMessage* pop() {
@@ -73,32 +89,45 @@ class QueuedNetworkRingBuffer {
 
 QueuedNetworkRingBuffer queuedNetworkRingBuffer {};
 
-ESPNOWBroadcast espnowBroadcast;
+ESPNOWBroadcastClass ESPNOWBroadcast;
 
-bool ESPNOWBroadcast::setup() {
+bool ESPNOWBroadcastClass::setup() {
+#ifdef ESPNOW_DEBUGGING
+    delay(2000);
+#endif
+
+#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(4, 0, 0)
+    tcpip_adapter_init();
+    esp_event_loop_init(onSystemEvent, nullptr);
+#else
 
     auto err = esp_event_loop_create_default();
     if ( ESP_OK != err && ESP_ERR_INVALID_STATE != err ) {
+        Serial.printf("esp_event_loop_create_default() err %d\n", err);
         return false;
     }
-    err = wifi_event_handler_register(WIFI_EVENT_STA_START, onWiFiEvent);
+    err = esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_START, onWiFiEvent, nullptr, nullptr);
     if ( ESP_OK != err ) {
+        Serial.printf("esp_event_handler_instance_register(WIFI_EVENT_STA_START) err %d\n", err);
         return false;
     }
-    err = wifi_event_handler_register(WIFI_EVENT_STA_STOP, onWiFiEvent);
+    err = esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_STOP, onWiFiEvent, nullptr, nullptr);
     if ( ESP_OK != err ) {
+        Serial.printf("esp_event_handler_instance_register(WIFI_EVENT_STA_STOP) err %d\n", err);
         return false;
     }
-    err = wifi_event_handler_register(WIFI_EVENT_AP_START, onWiFiEvent);
+    err = esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_AP_START, onWiFiEvent, nullptr, nullptr);
     if ( ESP_OK != err ) {
+        Serial.printf("esp_event_handler_instance_register(WIFI_EVENT_AP_START) err %d\n", err);
         return false;
     }
+#endif
 
     return setupWiFi();
 }
 
-bool ESPNOWBroadcast::setupWiFi() {
-    Serial.println("ESPNOWBroadcast::setupWiFi()");
+bool ESPNOWBroadcastClass::setupWiFi() {
+    Serial.println("ESPNOWBroadcastClass::setupWiFi()");
 
     _state.exchange(STOPPED);
 
@@ -119,16 +148,15 @@ bool ESPNOWBroadcast::setupWiFi() {
 
 
 
-void ESPNOWBroadcast::loop(size_t maxMessagesToProcess /*= 1*/) {
-    switch (espnowBroadcast._state.load()) {
-        case ESPNOWBroadcast::STARTING:
+void ESPNOWBroadcastClass::loop(size_t maxMessagesToProcess /*= 1*/) {
+    switch (ESPNOWBroadcast._state.load()) {
+        case ESPNOWBroadcastClass::STARTING:
             // if WiFI is in starting state, actually stat ESPNow from our main task thread.
             start();
             break;
-        case ESPNOWBroadcast::STARTED: {
+        case ESPNOWBroadcastClass::STARTED: {
             auto ndx = maxMessagesToProcess;
             while(ndx-- > 0) {
-                size_t size = 0;
                 auto *msg = queuedNetworkRingBuffer.pop();
                 if (msg) {
                     auto callback = _rxCallback;
@@ -148,17 +176,18 @@ void ESPNOWBroadcast::loop(size_t maxMessagesToProcess /*= 1*/) {
     }
 }
 
-ESPNOWBroadcast::err_t ESPNOWBroadcast::send(const uint8_t* msg, size_t len) {
+ESPNOWBroadcastClass::err_t ESPNOWBroadcastClass::send(const uint8_t* msg, size_t len) {
     static const uint8_t broadcast[] = BROADCAST_ADDR_ARRAY_INITIALIZER;
-    return static_cast<ESPNOWBroadcast::err_t>(esp_now_send(broadcast, msg, len));
+    return static_cast<ESPNOWBroadcastClass::err_t>(esp_now_send(broadcast, msg, len));
 }
 
-void ESPNOWBroadcast::start() {
+void ESPNOWBroadcastClass::start() {
 
     Serial.println("starting ESPNow");
 
     if ( WiFi.mode(WIFI_STA) ) {
-        if ( WiFi.status() == WL_DISCONNECTED ) {
+        auto status = WiFi.status();
+        if ( status >= WL_DISCONNECTED ) {
             if (esp_wifi_start() == ESP_OK) {
                 if (esp_now_init() == ESP_OK) {
                     if (esp_now_register_recv_cb(onESPNowRxCallback) == ESP_OK) {
@@ -172,41 +201,41 @@ void ESPNOWBroadcast::start() {
                             };
 
                         if (esp_now_add_peer(&peer) == ESP_OK) {
-                            ESPNOWBroadcast::STATE starting {ESPNOWBroadcast::STARTING};
-                            if (espnowBroadcast._state.compare_exchange_strong(starting, ESPNOWBroadcast::STARTED)) {
+                            ESPNOWBroadcastClass::STATE starting {ESPNOWBroadcastClass::STARTING};
+                            if (ESPNOWBroadcast._state.compare_exchange_strong(starting, ESPNOWBroadcastClass::STARTED)) {
                                 return;
                             } else {
-#ifdef NODE_DEBUGGING
+#ifdef ESPNOW_DEBUGGING
                                 Serial.println("atomic state out of sync");
 #endif
                             }
                         } else {
-#ifdef NODE_DEBUGGING
+#ifdef ESPNOW_DEBUGGING
                             Serial.println("esp_now_add_peer failed");
 #endif
                         }
                     } else {
-#ifdef NODE_DEBUGGING
+#ifdef ESPNOW_DEBUGGING
                         Serial.println("esp_now_register_recv_cb failed");
 #endif
                     }
                 } else {
-#ifdef NODE_DEBUGGING
+#ifdef ESPNOW_DEBUGGING
                     Serial.println("esp_now_init_init failed");
 #endif
                 }
             } else {
-#ifdef NODE_DEBUGGING
+#ifdef ESPNOW_DEBUGGING
                 Serial.println("esp_wifi_start failed");
 #endif
             }
         } else {
-#ifdef NODE_DEBUGGING
-            Serial.println("WiFi.status not disconnected");
+#ifdef ESPNOW_DEBUGGING
+            Serial.printf("WiFi.status not disconnected - %d\n", status);
 #endif
         }
     } else {
-#ifdef NODE_DEBUGGING
+#ifdef ESPNOW_DEBUGGING
         Serial.println("WiFi.mode failed");
 #endif
     }
@@ -214,29 +243,42 @@ void ESPNOWBroadcast::start() {
     setupWiFi();
 }
 
+esp_err_t ESPNOWBroadcastClass::onSystemEvent(void *ctx, system_event_t *event) {
+#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(4, 0, 0)
+    onWiFiEvent(ctx, SYSTEM_EVENT, event->event_id, nullptr );
+#endif
+    return ESP_OK;
+}
 
-void ESPNOWBroadcast::onWiFiEvent(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
+
+void ESPNOWBroadcastClass::onWiFiEvent(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
     if ( event_base == WIFI_EVENT ) {
-#ifdef NODE_DEBUGGING
-        Serial.printf("WiFiEvent( %S )\n", WiFi.eventName(event) );
+
+#ifdef ESPNOW_DEBUGGING
+    #if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(4, 0, 0)
+            Serial.printf("WiFiEvent( %d )\n", event_id );
+    #else
+            Serial.printf("WiFiEvent( %s )\n", WiFi.eventName((arduino_event_id_t)event_id) );
+    #endif
 #endif
         switch (event_id) {
             case WIFI_EVENT_STA_START: {
-                ESPNOWBroadcast::STATE stopped {ESPNOWBroadcast::STOPPED};
-                espnowBroadcast._state.compare_exchange_strong(stopped, ESPNOWBroadcast::STARTING);
+                ESPNOWBroadcastClass::STATE stopped {ESPNOWBroadcastClass::STOPPED};
+                ESPNOWBroadcast._state.compare_exchange_strong(stopped, ESPNOWBroadcastClass::STARTING);
                 break;
             }
 
             case WIFI_EVENT_STA_STOP:
             case WIFI_EVENT_AP_START: {
-                ESPNOWBroadcast::STATE started {ESPNOWBroadcast::STARTED};
-                ESPNOWBroadcast::STATE starting {ESPNOWBroadcast::STARTING};
-                if (espnowBroadcast._state.compare_exchange_strong(started, ESPNOWBroadcast::STOPPED) ||
-                    espnowBroadcast._state.compare_exchange_strong(starting, ESPNOWBroadcast::STOPPED)) {
-#ifdef NODE_DEBUGGING
+                ESPNOWBroadcastClass::STATE started {ESPNOWBroadcastClass::STARTED};
+                ESPNOWBroadcastClass::STATE starting {ESPNOWBroadcastClass::STARTING};
+                if (ESPNOWBroadcast._state.compare_exchange_strong(started, ESPNOWBroadcastClass::STOPPED) ||
+                    ESPNOWBroadcast._state.compare_exchange_strong(starting, ESPNOWBroadcastClass::STOPPED)) {
+#ifdef ESPNOW_DEBUGGING
                     Serial.println("WiFi connected: stop broadcasting");
 #endif
-                    __attribute__((unused)) esp_err_t err = esp_now_deinit();
+                    esp_now_unregister_recv_cb();
+                    esp_now_deinit();
                 }
                 break;
             }
@@ -244,7 +286,7 @@ void ESPNOWBroadcast::onWiFiEvent(void* arg, esp_event_base_t event_base, int32_
     }
 }
 
-bool ESPNOWBroadcast::registerCallback( receive_callback_t callback ) {
+bool ESPNOWBroadcastClass::registerCallback( receive_callback_t callback ) {
     // last element is always null
     size_t ndx;
     for (ndx = 0; ndx < _rxCallbackSize-1; ndx++) {
@@ -256,7 +298,7 @@ bool ESPNOWBroadcast::registerCallback( receive_callback_t callback ) {
     return ndx < _rxCallbackSize;
 }
 
-bool ESPNOWBroadcast::removeCallback( receive_callback_t callback ) {
+bool ESPNOWBroadcastClass::removeCallback( receive_callback_t callback ) {
     size_t ndx;
     for (ndx = 0; ndx < _rxCallbackSize-1; ndx++) {
         if (_rxCallback[ndx] == callback ) {
@@ -272,10 +314,10 @@ bool ESPNOWBroadcast::removeCallback( receive_callback_t callback ) {
 
 }
 
-void ESPNOWBroadcast::onESPNowRxCallback(const uint8_t *mac, const uint8_t *data, int len) {
+void ESPNOWBroadcastClass::onESPNowRxCallback(const uint8_t *mac, const uint8_t *data, int len) {
     if (!queuedNetworkRingBuffer.push(mac, data, len)) {
         if (len > sizeof(WLED_ESPNOW_MAX_MESSAGE_LENGTH)) {
-#ifdef NODE_DEBUGGING
+#ifdef ESPNOW_DEBUGGING
             Serial.printf("Receive to large of packet %d bytes. ignoring...\n", len);
 #endif
         } else {

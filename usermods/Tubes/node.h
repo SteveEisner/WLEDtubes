@@ -295,11 +295,11 @@ class LightNode {
         Serial.println();
 #endif
 
-        auto err = espnowBroadcast.send((const uint8_t*)message, sizeof(*message));
+        __attribute__((unused)) auto err = ESPNOWBroadcast.send((const uint8_t*)message, sizeof(*message));
 
 #ifdef NODE_DEBUGGING
         if (err != ESP_OK) {
-            Serial.printf("espnowBroadcast.send() failed: %d\n", err);
+            Serial.printf("ESPNOWBroadcast.send() failed: %d\n", err);
         } else {
             Serial.println("successful broadcast");
         }
@@ -352,7 +352,7 @@ class LightNode {
         delay(2000);
 #endif
 
-        espnowBroadcast.registerCallback(onEspNowMessage);
+        ESPNOWBroadcast.registerCallback(onEspNowMessage);
 
         Serial.println("setup: ok");
     }
@@ -409,9 +409,9 @@ class LightNode {
 protected:
 
     void checkESPNowState() {
-        auto state = espnowBroadcast.getState();
+        auto state = ESPNOWBroadcast.getState();
         switch(state) {
-            case ESPNOWBroadcast::STOPPED:
+            case ESPNOWBroadcastClass::STOPPED:
                 if (NODE_STATUS_QUIET != status) {
                     Serial.printf("checkESPNowState() - %d node_status:%s\n", state, status_code());
                     status = NODE_STATUS_QUIET;
@@ -419,17 +419,19 @@ protected:
                     Serial.printf("LightNode %s\n", status_code());
                 }
                 break;
-            case ESPNOWBroadcast::STARTING:
+            case ESPNOWBroadcastClass::STARTING:
                 Serial.printf("checkESPNowState() - %d node_status:%s\n", state, status_code());
                 break;
-            case ESPNOWBroadcast::STARTED:
+            case ESPNOWBroadcastClass::STARTED:
                 if (NODE_STATUS_QUIET == status) {
                     Serial.printf("checkESPNowState() - %d node_status:%s\n", state, status_code());
                     status = NODE_STATUS_RECEIVING;
                     statusTimer.start(3000 - header.id / 2);
                     Serial.printf("LightNode %s\n", status_code());
                 }
-            break;
+                break;
+            default:
+                break;
         }
     }
 
