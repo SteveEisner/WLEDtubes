@@ -21,8 +21,6 @@
 class ESPNOWBroadcast {
 
   public:
-#define ESPNOW_WIFI_CHANNEL 0
-
     ESPNOWBroadcast();
 
     bool setup();
