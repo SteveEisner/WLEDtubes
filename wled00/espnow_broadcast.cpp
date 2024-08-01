@@ -1,9 +1,11 @@
 
 #ifndef WLED_DISABLE_ESPNOW_NEW
-#include <espnow_broadcast.h>
+#include <Arduino.h>
 
 #if defined ESP32
 #include <WiFi.h>
+#include <esp_wifi.h>
+#include <esp_wifi_types.h>
 
 #elif defined ESP8266
 #include <ESP8266WiFi.h>
@@ -12,8 +14,8 @@
 #error "Unsupported platform"
 #endif //ESP32
 
-#include <esp_wifi.h>
-#include <esp_wifi_types.h>
+#include "espnow_broadcast.h"
+
 #include <esp_now.h>
 #include <esp_idf_version.h>
 #include <freertos/ringbuf.h>

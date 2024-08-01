@@ -3,9 +3,8 @@
 
 #ifndef WLED_DISABLE_ESPNOW_NEW
 
-#include <Arduino.h>
+#include <stddef.h>
 #include <atomic>
-#include <WiFi.h>
 #include "const.h"
 
 
