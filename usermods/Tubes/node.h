@@ -30,10 +30,6 @@ typedef enum{
     RECIPIENTS_INFO=2, // Send to all neighbors "FYI"; none will ignore
 } MessageRecipients;
 
-#pragma pack(push,4) // set packing for consist transport across network
-// ideally this would have been pack 1, so we're actually wasting a
-// number of bytes across the network, but we've already shipped...
-
 typedef uint16_t MeshId;
 
 typedef struct {
@@ -50,6 +46,7 @@ typedef struct {
     CommandId command;
     byte data[MESSAGE_DATA_SIZE] = {0};
 } NodeMessage;
+
 #pragma pack(pop)
 
 typedef struct {
@@ -130,8 +127,6 @@ class LightNode {
     Timer statusTimer;      // Use this timer to initialize and check wifi status
     Timer uplinkTimer;      // When this timer ends, assume uplink is lost.
     Timer rebroadcastTimer; // Until this timer ends, re-broadcast messages from uplink
-
-
 
     void onMeshChange() {
         sprintf(node_name,
