@@ -4,16 +4,30 @@
 
 #if defined ESP32
 #include <WiFi.h>
-#include <esp_wifi.h>
-#include <esp_now.h>
 
 #elif defined ESP8266
 #include <ESP8266WiFi.h>
-#define WIFI_MODE_STA WIFI_STA 
+#define WIFI_MODE_STA WIFI_STA
 #else
 #error "Unsupported platform"
 #endif //ESP32
 
+#include <esp_wifi.h>
+#include <esp_wifi_types.h>
+#include <esp_now.h>
+#include <freertos/ringbuf.h>
+
+#ifndef WIFI_EVENT_STA_START // Legacy Event Loop
+ESP_EVENT_DECLARE_BASE(WIFI_EVENT);
+#define WIFI_EVENT_STA_START SYSTEM_EVENT_STA_START
+#define WIFI_EVENT_STA_STOP SYSTEM_EVENT_STA_STOP
+#define WIFI_EVENT_AP_START SYSTEM_EVENT_AP_START
+#define wifi_event_handler_register(eventId, eventHandler) esp_event_handler_register(WIFI_EVENT, eventId, eventHandler, nullptr)
+#else
+#define wifi_event_handler_register(eventId, eventHandler) esp_event_handler_instance_register(WIFI_EVENT, eventId, eventHandler, nullptr, nullptr)
+#endif
+
+esp_event_base_t x;
 #define BROADCAST_ADDR_ARRAY_INITIALIZER {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
 #define WLED_ESPNOW_WIFI_CHANNEL 1
 
@@ -24,28 +38,59 @@ typedef struct {
 } QueuedNetworkMessage;
 static_assert(WLED_ESPNOW_MAX_MESSAGE_LENGTH <= ESP_NOW_MAX_DATA_LEN, "WLED_ESPNOW_MAX_MESSAGE_LENGTH must be <= 250 bytes");
 
-ESPNOWBroadcast espnowBroadcast;
+class QueuedNetworkRingBuffer {
+  protected:
+    //QueuedNetworkMessage messages[WLED_ESPNOW_MAX_QUEUED_MESSAGES];
+    RingbufHandle_t buf = nullptr;
 
-ESPNOWBroadcast::ESPNOWBroadcast() {    
-    _networkRxMessages = xRingbufferCreateNoSplit(sizeof(QueuedNetworkMessage), WLED_ESPNOW_MAX_QUEUED_MESSAGES);
-}
+  public:
+    QueuedNetworkRingBuffer() {
+        buf = xRingbufferCreateNoSplit(sizeof(QueuedNetworkMessage), WLED_ESPNOW_MAX_QUEUED_MESSAGES);
+    }
+
+    bool push(const uint8_t* mac, const uint8_t* data, uint8_t len) {
+        QueuedNetworkMessage* msg = nullptr;
+        if (len <= sizeof(msg->data) &&
+            pdTRUE == xRingbufferSendAcquire(buf, (void**)&msg, sizeof(*msg), 0)) {
+                memcpy(msg->mac, mac, sizeof(msg->mac));
+                memcpy(&(msg->data), data, len);
+                msg->len = len;
+                xRingbufferSendComplete(buf, msg);
+                return true;
+        }
+        return false;
+    }
+
+    QueuedNetworkMessage* pop() {
+        size_t size = 0;
+        return (QueuedNetworkMessage*)xRingbufferReceive(buf, &size, 0);
+    }
+
+    void popComplete(QueuedNetworkMessage* msg) {
+        vRingbufferReturnItem(buf, (void *)msg);
+    }
+};
+
+QueuedNetworkRingBuffer queuedNetworkRingBuffer {};
+
+ESPNOWBroadcast espnowBroadcast;
 
 bool ESPNOWBroadcast::setup() {
 
     auto err = esp_event_loop_create_default();
-    if ( ERR_OK != err && ESP_ERR_INVALID_STATE != err ) {
+    if ( ESP_OK != err && ESP_ERR_INVALID_STATE != err ) {
         return false;
     }
-    err = esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_START, onWiFiEvent, NULL, NULL);
-    if ( ERR_OK != err ) {
+    err = wifi_event_handler_register(WIFI_EVENT_STA_START, onWiFiEvent);
+    if ( ESP_OK != err ) {
         return false;
     }
-    err = esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_STOP, onWiFiEvent, NULL, NULL);
-    if ( ERR_OK != err ) {
+    err = wifi_event_handler_register(WIFI_EVENT_STA_STOP, onWiFiEvent);
+    if ( ESP_OK != err ) {
         return false;
     }
-    err = esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_AP_START, onWiFiEvent, NULL, NULL);
-    if ( ERR_OK != err ) {
+    err = wifi_event_handler_register(WIFI_EVENT_AP_START, onWiFiEvent);
+    if ( ESP_OK != err ) {
         return false;
     }
 
@@ -73,6 +118,7 @@ bool ESPNOWBroadcast::setupWiFi() {
 }
 
 
+
 void ESPNOWBroadcast::loop(size_t maxMessagesToProcess /*= 1*/) {
     switch (espnowBroadcast._state.load()) {
         case ESPNOWBroadcast::STARTING:
@@ -83,16 +129,14 @@ void ESPNOWBroadcast::loop(size_t maxMessagesToProcess /*= 1*/) {
             auto ndx = maxMessagesToProcess;
             while(ndx-- > 0) {
                 size_t size = 0;
-                auto *msg = (QueuedNetworkMessage*)xRingbufferReceive(_networkRxMessages, &size, 0);
+                auto *msg = queuedNetworkRingBuffer.pop();
                 if (msg) {
-                    if(size == sizeof(*msg)) {
-                        auto callback = _rxCallback;
-                        while( *callback ) {
-                            (*callback)(msg->mac, msg->data, msg->len);
-                            callback++;
-                        }
+                    auto callback = _rxCallback;
+                    while( *callback ) {
+                        (*callback)(msg->mac, msg->data, msg->len);
+                        callback++;
                     }
-                    vRingbufferReturnItem(_networkRxMessages, (void *)msg);
+                    queuedNetworkRingBuffer.popComplete(msg);
                 } else {
                     break;
                 }
@@ -179,7 +223,7 @@ void ESPNOWBroadcast::onWiFiEvent(void* arg, esp_event_base_t event_base, int32_
         switch (event_id) {
             case WIFI_EVENT_STA_START: {
                 ESPNOWBroadcast::STATE stopped {ESPNOWBroadcast::STOPPED};
-                espnowBroadcast._state.compare_exchange_strong(stopped, ESPNOWBroadcast::STARTING);            
+                espnowBroadcast._state.compare_exchange_strong(stopped, ESPNOWBroadcast::STARTING);
                 break;
             }
 
@@ -189,10 +233,10 @@ void ESPNOWBroadcast::onWiFiEvent(void* arg, esp_event_base_t event_base, int32_
                 ESPNOWBroadcast::STATE starting {ESPNOWBroadcast::STARTING};
                 if (espnowBroadcast._state.compare_exchange_strong(started, ESPNOWBroadcast::STOPPED) ||
                     espnowBroadcast._state.compare_exchange_strong(starting, ESPNOWBroadcast::STOPPED)) {
-#ifdef NODE_DEBUGGING                            
+#ifdef NODE_DEBUGGING
                     Serial.println("WiFi connected: stop broadcasting");
-#endif                        
-                    esp_err_t err = esp_now_deinit();
+#endif
+                    __attribute__((unused)) esp_err_t err = esp_now_deinit();
                 }
                 break;
             }
@@ -202,7 +246,7 @@ void ESPNOWBroadcast::onWiFiEvent(void* arg, esp_event_base_t event_base, int32_
 
 bool ESPNOWBroadcast::registerCallback( receive_callback_t callback ) {
     // last element is always null
-    size_t ndx;    
+    size_t ndx;
     for (ndx = 0; ndx < _rxCallbackSize-1; ndx++) {
         if (nullptr == _rxCallback[ndx]) {
             _rxCallback[ndx] = callback;
@@ -220,29 +264,23 @@ bool ESPNOWBroadcast::removeCallback( receive_callback_t callback ) {
         }
     }
 
-    for (; ndx < _rxCallbackSize-1; ndx++) { 
-        _rxCallback[ndx] == _rxCallback[ndx+1];
-    } 
+    for (; ndx < _rxCallbackSize-1; ndx++) {
+        _rxCallback[ndx] = _rxCallback[ndx+1];
+    }
 
     return ndx < _rxCallbackSize;
 
 }
 
-void ESPNOWBroadcast::onESPNowRxCallback(const uint8_t *mac_addr, const uint8_t *data, int len) {
-    QueuedNetworkMessage* msg = nullptr;
-    if (len <= sizeof(msg->data)) {
-        if (pdTRUE == xRingbufferSendAcquire(espnowBroadcast._networkRxMessages, (void**)&msg, sizeof(*msg), 0) ) {
-            memcpy(msg->mac, mac_addr, sizeof(msg->mac));
-            memcpy(&(msg->data), data, len);
-            msg->len = len;
-            xRingbufferSendComplete(espnowBroadcast._networkRxMessages, msg);
+void ESPNOWBroadcast::onESPNowRxCallback(const uint8_t *mac, const uint8_t *data, int len) {
+    if (!queuedNetworkRingBuffer.push(mac, data, len)) {
+        if (len > sizeof(WLED_ESPNOW_MAX_MESSAGE_LENGTH)) {
+#ifdef NODE_DEBUGGING
+            Serial.printf("Receive to large of packet %d bytes. ignoring...\n", len);
+#endif
         } else {
             Serial.println("Failed to aquire ring buffer.  Dropping network message");
         }
-    } else {
-#ifdef NODE_DEBUGGING
-        Serial.printf("Receive to large of packet %d bytes. ignoring...\n", len);
-#endif
     }
 }
 

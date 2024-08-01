@@ -4,7 +4,6 @@
 #ifndef WLED_DISABLE_ESPNOW_NEW
 
 #include <Arduino.h>
-#include <freertos/ringbuf.h>
 #include <atomic>
 #include <WiFi.h>
 #include "const.h"
@@ -18,11 +17,13 @@
 #define WLED_ESPNOW_MAX_MESSAGE_LENGTH 250
 #endif
 
+#ifndef WLED_ESPNOW_MAX_REGISTERED_CALLBACKS
+#define WLED_ESPNOW_MAX_REGISTERED_CALLBACKS WLED_MAX_USERMODS+1
+#endif
+
 class ESPNOWBroadcast {
 
   public:
-    ESPNOWBroadcast();
-
     bool setup();
 
     void loop(size_t maxMessagesToProcess = WLED_ESPNOW_MAX_QUEUED_MESSAGES);
@@ -56,8 +57,7 @@ class ESPNOWBroadcast {
 
     static void onESPNowRxCallback(const uint8_t *mac_addr, const uint8_t *data, int len);
 
-    RingbufHandle_t _networkRxMessages;
-    receive_callback_t _rxCallback[WLED_MAX_USERMODS+1] = {0};
+    receive_callback_t _rxCallback[WLED_ESPNOW_MAX_REGISTERED_CALLBACKS] = {0};
     static constexpr size_t _rxCallbackSize = sizeof(_rxCallback)/sizeof(_rxCallback[0]);
 
 };
