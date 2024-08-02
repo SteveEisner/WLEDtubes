@@ -410,6 +410,7 @@ protected:
 
     void checkESPNowState() {
         auto state = ESPNOWBroadcast.getState();
+        static auto prev = ESPNOWBroadcast.STOPPED;
         switch(state) {
             case ESPNOWBroadcastClass::STOPPED:
                 if (NODE_STATUS_QUIET != status) {
@@ -419,8 +420,10 @@ protected:
                     Serial.printf("LightNode %s\n", status_code());
                 }
                 break;
-            case ESPNOWBroadcastClass::STARTING:
-                Serial.printf("checkESPNowState() - %d node_status:%s\n", state, status_code());
+            case ESPNOWBroadcastClass::STARTING: {}
+                if ( state != prev ) {
+                    Serial.printf("checkESPNowState() - %d node_status:%s\n", state, status_code());
+                }
                 break;
             case ESPNOWBroadcastClass::STARTED:
                 if (NODE_STATUS_QUIET == status) {
@@ -433,6 +436,7 @@ protected:
             default:
                 break;
         }
+        prev = state;
     }
 
     typedef struct wizmote_message {
