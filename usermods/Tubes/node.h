@@ -295,11 +295,11 @@ class LightNode {
         Serial.println();
 #endif
 
-        __attribute__((unused)) auto err = ESPNOWBroadcast::instance().send((const uint8_t*)message, sizeof(*message));
+        __attribute__((unused)) auto err = espnowBroadcast.send((const uint8_t*)message, sizeof(*message));
 
 #ifdef NODE_DEBUGGING
         if (err != ESP_OK) {
-            Serial.printf("ESPNOWBroadcast::instance().send() failed: %d\n", err);
+            Serial.printf("espnowBroadcast.send() failed: %d\n", err);
         } else {
             Serial.println("successful broadcast");
         }
@@ -352,7 +352,7 @@ class LightNode {
         delay(2000);
 #endif
 
-        ESPNOWBroadcast::instance().registerCallback(onEspNowMessage);
+        espnowBroadcast.registerCallback(onEspNowMessage);
 
         Serial.println("setup: ok");
     }
@@ -409,8 +409,8 @@ class LightNode {
 protected:
 
     void checkESPNowState() {
-        auto state = ESPNOWBroadcast::instance().getState();
-        static auto prev = ESPNOWBroadcast::instance().STOPPED;
+        auto state = espnowBroadcast.getState();
+        static auto prev = espnowBroadcast.STOPPED;
         switch(state) {
             case ESPNOWBroadcast::STOPPED:
                 if (NODE_STATUS_QUIET != status) {

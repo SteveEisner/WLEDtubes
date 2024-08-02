@@ -90,17 +90,18 @@ class ESPNOWBroadcastImpl : public ESPNOWBroadcast {
 
 };
 
-ESPNOWBroadcastImpl espnow {};
-#else
-ESPNOWBroadcast espnow {};
+ESPNOWBroadcastImpl espnowBroadcastImpl {};
 #endif // ESP32
 
-ESPNOWBroadcast& ESPNOWBroadcast::instance() {
-    return espnow;
-}
+ESPNOWBroadcast espnowBroadcast {};
+
 
 ESPNOWBroadcast::STATE ESPNOWBroadcast::getState() {
-    return espnow.getState();
+#ifdef ESP32
+    return espnowBroadcastImpl.getState();
+#else
+    return ESPNOWBroadcast::STOPPED;
+#endif
 }
 
 bool ESPNOWBroadcast::setup() {
@@ -142,7 +143,7 @@ bool ESPNOWBroadcast::setup() {
     }
 #endif
 
-    setup = espnow.setupWiFi();
+    setup = espnowBroadcastImpl.setupWiFi();
 #endif //ESP32
     return setup;
 }
@@ -172,22 +173,22 @@ bool ESPNOWBroadcastImpl::setupWiFi() {
 
 void ESPNOWBroadcast::loop(size_t maxMessagesToProcess /*= 1*/) {
 #ifdef ESP32
-    switch (espnow._state.load()) {
+    switch (espnowBroadcastImpl._state.load()) {
         case ESPNOWBroadcast::STARTING:
             // if WiFI is in starting state, actually stat ESPNow from our main task thread.
-            espnow.start();
+            espnowBroadcastImpl.start();
             break;
         case ESPNOWBroadcast::STARTED: {
             auto ndx = maxMessagesToProcess;
             while(ndx-- > 0) {
-                auto *msg = espnow.queuedNetworkRingBuffer.pop();
+                auto *msg = espnowBroadcastImpl.queuedNetworkRingBuffer.pop();
                 if (msg) {
                     auto callback = _rxCallbacks;
                     while( *callback ) {
                         (*callback)(msg->mac, msg->data, msg->len);
                         callback++;
                     }
-                    espnow.queuedNetworkRingBuffer.popComplete(msg);
+                    espnowBroadcastImpl.queuedNetworkRingBuffer.popComplete(msg);
                 } else {
                     break;
                 }
@@ -322,7 +323,7 @@ void ESPNOWBroadcastImpl::onWiFiEvent(void* arg, esp_event_base_t event_base, in
         switch (event_id) {
             case WIFI_EVENT_STA_START: {
                 ESPNOWBroadcast::STATE stopped {ESPNOWBroadcast::STOPPED};
-                espnow._state.compare_exchange_strong(stopped, ESPNOWBroadcast::STARTING);
+                espnowBroadcastImpl._state.compare_exchange_strong(stopped, ESPNOWBroadcast::STARTING);
                 break;
             }
 
@@ -330,8 +331,8 @@ void ESPNOWBroadcastImpl::onWiFiEvent(void* arg, esp_event_base_t event_base, in
             case WIFI_EVENT_AP_START: {
                 ESPNOWBroadcast::STATE started {ESPNOWBroadcast::STARTED};
                 ESPNOWBroadcast::STATE starting {ESPNOWBroadcast::STARTING};
-                if (espnow._state.compare_exchange_strong(started, ESPNOWBroadcast::STOPPED) ||
-                    espnow._state.compare_exchange_strong(starting, ESPNOWBroadcast::STOPPED)) {
+                if (espnowBroadcastImpl._state.compare_exchange_strong(started, ESPNOWBroadcast::STOPPED) ||
+                    espnowBroadcastImpl._state.compare_exchange_strong(starting, ESPNOWBroadcast::STOPPED)) {
 #ifdef ESPNOW_DEBUGGING
                     Serial.println("WiFi connected: stop broadcasting");
 #endif
@@ -345,7 +346,7 @@ void ESPNOWBroadcastImpl::onWiFiEvent(void* arg, esp_event_base_t event_base, in
 }
 
 void ESPNOWBroadcastImpl::onESPNowRxCallback(const uint8_t *mac, const uint8_t *data, int len) {
-    if (!espnow.queuedNetworkRingBuffer.push(mac, data, len)) {
+    if (!espnowBroadcastImpl.queuedNetworkRingBuffer.push(mac, data, len)) {
         if (len > sizeof(WLED_ESPNOW_MAX_MESSAGE_LENGTH)) {
 #ifdef ESPNOW_DEBUGGING
             Serial.printf("Receive to large of packet %d bytes. ignoring...\n", len);

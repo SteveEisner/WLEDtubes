@@ -501,7 +501,7 @@ pinManager.allocateMultiplePins(pins, sizeof(pins)/sizeof(managed_pin_type), Pin
   DEBUG_PRINT(F("heap ")); DEBUG_PRINTLN(ESP.getFreeHeap());
 
 #ifndef WLED_DISABLE_ESPNOW_NEW
-  ESPNOWBroadcast::instance().setup();
+  espnowBroadcast.setup();
 #endif
 
   enableWatchdog();
@@ -814,7 +814,7 @@ void WLED::handleConnection()
   }
 
 #ifndef WLED_DISABLE_ESPNOW_NEW
-  ESPNOWBroadcast::instance().loop();
+  espnowBroadcast.loop();
 #endif
 
   // reconnect WiFi to clear stale allocations if heap gets too low

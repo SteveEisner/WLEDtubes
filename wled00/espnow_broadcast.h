@@ -21,8 +21,6 @@ class ESPNOWBroadcast {
 
   public:
 
-    static ESPNOWBroadcast& instance();
-
     bool setup();
 
     void loop(size_t maxMessagesToProcess = WLED_ESPNOW_MAX_QUEUED_MESSAGES);
@@ -48,4 +46,5 @@ class ESPNOWBroadcast {
 
 };
 
+extern ESPNOWBroadcast espnowBroadcast;
 #endif
