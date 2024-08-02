@@ -17,6 +17,8 @@
 
 #include "espnow_broadcast.h"
 
+#ifdef ESP32
+
 #include <esp_now.h>
 #include <esp_idf_version.h>
 #include <freertos/ringbuf.h>
@@ -89,7 +91,9 @@ class ESPNOWBroadcastImpl : public ESPNOWBroadcast {
 };
 
 ESPNOWBroadcastImpl espnow {};
-
+#else
+ESPNOWBroadcast espnow {};
+#endif // ESP32
 
 ESPNOWBroadcast& ESPNOWBroadcast::instance() {
     return espnow;
@@ -102,6 +106,7 @@ ESPNOWBroadcast::STATE ESPNOWBroadcast::getState() {
 bool ESPNOWBroadcast::setup() {
 
     static bool setup = false;
+#ifdef ESP32
     if (setup) {
         return true;
     }
@@ -138,9 +143,11 @@ bool ESPNOWBroadcast::setup() {
 #endif
 
     setup = espnow.setupWiFi();
+#endif //ESP32
     return setup;
 }
 
+#ifdef ESP32
 bool ESPNOWBroadcastImpl::setupWiFi() {
     Serial.println("ESPNOWBroadcast::setupWiFi()");
 
@@ -160,10 +167,11 @@ bool ESPNOWBroadcastImpl::setupWiFi() {
 
     return true;
 }
-
+#endif //ESP32
 
 
 void ESPNOWBroadcast::loop(size_t maxMessagesToProcess /*= 1*/) {
+#ifdef ESP32
     switch (espnow._state.load()) {
         case ESPNOWBroadcast::STARTING:
             // if WiFI is in starting state, actually stat ESPNow from our main task thread.
@@ -189,11 +197,14 @@ void ESPNOWBroadcast::loop(size_t maxMessagesToProcess /*= 1*/) {
         default:
             break;
     }
+#endif // ESP32
 }
 
 bool ESPNOWBroadcast::send(const uint8_t* msg, size_t len) {
+#ifdef ESP32
     static const uint8_t broadcast[] = BROADCAST_ADDR_ARRAY_INITIALIZER;
     return ERR_OK == esp_now_send(broadcast, msg, len);
+#endif
 }
 
 bool ESPNOWBroadcast::registerCallback( ESPNOWBroadcast::receive_callback_t callback ) {
@@ -223,6 +234,8 @@ bool ESPNOWBroadcast::removeCallback( ESPNOWBroadcast::receive_callback_t callba
     return ndx < _rxCallbacksSize;
 
 }
+
+#ifdef ESP32
 
 void ESPNOWBroadcastImpl::start() {
 
@@ -368,5 +381,7 @@ bool ESPNOWBroadcastImpl::QueuedNetworkRingBuffer::push(const uint8_t* mac, cons
     return false;
 #endif
 }
+
+#endif // ESP32
 
 #endif
