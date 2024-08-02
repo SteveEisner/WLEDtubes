@@ -1,5 +1,6 @@
 #define WLED_DEFINE_GLOBAL_VARS //only in one source file, wled.cpp!
 #include "wled.h"
+#include "espnow_broadcast.h"
 #include "wled_ethernet.h"
 #include "ota_update.h"
 #include <Arduino.h>
@@ -510,6 +511,10 @@ void WLED::setup()
   initServer();
   DEBUG_PRINTF_P(PSTR("heap %u\n"), ESP.getFreeHeap());
 
+#ifndef WLED_DISABLE_ESPNOW_NEW
+  espnowBroadcast.setup();
+#endif
+
 #ifndef WLED_DISABLE_INFRARED
   // init IR
   DEBUG_PRINTLN(F("initIR"));
@@ -917,6 +922,10 @@ void WLED::handleConnection()
     wasConnected = false;
     return;
   }
+
+#ifndef WLED_DISABLE_ESPNOW_NEW
+  espnowBroadcast.loop();
+#endif
 
   byte stac = 0;
   if (apActive) {
