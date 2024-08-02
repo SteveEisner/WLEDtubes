@@ -295,11 +295,11 @@ class LightNode {
         Serial.println();
 #endif
 
-        __attribute__((unused)) auto err = ESPNOWBroadcast.send((const uint8_t*)message, sizeof(*message));
+        __attribute__((unused)) auto err = ESPNOWBroadcast::instance().send((const uint8_t*)message, sizeof(*message));
 
 #ifdef NODE_DEBUGGING
         if (err != ESP_OK) {
-            Serial.printf("ESPNOWBroadcast.send() failed: %d\n", err);
+            Serial.printf("ESPNOWBroadcast::instance().send() failed: %d\n", err);
         } else {
             Serial.println("successful broadcast");
         }
@@ -352,7 +352,7 @@ class LightNode {
         delay(2000);
 #endif
 
-        ESPNOWBroadcast.registerCallback(onEspNowMessage);
+        ESPNOWBroadcast::instance().registerCallback(onEspNowMessage);
 
         Serial.println("setup: ok");
     }
@@ -409,10 +409,10 @@ class LightNode {
 protected:
 
     void checkESPNowState() {
-        auto state = ESPNOWBroadcast.getState();
-        static auto prev = ESPNOWBroadcast.STOPPED;
+        auto state = ESPNOWBroadcast::instance().getState();
+        static auto prev = ESPNOWBroadcast::instance().STOPPED;
         switch(state) {
-            case ESPNOWBroadcastClass::STOPPED:
+            case ESPNOWBroadcast::STOPPED:
                 if (NODE_STATUS_QUIET != status) {
                     Serial.printf("checkESPNowState() - %d node_status:%s\n", state, status_code());
                     status = NODE_STATUS_QUIET;
@@ -420,12 +420,12 @@ protected:
                     Serial.printf("LightNode %s\n", status_code());
                 }
                 break;
-            case ESPNOWBroadcastClass::STARTING: {}
+            case ESPNOWBroadcast::STARTING: {}
                 if ( state != prev ) {
                     Serial.printf("checkESPNowState() - %d node_status:%s\n", state, status_code());
                 }
                 break;
-            case ESPNOWBroadcastClass::STARTED:
+            case ESPNOWBroadcast::STARTED:
                 if (NODE_STATUS_QUIET == status) {
                     Serial.printf("checkESPNowState() - %d node_status:%s\n", state, status_code());
                     status = NODE_STATUS_RECEIVING;
