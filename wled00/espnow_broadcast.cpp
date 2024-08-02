@@ -117,7 +117,7 @@ bool ESPNOWBroadcast::setup() {
 
 #if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(4, 0, 0)
     tcpip_adapter_init();
-    esp_event_loop_init(onSystemEvent, nullptr);
+    esp_event_loop_init(ESPNOWBroadcastImpl::onSystemEvent, nullptr);
 #else
 
     auto err = esp_event_loop_create_default();
