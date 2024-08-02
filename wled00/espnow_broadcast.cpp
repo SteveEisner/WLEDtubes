@@ -203,7 +203,7 @@ void ESPNOWBroadcast::loop(size_t maxMessagesToProcess /*= 1*/) {
 bool ESPNOWBroadcast::send(const uint8_t* msg, size_t len) {
 #ifdef ESP32
     static const uint8_t broadcast[] = BROADCAST_ADDR_ARRAY_INITIALIZER;
-    return ERR_OK == esp_now_send(broadcast, msg, len);
+    return ESP_OK == esp_now_send(broadcast, msg, len);
 #else
     return false;    
 #endif
