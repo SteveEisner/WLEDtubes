@@ -9,7 +9,6 @@
 
 #include "FX.h"
 
-#include "beats.h"
 #include "virtual_strip.h"
 #include "led_strip.h"
 #include "master.h"
@@ -24,10 +23,9 @@
 
 class TubesUsermod : public Usermod {
   private:
-    BeatController beats;
-    PatternController controller = PatternController(MAX_REAL_LEDS, &beats);
-    DebugController debug = DebugController(&controller);
-    Master *master = nullptr;
+    PatternController controller = PatternController(MAX_REAL_LEDS);
+    DebugController debug = DebugController(controller);
+    Master master = Master(controller);
     bool isLegacy = false;
 
     void randomize() {
@@ -59,11 +57,9 @@ class TubesUsermod : public Usermod {
 
       // Start timing
       globalTimer.setup();
-      beats.setup();
       controller.setup();
       if (controller.isMasterRole()) {
-        master = new Master(&controller);
-        master->setup();
+        master.setup();
       }
       debug.setup();
     }
@@ -76,55 +72,23 @@ class TubesUsermod : public Usermod {
 
       globalTimer.update();
 
-      if (master) 
-        master->update();
-      beats.update();
+      if (controller.isMasterRole()) {
+        master.update();
+      }
       controller.update();
       debug.update();
 
       // Draw after everything else is done
-      controller.led_strip->update();
+      controller.led_strip.update();
     }
 
-    void handleOverlayDraw()
-    {
-      // Perform a cross-fade between current WLED mode and the external buffer
-      uint8_t fade; // amount that Tubes overwrites WLED, 0-255
-      switch (this->controller.options.fader) {
-        case AUTO:
-        default:
-          fade = sin8(millis() / 40);
-          break;
-        case LEFT:
-          fade = 255;
-          break;
-        case RIGHT:
-          fade = 0;
-          break;
-        case MIDDLE:
-          fade = 127;
-          break;
-      }
-
-      if (fade > 0) {
-        uint16_t length = strip.getLengthTotal();
-        for (int i = 0; i < length; i++) {
-          CRGB color1 = strip.getPixelColor(i);
-          CRGB color2 = controller.led_strip->getPixelColor(i);
-
-          uint8_t r = blend8(color1.r, color2.r, fade);
-          uint8_t g = blend8(color1.g, color2.g, fade);
-          uint8_t b = blend8(color1.b, color2.b, fade);
-
-          strip.setPixelColor(i, CRGB(r,g,b));
-        }
-      }
-
+    void handleOverlayDraw() {
       // Draw effects layers over whatever WLED is doing.
       controller.handleOverlayDraw();
       debug.handleOverlayDraw();
-      if (master) 
-        master->handleOverlayDraw();
+      if (controller.isMasterRole()) {
+        master.handleOverlayDraw();
+      }
 
       // When AP mode is on, make sure it's obvious
       // Blink when there's a connected client
