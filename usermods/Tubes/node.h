@@ -454,9 +454,16 @@ protected:
                 case WLED_Header::ID::None:
                     return false;
                     break;
-                case WLED_Header::ID::RTC:
-                    settimeofday(&(wled->u.rtc.tv), nullptr);
+                case WLED_Header::ID::RTC: {
+                    static auto rtc = false;
+                    if (!rtc) {
+                        settimeofday(&(wled->u.rtc.tv), nullptr);
+                        rtc = true;
+                    } else {
+                        adjtime(&(wled->u.rtc.tv), nullptr);
+                    }
                     return false;
+                    }
                     break;
                 default:
                     return true;
