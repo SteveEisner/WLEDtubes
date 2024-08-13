@@ -251,6 +251,13 @@ bool ESPNOWBroadcast::removeCallback( ESPNOWBroadcast::receive_callback_t callba
 
 }
 
+ESPNOWBroadcast::receive_filter_t ESPNOWBroadcast::registerFilter( ESPNOWBroadcast::receive_filter_t filter ) {
+    auto old = _rxFilter;
+    _rxFilter = filter;
+    return old;
+}
+
+
 #ifdef ESP32
 
 void ESPNOWBroadcastImpl::start() {
@@ -398,7 +405,11 @@ void ESPNOWBroadcastImpl::onESPNowRxCallback(const uint8_t *mac, const uint8_t *
         rssi = 0;
     }
 
-    if (!espnowBroadcastImpl.queuedNetworkRingBuffer.push(mac, data, len, rssi)) {
+    if (!espnowBroadcastImpl._rxFilter(mac, data, len, rssi)) {
+        return;
+    }
+ 
+    if(!espnowBroadcastImpl.queuedNetworkRingBuffer.push(mac, data, len, rssi)) {
         Serial.printf("Failed to queue message (%d bytes) to ring buffer.  Dropping message\n", len);
     } else {
 #ifdef ESPNOW_CALLBACK_DEBUGGING

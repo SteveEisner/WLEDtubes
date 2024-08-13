@@ -8,36 +8,7 @@
 // #define RELAY_DEBUGGING
 #define TESTING_NODE_ID 0
 
-#define CURRENT_NODE_VERSION 2
-
-#pragma pack(push,4) // set packing for consist transport across network
-// ideally this would have been pack 1, so we're actually wasting a
-// number of bytes across the network, but we've already shipped...
-
-typedef enum{
-    RECIPIENTS_ALL=0,  // Send to all neighbors; non-followers will ignore
-    RECIPIENTS_ROOT=1, // Send to root for rebroadcasting downward, all will see
-    RECIPIENTS_INFO=2, // Send to all neighbors "FYI"; none will ignore
-} MessageRecipients;
-
-typedef uint16_t MeshId;
-
-typedef struct {
-    MeshId id = 0;
-    MeshId uplinkId = 0;
-    uint8_t version = CURRENT_NODE_VERSION;
-} MeshNodeHeader;
-
-#define MESSAGE_DATA_SIZE 64
-typedef struct {
-    MeshNodeHeader header;
-    MessageRecipients recipients;
-    uint32_t timebase;
-    CommandId command;
-    byte data[MESSAGE_DATA_SIZE] = {0};
-} NodeMessage;
-
-#pragma pack(pop)
+#include "protocol.h"
 
 typedef struct {
     uint8_t status;
@@ -187,20 +158,6 @@ class LightNode {
     }
 
     void onPeerData(const uint8_t* address, const NodeMessage* message, uint8_t len, signed int rssi, bool broadcast) {
-        // Ignore this message if it isn't a valid message payload.
-        if (len != sizeof(*message))
-            return;
-
-        // Ignore this message if it's the wrong version.
-        if (message->header.version != header.version) {
-#ifdef NODE_DEBUGGING
-            Serial.print("  -- !version ");
-            printMessage(message, rssi);
-            Serial.println();
-#endif
-            return;
-        }
-
         // Track that another node exists, updating this node's understanding of the mesh.
         onPeerPing(message->header);
 
@@ -352,6 +309,9 @@ class LightNode {
 
         espnowBroadcast.registerCallback(onEspNowMessage);
 
+        espnowBroadcast.registerFilter(onEspNowFilter);
+
+
         Serial.println("setup: ok");
     }
 
@@ -437,25 +397,7 @@ protected:
         prev = state;
     }
 
-    typedef struct wizmote_message {
-        uint8_t program;      // 0x91 for ON button, 0x81 for all others
-        uint8_t seq[4];       // Incremetal sequence number 32 bit unsigned integer LSB first
-        uint8_t byte5 = 32;   // Unknown
-        uint8_t button;       // Identifies which button is being pressed
-        uint8_t byte8 = 1;    // Unknown, but always 0x01
-        uint8_t byte9 = 100;  // Unnkown, but always 0x64
-
-        uint8_t byte10;  // Unknown, maybe checksum
-        uint8_t byte11;  // Unknown, maybe checksum
-        uint8_t byte12;  // Unknown, maybe checksum
-        uint8_t byte13;  // Unknown, maybe checksum
-    } wizmote_message;
-
     void onWizmote(const uint8_t* address, const wizmote_message* data, uint8_t len) {
-        // First make sure this is a WizMote message.
-        if (len != sizeof(wizmote_message) || data->byte8 != 1 || data->byte9 != 100 || data->byte5 != 32)
-            return;
-
         static uint32_t last_seq = 0;
         uint32_t cur_seq = data->seq[0] | (data->seq[1] << 8) | (data->seq[2] << 16) | (data->seq[3] << 24);
         if (cur_seq == last_seq)
@@ -469,15 +411,60 @@ protected:
         if (msg) {
             if(len == sizeof(NodeMessage)) {
                 instance->onPeerData(address, (const NodeMessage*)msg, len, rssi, true);
+            } else if (len == sizeof(wizmote_message)) {
                 instance->onWizmote(address, (const wizmote_message*)msg, len);
             } else {
 #ifdef NODE_DEBUGGING
-                Serial.printf("wrong size QueueNodeMessage received %d\n", len);
+                Serial.printf("wrong size NodeMessage received %d\n", len);
 #endif
             }
         }
     }
 
+    static bool onEspNowFilter(const uint8_t *address, const uint8_t *msg, uint8_t len, int8_t rssi) {
+        if (len == sizeof(NodeMessage)) {
+            return ((const NodeMessage*)msg)->header.version == instance->header.version;
+        } else if (len == sizeof(wizmote_message)) {
+            auto wizmote = (const wizmote_message*)msg;
+            return !( wizmote->byte8 != 1 || wizmote->byte9 != 100 || wizmote->byte5 != 32);
+        } else {
+            auto wled = (const WLED_Message*)msg;
+            if  (!wled->u.header.isHeaderValid()) {
+                return false;
+            }
+
+            if (!wled->u.header.isCurrentVersion()){
+                return false;
+            }
+
+            if (wled->u.header.len > len) {
+                return false;
+            }
+
+            if (wled->u.header.sig != 0) {
+                // currently signing is not supported
+                return false;
+            }
+
+            if (wled->u.header.id >= static_cast<uint16_t>(WLED_Header::ID::MAX_ID)) {
+                return false;
+            }
+
+            switch(static_cast<WLED_Header::ID>(wled->u.header.id)) {
+                case WLED_Header::ID::None:
+                    return false;
+                    break;
+                case WLED_Header::ID::RTC:
+                    settimeofday(&(wled->u.rtc.tv), nullptr);
+                    return false;
+                    break;
+                default:
+                    return true;
+            }
+
+        }
+        return false;
+    }
 };
 
 LightNode* LightNode::instance = nullptr;
