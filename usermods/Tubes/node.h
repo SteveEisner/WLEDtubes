@@ -55,7 +55,7 @@ class LightNode {
     } NodeStatus;
     NodeStatus status = NODE_STATUS_QUIET;
 
-    PGM_P status_code() {
+    PGM_P status_code() const {
         switch (status) {
         case NODE_STATUS_QUIET:
             return PSTR(" (quiet)");
@@ -410,7 +410,7 @@ protected:
                 instance->onWizmote(address, (const wizmote_message*)msg, len);
             } else {
 #ifdef NODE_DEBUGGING
-                Serial.printf("wrong size NodeMessage received %d\n", len);
+                Serial.printf("wrong size EspNowMessage received %d\n", len);
 #endif
             }
         }
