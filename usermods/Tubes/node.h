@@ -35,14 +35,8 @@ const char *command_name(CommandId command) {
 
 class MessageReceiver {
   public:
-    virtual bool onCommand(CommandId command, void *data) {
-      // Abstract: subclasses must define
-      return false;
-    }  
-    virtual bool onButton(uint8_t button_id) {
-      // Abstract: subclasses must define
-      return false;
-    }  
+    virtual bool onCommand(CommandId command, void *data) = 0;
+    virtual bool onButton(uint8_t button_id) = 0;
 };
 
 class LightNode {

@@ -1,6 +1,7 @@
 #pragma once
 
 // THIS FILE ISN'T USED ANY MORE
+#if 0
 
 #include <NimBLEDevice.h>
 #include <esp_coexist.h>
@@ -493,3 +494,5 @@ void procUpdaterTask(void* pvParameters) {
     }
 
 }
+
+#endif //0
