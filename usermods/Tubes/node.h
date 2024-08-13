@@ -15,6 +15,7 @@ typedef struct {
     char message[40];
 } NodeInfo;
 
+#pragma once
 
 const char *command_name(CommandId command) {
     switch (command) {

@@ -1,7 +1,6 @@
 #pragma once
 #include <time.h>
 #include "options.h"
-#include "commands.h"
 #include "effects.h"
 
 #define CURRENT_NODE_VERSION 2
@@ -11,6 +10,15 @@
 // number of bytes across the network, but we've already shipped...
 
 #define WLED_MESSAGE_MAX_SIZE 250
+
+typedef enum CommandId: uint8_t {
+    COMMAND_OPTIONS = 0x10,
+    COMMAND_STATE   = 0x20,
+    COMMAND_ACTION  = 0x30,
+    COMMAND_INFO    = 0x40,
+    COMMAND_BEATS   = 0x50,
+    COMMAND_UPGRADE = 0xE0
+} CommandId;
 
 typedef enum{
     RECIPIENTS_ALL=0,  // Send to all neighbors; non-followers will ignore
@@ -31,7 +39,7 @@ typedef struct {
     MeshNodeHeader header;
     MessageRecipients recipients;
     uint32_t timebase;
-    CommandId command;
+    CommandId command:8;
     uint8_t data[MESSAGE_DATA_SIZE] = {0};
 } NodeMessage;
 
@@ -98,7 +106,7 @@ struct WLED_Header {
 private:
     constexpr uint32_t WLEDHeaderValue() {
         return *((uint32_t*)"WLED");
-    } 
+    }
 
 };
 
@@ -114,7 +122,6 @@ struct WLED_GPS : WLED_Header {
     WLED_GPS() : WLED_Header(WLED_Header::ID::GPS) {}
     float lat;
     float lng;
-    
 };
 WLED_MESSAGE_COMPATIBILITY_ASSERT(WLED_GPS);
 
@@ -132,7 +139,6 @@ struct WLED_WellknownPeer : WLED_Header {
     uint8_t macaddr[6];
     uint8_t role;
     uint8_t unused;
-
 };
 WLED_MESSAGE_COMPATIBILITY_ASSERT(WLED_WellknownPeer);
 
@@ -170,7 +176,7 @@ struct WLED_Message {
     union U {
         WLED_Header header;
         WLED_RTC rtc;
-        WLED_GPS gps;        
+        WLED_GPS gps;
         WLED_WellknownPeer peer;
         WLED_LogMessage log;
         WLED_Background background;
