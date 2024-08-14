@@ -911,7 +911,7 @@ class PatternController : public MessageReceiver {
     }
   }
 
-  accum88 parse_number(char *s) {
+  accum88 parse_number(const char *s) {
     uint16_t n=0, d=0;
     
     while (*s == ' ')
@@ -937,7 +937,7 @@ class PatternController : public MessageReceiver {
     return n+d;
   }
 
-  void keyboard_command(char *command) {
+  void keyboard_command(const char *command) {
     // If not the lead, send it to the lead.
     uint8_t b;
     accum88 arg = parse_number(command+1);
@@ -1198,6 +1198,10 @@ class PatternController : public MessageReceiver {
         if (isMasterRole())
           return false;
         set_tapped_bpm(*(accum88*)data, 0);
+        return true;
+
+      case COMMAND_KEYBOARD:
+        keyboard_command((const char*)data);
         return true;
     }
   
