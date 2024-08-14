@@ -405,7 +405,7 @@ void ESPNOWBroadcastImpl::onESPNowRxCallback(const uint8_t *mac, const uint8_t *
         rssi = 0;
     }
 
-    if (!espnowBroadcastImpl._rxFilter(mac, data, len, rssi)) {
+    if (espnowBroadcastImpl._rxFilter && !espnowBroadcastImpl._rxFilter(mac, data, len, rssi)) {
         return;
     }
  
