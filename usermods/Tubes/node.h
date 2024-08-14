@@ -140,7 +140,7 @@ class LightNode {
         }
     }
 
-    void printMessage(const NodeMessage* message, signed int rssi) {
+    void printMessage(const NodeMessage* message, signed int rssi) const {
         Serial.printf("%03X/%03X %s",
             message->header.id,
             message->header.uplinkId,
@@ -313,7 +313,7 @@ class LightNode {
     void update() {
 
         //process any wifi events to turn on/off ESPNode
-        checkESPNowState();
+        updateESPNowState();
 
         // Check the last time we heard from the uplink node
         if (isFollowing() && uplinkTimer.ended()) {
@@ -355,19 +355,19 @@ class LightNode {
         onMeshChange();
     }
 
-    bool isFollowing() {
+    bool isFollowing() const {
         return header.uplinkId != 0;
     }
 
 protected:
 
-    void checkESPNowState() {
+    void updateESPNowState() {
         auto state = espnowBroadcast.getState();
         static auto prev = espnowBroadcast.STOPPED;
         switch(state) {
             case ESPNOWBroadcast::STOPPED:
                 if (NODE_STATUS_QUIET != status) {
-                    Serial.printf("checkESPNowState() - %d node_status:%s\n", state, status_code());
+                    Serial.printf("updateESPNowState() - %d node_status:%s\n", state, status_code());
                     status = NODE_STATUS_QUIET;
                     rebroadcastTimer.stop();
                     Serial.printf("LightNode %s\n", status_code());
@@ -375,12 +375,12 @@ protected:
                 break;
             case ESPNOWBroadcast::STARTING: {}
                 if ( state != prev ) {
-                    Serial.printf("checkESPNowState() - %d node_status:%s\n", state, status_code());
+                    Serial.printf("updateESPNowState() - %d node_status:%s\n", state, status_code());
                 }
                 break;
             case ESPNOWBroadcast::STARTED:
                 if (NODE_STATUS_QUIET == status) {
-                    Serial.printf("checkESPNowState() - %d node_status:%s\n", state, status_code());
+                    Serial.printf("updateESPNowState() - %d node_status:%s\n", state, status_code());
                     status = NODE_STATUS_RECEIVING;
                     statusTimer.start(STATUS_TIMEOUT_BASE - header.id / 2);
                     Serial.printf("LightNode %s\n", status_code());
