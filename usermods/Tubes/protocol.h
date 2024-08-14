@@ -12,13 +12,21 @@
 #define WLED_MESSAGE_MAX_SIZE 250
 
 typedef enum CommandId: uint8_t {
-    COMMAND_OPTIONS = 0x10,
-    COMMAND_STATE   = 0x20,
-    COMMAND_ACTION  = 0x30,
-    COMMAND_INFO    = 0x40,
-    COMMAND_BEATS   = 0x50,
-    COMMAND_UPGRADE = 0xE0
+    COMMAND_OPTIONS  = 0x10,
+    COMMAND_STATE    = 0x20,
+    COMMAND_ACTION   = 0x30,
+    COMMAND_INFO     = 0x40,
+    COMMAND_BEATS    = 0x50,
+    COMMAND_KEYBOARD = 0x60,
+    COMMAND_UPGRADE  = 0xE0
 } CommandId;
+
+typedef struct {
+  char key;
+  uint8_t arg;
+} Action;
+
+
 
 typedef enum{
     RECIPIENTS_ALL=0,  // Send to all neighbors; non-followers will ignore
@@ -70,7 +78,7 @@ typedef struct wizmote_message {
 struct WLED_Header {
 
     enum class ID : uint16_t {
-        None = 0,
+        Keyboard = 0,
         RTC,
         GPS,
         WellknownPeer,
@@ -117,6 +125,13 @@ struct WLED_RTC : WLED_Header {
     timeval  tv;
 };
 WLED_MESSAGE_COMPATIBILITY_ASSERT(WLED_RTC);
+
+struct WLED_Keyboard : WLED_Header {
+    WLED_Keyboard() : WLED_Header(WLED_Header::ID::Keyboard) {}
+    char keys[20] = {0};
+};
+WLED_MESSAGE_COMPATIBILITY_ASSERT(WLED_Keyboard);
+
 
 struct WLED_GPS : WLED_Header {
     WLED_GPS() : WLED_Header(WLED_Header::ID::GPS) {}
@@ -168,7 +183,7 @@ WLED_MESSAGE_COMPATIBILITY_ASSERT(WLED_Effect);
 
 struct WLED_BPM : WLED_Header {
     WLED_BPM() : WLED_Header(WLED_Header::ID::BPM) {}
-
+    accum88 bpm;
 };
 WLED_MESSAGE_COMPATIBILITY_ASSERT(WLED_BPM);
 
@@ -176,6 +191,7 @@ struct WLED_Message {
     union U {
         WLED_Header header;
         WLED_RTC rtc;
+        WLED_Keyboard keyboard;
         WLED_GPS gps;
         WLED_WellknownPeer peer;
         WLED_LogMessage log;

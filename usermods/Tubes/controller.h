@@ -63,11 +63,6 @@ typedef struct BootOptions {
 #define BOOT_OPTION_POWER_SAVE_OFF 1
 #define BOOT_OPTION_POWER_SAVE_ON 2
 
-typedef struct {
-  char key;
-  uint8_t arg;
-} Action;
-
 #define NUM_VSTRIPS 3
 
 #define DEBOUNCE_TIME 40
@@ -137,7 +132,7 @@ class PatternController : public MessageReceiver {
     LightNode node;
 
     ControllerOptions options;
-    char key_buffer[20] = {0};
+    char key_buffer[sizeof(WLED_Keyboard::keys)] = {0};
 
     Energy energy=Chill;
     TubeState current_state;

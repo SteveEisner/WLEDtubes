@@ -403,15 +403,40 @@ protected:
     }
 
     static void onEspNowMessage(const uint8_t *address, const uint8_t *msg, uint8_t len, int8_t rssi) {
+        // basic length and field checking has been done in onEspNowFilter
         if (msg) {
             if(len == sizeof(NodeMessage)) {
                 instance->onPeerData(address, (const NodeMessage*)msg, len, rssi, true);
             } else if (len == sizeof(wizmote_message)) {
                 instance->onWizmote(address, (const wizmote_message*)msg, len);
             } else {
-#ifdef NODE_DEBUGGING
-                Serial.printf("wrong size EspNowMessage received %d\n", len);
-#endif
+                auto wled = (const WLED_Message*)msg;
+                switch(static_cast<WLED_Header::ID>(wled->u.header.id)) {
+                    case WLED_Header::ID::Keyboard: {
+                        Action action = { 'K', 0};
+                        instance->receiver->onCommand(
+                            COMMAND_KEYBOARD,
+                            (void*)(wled->u.keyboard.keys)
+                        );
+                        }
+                        break;
+                    case WLED_Header::ID::Effect: {
+                        Action action = { 'G', 0};
+                        instance->receiver->onCommand(
+                            COMMAND_ACTION,
+                            &action
+                        );
+                        }
+                        break;
+                    case WLED_Header::ID::BPM:
+                        instance->receiver->onCommand(
+                            COMMAND_BEATS,
+                            (void*)&(wled->u.bpm.bpm)
+                        );
+                        break;
+                    default:
+                        break;
+                }
             }
         }
     }
@@ -446,9 +471,6 @@ protected:
             }
 
             switch(static_cast<WLED_Header::ID>(wled->u.header.id)) {
-                case WLED_Header::ID::None:
-                    return false;
-                    break;
                 case WLED_Header::ID::RTC: {
                     static auto rtc = false;
                     if (!rtc) {
