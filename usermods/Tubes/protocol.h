@@ -1,7 +1,7 @@
 #pragma once
 #include <time.h>
 #include "options.h"
-#include "effects.h"
+//#include "effects.h"
 
 #define CURRENT_NODE_VERSION 2
 
@@ -86,6 +86,7 @@ struct WLED_Header {
         Background,
         Effect,
         BPM,
+        Nearby,
         MAX_ID
     };
 
@@ -177,15 +178,23 @@ WLED_MESSAGE_COMPATIBILITY_ASSERT(WLED_Background);
 
 struct WLED_Effect : WLED_Header {
     WLED_Effect() : WLED_Header(WLED_Header::ID::Effect) {}
-    EffectDef effect;
+//    EffectDef effect;
 };
 WLED_MESSAGE_COMPATIBILITY_ASSERT(WLED_Effect);
 
 struct WLED_BPM : WLED_Header {
     WLED_BPM() : WLED_Header(WLED_Header::ID::BPM) {}
-    accum88 bpm;
+//    accum88 bpm;
 };
 WLED_MESSAGE_COMPATIBILITY_ASSERT(WLED_BPM);
+
+struct WLED_Nearby : WLED_Header {
+    WLED_Nearby() : WLED_Header(WLED_Header::ID::Nearby) {}
+};
+WLED_MESSAGE_COMPATIBILITY_ASSERT(WLED_Nearby);
+
+
+
 
 struct WLED_Message {
     union U {
@@ -198,6 +207,7 @@ struct WLED_Message {
         WLED_Background background;
         WLED_Effect effect;
         WLED_BPM bpm;
+        WLED_Nearby nearby;
     };
 
     U u;

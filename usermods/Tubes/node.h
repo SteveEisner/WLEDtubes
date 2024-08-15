@@ -412,28 +412,39 @@ protected:
             } else {
                 auto wled = (const WLED_Message*)msg;
                 switch(static_cast<WLED_Header::ID>(wled->u.header.id)) {
-                    case WLED_Header::ID::Keyboard: {
-                        Action action = { 'K', 0};
-                        instance->receiver->onCommand(
-                            COMMAND_KEYBOARD,
-                            (void*)(wled->u.keyboard.keys)
-                        );
+                    case WLED_Header::ID::Keyboard: 
+                        {
+                            Action action = { 'K', 0};
+                            instance->receiver->onCommand(
+                                COMMAND_KEYBOARD,
+                                (void*)(wled->u.keyboard.keys)
+                            );
                         }
                         break;
-                    case WLED_Header::ID::Effect: {
-                        Action action = { 'G', 0};
-                        instance->receiver->onCommand(
-                            COMMAND_ACTION,
-                            &action
-                        );
+                    case WLED_Header::ID::Effect: 
+                        {
+                            Action action = { 'G', 0};
+                            instance->receiver->onCommand(
+                                COMMAND_ACTION,
+                                &action
+                            );
                         }
                         break;
-                    case WLED_Header::ID::BPM:
-                        instance->receiver->onCommand(
-                            COMMAND_BEATS,
-                            (void*)&(wled->u.bpm.bpm)
-                        );
+                    case WLED_Header::ID::Nearby:
+                        {
+                            Action action = { 'G', 0};
+                            instance->receiver->onCommand(
+                                COMMAND_ACTION,
+                                &action
+                            );
+                        }
                         break;
+                    // case WLED_Header::ID::BPM:
+                    //     instance->receiver->onCommand(
+                    //         COMMAND_BEATS,
+                    //         (void*)&(wled->u.bpm.bpm)
+                    //     );
+                    //     break;
                     default:
                         break;
                 }
@@ -481,6 +492,9 @@ protected:
                     }
                     return false;
                     }
+                    break;
+                case WLED_Header::ID::Nearby:
+                    return rssi < 40;
                     break;
                 default:
                     return true;

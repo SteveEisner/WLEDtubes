@@ -57,7 +57,7 @@ class ESPNOWBroadcastImpl : public ESPNOWBroadcast {
     friend ESPNOWBroadcast;
 
     std::atomic<STATE> _state {STOPPED};
-    STATE getState() {
+    STATE getState() const {
         return _state.load();
     }
 
@@ -103,7 +103,7 @@ ESPNOWBroadcastImpl espnowBroadcastImpl {};
 ESPNOWBroadcast espnowBroadcast {};
 
 
-ESPNOWBroadcast::STATE ESPNOWBroadcast::getState() {
+ESPNOWBroadcast::STATE ESPNOWBroadcast::getState() const {
 #ifdef ESP32
     return espnowBroadcastImpl.getState();
 #else

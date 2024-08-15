@@ -3,7 +3,7 @@
 
 #ifndef WLED_DISABLE_ESPNOW_NEW
 
-#include "const.h"
+//#include "const.h"
 
 #ifndef WLED_ESPNOW_MAX_QUEUED_MESSAGES
 #define WLED_ESPNOW_MAX_QUEUED_MESSAGES 6
@@ -50,7 +50,11 @@ class ESPNOWBroadcast {
         MAX
     };
 
-    STATE getState();
+    STATE getState() const;
+
+    bool isStarted() const {
+      return STATE::STARTED == getState();
+    }
 
   protected:
     receive_callback_t _rxCallbacks[WLED_ESPNOW_MAX_REGISTERED_CALLBACKS] = {0};
