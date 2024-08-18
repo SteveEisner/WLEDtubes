@@ -59,8 +59,6 @@ class ESPNOWBroadcast {
   protected:
     receive_callback_t _rxCallbacks[WLED_ESPNOW_MAX_REGISTERED_CALLBACKS] = {0};
     static constexpr size_t _rxCallbacksSize = sizeof(_rxCallbacks)/sizeof(_rxCallbacks[0]);
-
-    receive_filter_t _rxFilter = nullptr;
 };
 
 extern ESPNOWBroadcast espnowBroadcast;

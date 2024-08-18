@@ -15,8 +15,6 @@ typedef struct {
     char message[40];
 } NodeInfo;
 
-#pragma once
-
 const char *command_name(CommandId command) {
     switch (command) {
         case COMMAND_STATE:
@@ -432,6 +430,7 @@ protected:
                         break;
                     case WLED_Header::ID::Nearby:
                         {
+                            Serial.println("processing Nearby");
                             Action action = { 'G', 0};
                             instance->receiver->onCommand(
                                 COMMAND_ACTION,
@@ -468,33 +467,26 @@ protected:
                 return false;
             }
 
-            if (wled->u.header.len > len) {
-                return false;
-            }
-
-            if (wled->u.header.sig != 0) {
-                // currently signing is not supported
-                return false;
-            }
-
             if (wled->u.header.id >= static_cast<uint16_t>(WLED_Header::ID::MAX_ID)) {
                 return false;
             }
 
             switch(static_cast<WLED_Header::ID>(wled->u.header.id)) {
-                case WLED_Header::ID::RTC: {
-                    static auto rtc = false;
-                    if (!rtc) {
-                        settimeofday(&(wled->u.rtc.tv), nullptr);
-                        rtc = true;
-                    } else {
-                        adjtime(&(wled->u.rtc.tv), nullptr);
-                    }
-                    return false;
+                case WLED_Header::ID::RTC: 
+                    {
+                        static auto rtc = false;
+                        if (!rtc) {
+                            settimeofday(&(wled->u.rtc.tv), nullptr);
+                            rtc = true;
+                        } else {
+                            adjtime(&(wled->u.rtc.tv), nullptr);
+                        }
+                        return false;
                     }
                     break;
                 case WLED_Header::ID::Nearby:
-                    return rssi < 40;
+                    Serial.printf("Filter Nearby %d\n", rssi);
+                    return rssi > -40;
                     break;
                 default:
                     return true;

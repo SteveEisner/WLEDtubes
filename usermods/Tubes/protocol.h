@@ -2,6 +2,7 @@
 #include <time.h>
 #include "options.h"
 //#include "effects.h"
+#include "espnow_broadcast.h"
 
 #define CURRENT_NODE_VERSION 2
 
@@ -77,8 +78,9 @@ typedef struct wizmote_message {
 
 struct WLED_Header {
 
-    enum class ID : uint16_t {
-        Keyboard = 0,
+    enum class ID : uint8_t {
+        Info = 0,
+        Keyboard,
         RTC,
         GPS,
         WellknownPeer,
@@ -90,18 +92,35 @@ struct WLED_Header {
         MAX_ID
     };
 
+    enum class State : uint8_t {
+        Broadcast,
+        Rebroadcast,
+        DontRebroadcast,
+        Ack,
+        MAX_STATE
+    };
+
+
     static_assert(static_cast<uint16_t>(WLED_Header::ID::MAX_ID) <= 0x3FFF, "Too large of message id" );
 
-    uint32_t header_ver = WLEDHeaderValue();
-    uint16_t id:12;
-    uint16_t sig:4;
-    uint8_t  unused = 0;  // perhaps for nonce or checksum  - makes uint32_t aligned
-    uint8_t  len;
+    uint32_t header_ver = headerAndVersion();
+    uint16_t key:3; // must be 0-6
+    uint16_t state:3;
+    uint16_t id:10;
+    uint16_t unused = 0;  // perhaps for nonce or checksum  - makes uint32_t aligned
 
-    WLED_Header( ID i, uint8_t s = 0) : id(static_cast<uint16_t>(i) & 0x07ff), sig(s & 0x07) {}
+    WLED_Header(ID i, State s = State::Broadcast) : 
+        key(0),
+        state(static_cast<uint16_t>(s)),
+        id(static_cast<uint16_t>(i))
+        {}
 
     constexpr bool isHeaderValid() {
-        return WLEDHeaderValue() == (header_ver & 0x7f7f7f7f);
+        return header() == (header_ver & 0x7f7f7f7f);
+    }
+
+    constexpr uint32_t currentVersion() {
+        return 0x00000000; // only use highest bit of each byte
     }
 
     constexpr uint32_t version() {
@@ -109,23 +128,36 @@ struct WLED_Header {
     }
 
     constexpr bool isCurrentVersion() {
-        return version() == 0x00000000;
+        return version() == currentVersion();
+    }
+
+    inline bool send(uint8_t len) {
+        return espnowBroadcast.send((const uint8_t*)this, len);
+    }
+
+    constexpr bool isValid(uint8_t len) {
+        return isHeaderValid() 
+            && id < static_cast<uint8_t>(ID::MAX_ID)
+            && state < static_cast<uint8_t>(State::MAX_STATE);
     }
 
 private:
-    constexpr uint32_t WLEDHeaderValue() {
+    constexpr uint32_t header() {
         return *((uint32_t*)"WLED");
+    }
+
+    constexpr uint32_t headerAndVersion() {
+        return header() | currentVersion();
     }
 
 };
 
 static_assert(sizeof(WLED_Header) == 2*sizeof(uint32_t), "WLED_Header is not 32bit aligned");
 
-struct WLED_RTC : WLED_Header {
-    WLED_RTC() : WLED_Header(WLED_Header::ID::RTC) {}
-    timeval  tv;
+struct WLED_Info : WLED_Header {
+    WLED_Info() : WLED_Header(WLED_Header::ID::Info) {}
 };
-WLED_MESSAGE_COMPATIBILITY_ASSERT(WLED_RTC);
+WLED_MESSAGE_COMPATIBILITY_ASSERT(WLED_Info);
 
 struct WLED_Keyboard : WLED_Header {
     WLED_Keyboard() : WLED_Header(WLED_Header::ID::Keyboard) {}
@@ -133,6 +165,11 @@ struct WLED_Keyboard : WLED_Header {
 };
 WLED_MESSAGE_COMPATIBILITY_ASSERT(WLED_Keyboard);
 
+struct WLED_RTC : WLED_Header {
+    WLED_RTC() : WLED_Header(WLED_Header::ID::RTC) {}
+    timeval  tv;
+};
+WLED_MESSAGE_COMPATIBILITY_ASSERT(WLED_RTC);
 
 struct WLED_GPS : WLED_Header {
     WLED_GPS() : WLED_Header(WLED_Header::ID::GPS) {}
@@ -199,8 +236,9 @@ WLED_MESSAGE_COMPATIBILITY_ASSERT(WLED_Nearby);
 struct WLED_Message {
     union U {
         WLED_Header header;
-        WLED_RTC rtc;
+        WLED_Info info;
         WLED_Keyboard keyboard;
+        WLED_RTC rtc;
         WLED_GPS gps;
         WLED_WellknownPeer peer;
         WLED_LogMessage log;
