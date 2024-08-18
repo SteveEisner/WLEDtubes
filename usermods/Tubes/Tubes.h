@@ -23,7 +23,7 @@
 
 class TubesUsermod : public Usermod {
   private:
-    PatternController controller = PatternController(MAX_REAL_LEDS);
+    PatternController controller = PatternController();
     DebugController debug = DebugController(controller);
     Master master = Master(controller);
     bool isLegacy = false;
