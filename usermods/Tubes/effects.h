@@ -60,11 +60,11 @@ class Effects {
     chance = params.chance;
   }
 
-  void update(VirtualStrip *strip, BeatFrame_24_8 beat_frame, BeatPulse beat_pulse) {
+  void update(VirtualStrip& strip, BeatFrame_24_8 beat_frame, BeatPulse beat_pulse) {
     if (!beat || beat_pulse & beat) {
 
       if (random8() <= chance) {
-        CRGB color = strip->palette_color(random8());
+        CRGB color = strip.palette_color(random8());
   
         switch (effect) {
           case None:

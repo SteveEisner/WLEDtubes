@@ -64,6 +64,12 @@ class DebugController {
       if (controller.sound.active) {
         Serial.print("SOUND ");
       }
+      if (controller.node.isLeading()) {
+        Serial.print("LEADING ");
+      }
+      if (controller.node.isFollowing()) {
+        Serial.print("FOLLLOWING ");
+      }
       Serial.printf("role=%d power_save=%d\n",
         controller.role,
         controller.power_save
@@ -93,13 +99,19 @@ class DebugController {
       }
       Serial.println();
 
-      Serial.printf("=== firmware: v%d from SSID %s %u.%u.%u.%u OTA=%d\n\n",
+      Serial.printf("=== firmware: v%d "
+#ifdef TUBES_AUTOUPDATER
+        "from SSID %s %u.%u.%u.%u "
+#endif
+        "OTA=%d\n\n",
         controller.updater.current_version.version,
+#ifdef TUBES_AUTOUPDATER
         controller.updater.current_version.ssid,
         controller.updater.current_version.host[0],
         controller.updater.current_version.ssid[1],
         controller.updater.current_version.ssid[2],
         controller.updater.current_version.ssid[3],
+#endif
         controller.updater.status
       );
 

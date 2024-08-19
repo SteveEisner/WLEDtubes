@@ -862,24 +862,26 @@ class PatternController : public MessageReceiver {
 
     wled_fader = 0;
 
-    VirtualStrip *first_strip = NULL;
+    uint8_t first_strip = 0xff;
     for (uint8_t i=0; i < NUM_VSTRIPS; i++) {
-      VirtualStrip *vstrip = vstrips+i;
-      if (vstrip->fade == Dead)
+      VirtualStrip& vstrip = vstrips[i];
+      if (vstrip.fade == Dead)
         continue;
 
       // Remember the first strip
-      if (first_strip == NULL)
-        first_strip = vstrip;
+      if (0xff == first_strip)
+        first_strip = i;
 
       // Remember the strip that's actually WLED
-      if (vstrip->isWled())
-        wled_fader = vstrip->fader;
+      if (vstrip.isWled())
+        wled_fader = vstrip.fader;
      
-      vstrip->update(beat_frame, beat_pulse);
+      vstrip.update(beat_frame, beat_pulse);
     }
 
-    effects.update(first_strip, beat_frame, (BeatPulse)beat_pulse);
+    if (0xff != first_strip) {
+      effects.update(vstrips[first_strip], beat_frame, (BeatPulse)beat_pulse);
+    }
   }
 
   CRGB getBlendedPixelColor(int32_t pos) const {
@@ -888,21 +890,21 @@ class PatternController : public MessageReceiver {
 
     bool first_strip = true;
     for (uint8_t i=0; i < NUM_VSTRIPS; i++) {
-      const VirtualStrip *vstrip = vstrips+i;
+      const VirtualStrip& vstrip = vstrips[i];
 
       // Don't bother blending a fully faded strip, or the WLED strip itself
-      if (vstrip->fade == Dead || vstrip->isWled())
+      if (vstrip.fade == Dead || vstrip.isWled())
         continue;
 
-      auto br = vstrip->brightness;
-      // TODO: code intended to use scale8(options.brightness, vstrip->brightness);
+      auto br = vstrip.brightness;
+      // TODO: code intended to use scale8(options.brightness, vstrip.brightness);
       // but that was never implemented - should review later to see if we want
       // options.brightness to be a factor in the brightness of the strip
 
       // Fetch the color from the strip and dim it according to the brightness
-      CRGB c = vstrip->getPixelColor(pos);
+      CRGB c = vstrip.getPixelColor(pos);
       nscale8x3(c.r, c.g, c.b, br);
-      nscale8x3(c.r, c.g, c.b, vstrip->fader>>8);
+      nscale8x3(c.r, c.g, c.b, vstrip.fader>>8);
 
       if (first_strip) {
         color = c;
