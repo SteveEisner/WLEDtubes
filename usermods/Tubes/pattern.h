@@ -2,7 +2,6 @@
 
 #include "virtual_strip.h"
 #include "FX.h"
-#include "algorithm"
 
 void rainbow(VirtualStrip& strip)
 {
