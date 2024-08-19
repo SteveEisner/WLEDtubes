@@ -587,7 +587,7 @@ class PatternController : public MessageReceiver {
     background_changed();
   }
 
-  bool isShowingWled() {
+  bool isShowingWled() const {
     return current_state.pattern_id >= numInternalPatterns;
   }
 
@@ -751,7 +751,7 @@ class PatternController : public MessageReceiver {
     set_wled_palette(background.palette_id);
   }
 
-  bool isUnderWledControl() {
+  bool isUnderWledControl() const {
     return paletteOverride || patternOverride;
   }
 
@@ -886,7 +886,7 @@ class PatternController : public MessageReceiver {
     effects.update(first_strip, beat_frame, (BeatPulse)beat_pulse);
   }
 
-  CRGB getBlendedPixelColor(int32_t pos) {
+  CRGB getBlendedPixelColor(int32_t pos) const {
     // Calculate the color of the pixel at position i by blending the colors of the virtual strips
     CRGB color = CRGB::Black;
 
@@ -942,7 +942,7 @@ class PatternController : public MessageReceiver {
     }
   }
 
-  accum88 parse_number(char *s) {
+  accum88 parse_number(char *s) const {
     uint16_t n=0, d=0;
     
     while (*s == ' ')
