@@ -44,27 +44,22 @@ class VirtualStrip {
   const static uint16_t DEF_BRIGHT = 255;
 
   public:
-    CRGB leds[MAX_VIRTUAL_LEDS];
-    uint8_t brightness;
+    CRGB leds[MAX_VIRTUAL_LEDS] { 0 };
+    uint8_t brightness { DEF_BRIGHT };
 
     // Fade in/out
-    VirtualStripFade fade;
-    uint16_t fader;
-    uint8_t fade_speed;
+    VirtualStripFade fade {VirtualStripFade::Dead};
+    uint16_t fader {0};
+    uint8_t fade_speed { DEFAULT_FADE_SPEED };
 
     // Pattern parameters
     Background background;
-    uint32_t frame;
-    uint8_t beat;
-    uint16_t beat16;  // 8 bits of beat and 8 bits of fractional
-    uint8_t hue;
-    bool beat_pulse;
-    int bps = 0;
-
-  VirtualStrip()
-  {
-    fade = Dead;
-  }
+    uint32_t frame {0};
+    uint8_t beat {0};
+    uint16_t beat16 {0};  // 8 bits of beat and 8 bits of fractional
+    uint8_t hue {0};
+    bool beat_pulse {0};
+    int bps {0};
 
   int32_t length() const {
     // Try to be the same as the main segment, but not if it's too big
@@ -161,7 +156,7 @@ class VirtualStrip {
         if (fader < fade_speed) {
           fader = 0;
           fade = Dead;
-          return;
+          fill(CRGB::Black);
         } else {
           fader -= fade_speed;
         }

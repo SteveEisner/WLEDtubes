@@ -107,7 +107,7 @@ class PatternController : public MessageReceiver {
     const static int FRAMES_PER_SECOND = 60;  // how often we animate, in frames per second
     const static int REFRESH_PERIOD = 1000 / FRAMES_PER_SECOND;  // how often we animate, in milliseconds
 
-    VirtualStrip *vstrips[NUM_VSTRIPS];
+    VirtualStrip vstrips[NUM_VSTRIPS] {};
     uint8_t next_vstrip = 0;
     bool canOverride = false;
     uint8_t paletteOverride = 0;
@@ -149,10 +149,6 @@ class PatternController : public MessageReceiver {
 #ifdef USELCD
     lcd = new Lcd();
 #endif
-
-    for (auto i=0; i < NUM_VSTRIPS; i++) {
-      vstrips[i] = new VirtualStrip();
-    }
   }
 
   bool isMasterRole() const {
@@ -741,9 +737,9 @@ class PatternController : public MessageReceiver {
     // it to do nothing since WLED merging happens in handleOverlayDraw.
     // Reuse virtual strips to prevent heap fragmentation
     for (uint8_t i = 0; i < NUM_VSTRIPS; i++) {
-      vstrips[i]->fadeOut();
+      vstrips[i].fadeOut();
     }
-    vstrips[next_vstrip]->load(background);
+    vstrips[next_vstrip].load(background);
     next_vstrip = (next_vstrip + 1) % NUM_VSTRIPS; 
 
     uint8_t param = modeParameter(background.wled_fx_id);
@@ -868,7 +864,7 @@ class PatternController : public MessageReceiver {
 
     VirtualStrip *first_strip = NULL;
     for (uint8_t i=0; i < NUM_VSTRIPS; i++) {
-      VirtualStrip *vstrip = vstrips[i];
+      VirtualStrip *vstrip = vstrips+i;
       if (vstrip->fade == Dead)
         continue;
 
@@ -892,7 +888,7 @@ class PatternController : public MessageReceiver {
 
     bool first_strip = true;
     for (uint8_t i=0; i < NUM_VSTRIPS; i++) {
-      VirtualStrip *vstrip = vstrips[i];
+      const VirtualStrip *vstrip = vstrips+i;
 
       // Don't bother blending a fully faded strip, or the WLED strip itself
       if (vstrip->fade == Dead || vstrip->isWled())

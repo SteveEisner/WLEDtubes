@@ -2,6 +2,7 @@
 
 #include "virtual_strip.h"
 #include "FX.h"
+#include "algorithm"
 
 void rainbow(VirtualStrip *strip) 
 {
@@ -65,8 +66,8 @@ void biwave(VirtualStrip *strip)
   uint16_t r = strip->frame * 32;
   r = cos16( r + random_offset ) + 32768;
 
-  uint8_t p1 = scaled16to8(l, 0, strip->length()-1);
-  uint8_t p2 = scaled16to8(r, 0, strip->length()-1);
+  uint8_t p1 = std::min(scaled16to8(l, 0, strip->length()), (uint8_t)(strip->length()-1));
+  uint8_t p2 = std::min(scaled16to8(r, 0, strip->length()), (uint8_t)(strip->length()-1));
   
   if (p2 < p1) {
     uint16_t t = p1;
@@ -90,7 +91,7 @@ void sinelon(VirtualStrip *strip)
   // a colored dot sweeping back and forth, with fading trails
   strip->darken(30);
 
-  int pos = scale16(sin16( strip->frame << 5 ) + 32768, strip->length()-1);   // beatsin16 re-implemented
+  int pos = std::min(scale16(sin16( strip->frame << 5 ) + 32768, strip->length()), (uint16_t)(strip->length()-1));   // beatsin16 re-implemented
   strip->leds[pos] += strip->hue_color();
 }
 
@@ -123,7 +124,7 @@ void juggle(VirtualStrip *strip)
   for( int i = 0; i < 8; i++) {
     CRGB c = strip->palette_color(dothue + strip->hue);
     // c = CHSV(dothue, 200, 255);
-    strip->leds[beatsin16( i+7, 0, strip->length()-1 )] |= c;
+    strip->leds[std::min(beatsin16( i+7, 0, strip->length() ), (uint16_t)(strip->length()-1))] |= c;
     dothue += 32;
   }
 }
