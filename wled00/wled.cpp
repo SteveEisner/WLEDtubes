@@ -3,6 +3,7 @@
 #include "wled_ethernet.h"
 #include <Arduino.h>
 #include "espnow_broadcast.h"
+#include <algorithm>
 
 #if defined(ARDUINO_ARCH_ESP32) && defined(WLED_DISABLE_BROWNOUT_DET)
 #include "soc/soc.h"
@@ -39,6 +40,10 @@ void WLED::reset()
   apActive = false;
   ESP.restart();
 }
+
+#ifdef LED_MASK_OFFSET
+  uint32_t savedStrip[MAX_SAVED_LEDS] {0};
+#endif
 
 void WLED::loop()
 {
@@ -121,12 +126,21 @@ void WLED::loop()
     handlePresets();
     yield();
 
-    if (!offMode || strip.isOffRefreshRequired())
+    if (!offMode || strip.isOffRefreshRequired()) {
       strip.service();
+    #ifdef LED_MASK_OFFSET
+      // restore existing strip
+      uint16_t savedLen = std::min(strip.getLengthTotal(), static_cast<uint16_t>(MAX_SAVED_LEDS));
+      for (auto i = 0; i < savedLen; i++) {
+        strip.setPixelColor(i, savedStrip[i]);
+      }
+    #endif
+
     #ifdef ESP8266
     else if (!noWifiSleep)
       delay(1); //required to make sure ESP enters modem sleep (see #1184)
     #endif
+    }
   }
   #ifdef WLED_DEBUG
   stripMillis = millis() - stripMillis;
