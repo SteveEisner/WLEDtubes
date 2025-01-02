@@ -2,7 +2,7 @@
 #ifndef WLED_DISABLE_ESPNOW_NEW
 #include <Arduino.h>
 #include <atomic>
-
+#include <wled.h>
 #if defined ESP32
 #include <WiFi.h>
 #include <esp_wifi.h>
@@ -34,13 +34,14 @@ ESP_EVENT_DEFINE_BASE(SYSTEM_EVENT);
 
 //#define ESPNOW_DEBUGGING
 //#define ESPNOW_CALLBACK_DEBUGGING // Serial is called from multiple threads
+//#define ESPNOW_EVENT_DEBUGGING
 //#define ESPNOW_DEBUG_COUNTERS
 
 #define BROADCAST_ADDR_ARRAY_INITIALIZER {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
 #define WLED_ESPNOW_WIFI_CHANNEL 1
 
 #ifndef WLED_WIFI_POWER_SETTING
-#define WLED_WIFI_POWER_SETTING WIFI_POWER_15dBm
+#define WLED_WIFI_POWER_SETTING WIFI_POWER_18_5dBm
 #endif
 
 typedef struct {
@@ -143,6 +144,14 @@ bool ESPNOWBroadcast::setup() {
         Serial.printf("esp_event_loop_create_default() err %d\n", err);
         return false;
     }
+
+  #ifdef ESPNOW_EVENT_DEBUGGING
+    err = esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, ESPNOWBroadcastImpl::onWiFiEvent, nullptr, nullptr);
+    if ( ESP_OK != err ) {
+        Serial.printf("esp_event_handler_instance_register(ESP_EVENT_ANY_ID) err %d\n", err);
+        return false;
+    }
+  #else
     err = esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_START, ESPNOWBroadcastImpl::onWiFiEvent, nullptr, nullptr);
     if ( ESP_OK != err ) {
         Serial.printf("esp_event_handler_instance_register(WIFI_EVENT_STA_START) err %d\n", err);
@@ -158,7 +167,8 @@ bool ESPNOWBroadcast::setup() {
         Serial.printf("esp_event_handler_instance_register(WIFI_EVENT_AP_START) err %d\n", err);
         return false;
     }
-#endif
+  #endif  // ESPNOW_EVENT_DEBUGGING
+#endif // ESP_IDF_VERSION
 
     setup = espnowBroadcastImpl.setupWiFi();
 #endif //ESP32
@@ -183,6 +193,7 @@ bool ESPNOWBroadcastImpl::setupWiFi() {
         return false;
     }
 
+    yield();
     return true;
 }
 #endif //ESP32
@@ -295,11 +306,13 @@ void ESPNOWBroadcastImpl::start() {
         auto status = WiFi.status();
         if ( status >= WL_DISCONNECTED ) {
             if (esp_wifi_start() == ESP_OK) {
+                yield();
                 if (!WiFi.setTxPower(WLED_WIFI_POWER_SETTING)) {
                     auto power = WiFi.getTxPower();
                     Serial.printf("setTxPower(%d) failed. getTX: %d\n", WLED_WIFI_POWER_SETTING, power);
                 }
                 if (esp_now_init() == ESP_OK) {
+                    yield();
                     if (esp_now_register_recv_cb(ESPNOWBroadcastImpl::onESPNowRxCallback) == ESP_OK) {
                         static esp_now_peer_info_t peer = {
                             BROADCAST_ADDR_ARRAY_INITIALIZER,
@@ -368,10 +381,10 @@ void ESPNOWBroadcastImpl::onWiFiEvent(void* arg, esp_event_base_t event_base, in
     if ( event_base == WIFI_EVENT ) {
 
 #ifdef ESPNOW_DEBUGGING
-    #if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(4, 0, 0)
-            Serial.printf("WiFiEvent( %d )\n", event_id );
+    #if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(4, 4, 4)
+        Serial.printf("WiFiEvent( %d )\n", event_id );
     #else
-            Serial.printf("WiFiEvent( %s )\n", WiFi.eventName((arduino_event_id_t)event_id) );
+        Serial.printf("WiFiEvent %d ( %s )\n", event_id, WiFi.eventName((arduino_event_id_t)event_id) );
     #endif
 #endif
         switch (event_id) {
@@ -382,6 +395,8 @@ void ESPNOWBroadcastImpl::onWiFiEvent(void* arg, esp_event_base_t event_base, in
             }
 
             case WIFI_EVENT_STA_STOP:
+                lastReconnectAttempt = 0;
+                // fall thru
             case WIFI_EVENT_AP_START: {
                 ESPNOWBroadcast::STATE started {ESPNOWBroadcast::STARTED};
                 ESPNOWBroadcast::STATE starting {ESPNOWBroadcast::STARTING};
@@ -434,6 +449,9 @@ void ESPNOWBroadcastImpl::onESPNowRxCallback(const uint8_t *mac, const uint8_t *
 
     if (espnowBroadcastImpl._rxFilter) {
         if (!espnowBroadcastImpl._rxFilter(mac, data, len, rssi)) {
+#ifdef ESPNOW_CALLBACK_DEBUGGING
+            Serial.printf("Filtering message of len %d\n", len);
+#endif
             return;
         }
     }
