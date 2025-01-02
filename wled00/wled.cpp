@@ -30,6 +30,13 @@ void WLED::reset()
   }
   applyBri();
   DEBUG_PRINTLN(F("WLED RESET"));
+
+  WiFi.softAPdisconnect(true);
+  WiFi.disconnect(true);
+  yield();
+
+  lastReconnectAttempt = 0;
+  apActive = false;
   ESP.restart();
 }
 
@@ -58,7 +65,9 @@ void WLED::loop()
   #ifndef WLED_DISABLE_ESPNOW
   handleRemote();
   #endif
+  #ifndef WLED_DISABLE_SERIAL
   handleSerial();
+  #endif
   handleImprovWifiScan();
   handleNotifications();
   handleTransitions();
@@ -540,8 +549,9 @@ void WLED::beginStrip()
 
 void WLED::initAP(bool resetAP)
 {
-  if (apBehavior == AP_BEHAVIOR_BUTTON_ONLY && !resetAP)
+  if (apBehavior == AP_BEHAVIOR_BUTTON_ONLY && !resetAP) {
     return;
+  }
 
   if (resetAP) {
     WLED_SET_AP_SSID();
@@ -557,8 +567,11 @@ void WLED::initAP(bool resetAP)
 
   if (!apActive) // start captive portal if AP active
   {
+
     DEBUG_PRINTLN(F("Init AP interfaces"));
     server.begin();
+    yield();
+
     if (udpPort > 0 && udpPort != ntpLocalPort) {
       udpConnected = notifierUdp.begin(udpPort);
     }
@@ -568,8 +581,12 @@ void WLED::initAP(bool resetAP)
     if (udpPort2 > 0 && udpPort2 != ntpLocalPort && udpPort2 != udpPort && udpPort2 != udpRgbPort) {
       udp2Connected = notifier2Udp.begin(udpPort2);
     }
+    yield();
+
     e131.begin(false, e131Port, e131Universe, E131_MAX_UNIVERSE_COUNT);
     ddp.begin(false, DDP_DEFAULT_PORT);
+
+    yield();
 
     dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
     dnsServer.start(53, "*", WiFi.softAPIP());
