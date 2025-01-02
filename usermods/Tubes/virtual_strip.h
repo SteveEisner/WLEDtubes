@@ -12,7 +12,7 @@
 #define DEFAULT_WLED_FX FX_MODE_RAINBOW_CYCLE
 
 class VirtualStrip;
-typedef void (*BackgroundFn)(VirtualStrip *strip);
+typedef void (*BackgroundFn)(VirtualStrip& strip);
 
 class Background {
   public:
@@ -43,31 +43,31 @@ class VirtualStrip {
   // Let WLED do the dimming
   const static uint16_t DEF_BRIGHT = 255;
 
-  public:
-    CRGB leds[MAX_VIRTUAL_LEDS];
+  protected:
     uint16_t num_leds = 1; // only temporary until the first loop
-    uint8_t brightness;
+
+  public:
+    CRGB leds[MAX_VIRTUAL_LEDS] { 0 };
+    uint8_t brightness { DEF_BRIGHT };
 
     // Fade in/out
-    VirtualStripFade fade;
-    uint16_t fader;
-    uint8_t fade_speed;
+    VirtualStripFade fade {VirtualStripFade::Dead};
+    uint16_t fader {0};
+    uint8_t fade_speed { DEFAULT_FADE_SPEED };
 
     // Pattern parameters
     Background background;
-    uint32_t frame;
-    uint8_t beat;
-    uint16_t beat16;  // 8 bits of beat and 8 bits of fractional
-    uint8_t hue;
-    bool beat_pulse;
-    int bps = 0;
+    uint32_t frame {0};
+    uint8_t beat {0};
+    uint16_t beat16 {0};  // 8 bits of beat and 8 bits of fractional
+    uint8_t hue {0};
+    bool beat_pulse {0};
+    int bps {0};
 
-  VirtualStrip()
-  {
-    fade = Dead;
-  }
-
+  public:
   
+  inline uint16_t length() const { return num_leds; }
+
   void load(Background &b, uint8_t fs=DEFAULT_FADE_SPEED)
   {
     background = b;
@@ -77,7 +77,7 @@ class VirtualStrip {
     brightness = DEF_BRIGHT;
   }
 
-  bool isWled() const {
+  inline bool isWled() const {
     return background.wled_fx_id != 0;
   }
 
@@ -89,14 +89,14 @@ class VirtualStrip {
     fade_speed = fs;
   }
 
-  void darken(uint8_t amount=10)
+  inline void darken(uint8_t amount=10)
   {
-    fadeToBlackBy( leds, num_leds, amount);
+    fadeToBlackBy( leds, length(), amount);
   }
 
-  void fill(CRGB crgb) 
+  inline void fill(CRGB crgb)
   {
-    fill_solid( leds, num_leds, crgb);
+    fill_solid( leds, length(), crgb);
   }
 
   void update(BeatFrame_24_8 fr, uint8_t bp)
@@ -142,7 +142,7 @@ class VirtualStrip {
     beat_pulse = bp;
 
     // Animate this virtual strip
-    background.animate(this);
+    background.animate(*this);
 
     switch (fade) {
       case Steady:
@@ -162,7 +162,7 @@ class VirtualStrip {
         if (fader < fade_speed) {
           fader = 0;
           fade = Dead;
-          return;
+          fill(CRGB::Black);
         } else {
           fader -= fade_speed;
         }
@@ -176,22 +176,22 @@ class VirtualStrip {
     return CRGB(color);
   }
 
-  CRGB hue_color(uint8_t offset=0, uint8_t saturation=255, uint8_t value=192) const {
+  inline CRGB hue_color(uint8_t offset=0, uint8_t saturation=255, uint8_t value=192) const {
     return CHSV(hue + offset, saturation, value);
   }
  
-  uint8_t bpm_sin16( uint16_t lowest=0, uint16_t highest=65535 ) const
+  inline uint8_t bpm_sin16( uint16_t lowest=0, uint16_t highest=65535 ) const
   {
     return scaled16to8(sin16( frame << 7 ) + 32768, lowest, highest);
   }
 
-  uint8_t bpm_cos16( uint16_t lowest=0, uint16_t highest=65535 ) const
+  inline uint8_t bpm_cos16( uint16_t lowest=0, uint16_t highest=65535 ) const
   {
     return scaled16to8(cos16( frame << 7 ) + 32768, lowest, highest);
   }
 
-  CRGB getPixelColor(int32_t pos) const {
-    return leds[pos % num_leds];
+  inline CRGB getPixelColor(int32_t pos) const {
+    return leds[pos % length()];
   }
 
 };
