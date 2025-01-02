@@ -20,6 +20,8 @@
 #define MASTER_PIN 25
 #define LEGACY_PIN 32  // DigUno Q4
 
+extern uint32_t savedStrip[];
+
 
 class TubesUsermod : public Usermod {
   private:
@@ -89,6 +91,27 @@ class TubesUsermod : public Usermod {
       if (controller.isMasterRole()) {
         master.handleOverlayDraw();
       }
+
+    #ifdef LED_MASK_OFFSET
+      uint16_t len = strip.getLengthTotal();
+      uint16_t savedLen = std::min(len, static_cast<uint16_t>(MAX_SAVED_LEDS));
+      static_assert( LED_MASK_OFFSET < 0xffff, "LED_MASK_OFFSET set to large");
+      uint16_t maskLength = std::min(len, static_cast<uint16_t>(LED_MASK_OFFSET));
+      // save existing strip
+      for (auto i = 0; i < savedLen; i++) {
+        savedStrip[i] = strip.getPixelColor(i);
+      }
+      // shift all colors to beginning of strip by mask length
+      uint16_t p = 0;
+      for (auto i = maskLength; i < len; i++) {
+        strip.setPixelColor(p++, strip.getPixelColor(i));
+      }
+      // black out the remaining
+      for ( ; p < len; p++) {
+          strip.setPixelColor(p, CRGB::Black);
+      }
+    #endif
+
 
       // When AP mode is on, make sure it's obvious
       // Blink when there's a connected client
