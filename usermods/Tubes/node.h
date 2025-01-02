@@ -8,42 +8,12 @@
 // #define RELAY_DEBUGGING
 #define TESTING_NODE_ID 0
 
-#define CURRENT_NODE_VERSION 2
-
-#pragma pack(push,4) // set packing for consist transport across network
-// ideally this would have been pack 1, so we're actually wasting a
-// number of bytes across the network, but we've already shipped...
-
-typedef enum{
-    RECIPIENTS_ALL=0,  // Send to all neighbors; non-followers will ignore
-    RECIPIENTS_ROOT=1, // Send to root for rebroadcasting downward, all will see
-    RECIPIENTS_INFO=2, // Send to all neighbors "FYI"; none will ignore
-} MessageRecipients;
-
-typedef uint16_t MeshId;
-
-typedef struct {
-    MeshId id = 0;
-    MeshId uplinkId = 0;
-    uint8_t version = CURRENT_NODE_VERSION;
-} MeshNodeHeader;
-
-#define MESSAGE_DATA_SIZE 64
-typedef struct {
-    MeshNodeHeader header;
-    MessageRecipients recipients;
-    uint32_t timebase;
-    CommandId command;
-    byte data[MESSAGE_DATA_SIZE] = {0};
-} NodeMessage;
-
-#pragma pack(pop)
+#include "protocol.h"
 
 typedef struct {
     uint8_t status;
     char message[40];
 } NodeInfo;
-
 
 const char *command_name(CommandId command) {
     switch (command) {
@@ -334,6 +304,9 @@ class LightNode {
         espnowBroadcast.registerFilter(onEspNowFilter);
         espnowBroadcast.registerCallback(onEspNowMessage);
 
+        espnowBroadcast.registerFilter(onEspNowFilter);
+
+
         Serial.println("setup: ok");
     }
 
@@ -428,20 +401,6 @@ protected:
         prev = state;
     }
 
-    typedef struct wizmote_message {
-        uint8_t program;      // 0x91 for ON button, 0x81 for all others
-        uint8_t seq[4];       // Incremetal sequence number 32 bit unsigned integer LSB first
-        uint8_t byte5 = 32;   // Unknown
-        uint8_t button;       // Identifies which button is being pressed
-        uint8_t byte8 = 1;    // Unknown, but always 0x01
-        uint8_t byte9 = 100;  // Unnkown, but always 0x64
-
-        uint8_t byte10;  // Unknown, maybe checksum
-        uint8_t byte11;  // Unknown, maybe checksum
-        uint8_t byte12;  // Unknown, maybe checksum
-        uint8_t byte13;  // Unknown, maybe checksum
-    } wizmote_message;
-
     void onWizmote(const uint8_t* address, const wizmote_message* data, uint8_t len) {
         static uint32_t last_seq = 0;
         uint32_t cur_seq = data->seq[0] | (data->seq[1] << 8) | (data->seq[2] << 16) | (data->seq[3] << 24);
@@ -457,12 +416,48 @@ protected:
         if (msg) {
             if(len == sizeof(NodeMessage)) {
                 instance->onPeerData(address, (const NodeMessage*)msg, len, rssi, true);
-            } else if(len == sizeof(wizmote_message)) {
+            } else if (len == sizeof(wizmote_message)) {
                 instance->onWizmote(address, (const wizmote_message*)msg, len);
             } else {
-#ifdef NODE_DEBUGGING
-                Serial.printf("wrong size EspNowMessage received %d\n", len);
-#endif
+                auto wled = (const WLED_Message*)msg;
+                switch(static_cast<WLED_Header::ID>(wled->u.header.id)) {
+                    case WLED_Header::ID::Keyboard: 
+                        {
+                            Action action = { 'K', 0};
+                            instance->receiver->onCommand(
+                                COMMAND_KEYBOARD,
+                                (void*)(wled->u.keyboard.keys)
+                            );
+                        }
+                        break;
+                    case WLED_Header::ID::Effect: 
+                        {
+                            Action action = { 'G', 0};
+                            instance->receiver->onCommand(
+                                COMMAND_ACTION,
+                                &action
+                            );
+                        }
+                        break;
+                    case WLED_Header::ID::Nearby:
+                        {
+                            Serial.println("processing Nearby");
+                            Action action = { 'G', 0};
+                            instance->receiver->onCommand(
+                                COMMAND_ACTION,
+                                &action
+                            );
+                        }
+                        break;
+                    // case WLED_Header::ID::BPM:
+                    //     instance->receiver->onCommand(
+                    //         COMMAND_BEATS,
+                    //         (void*)&(wled->u.bpm.bpm)
+                    //     );
+                    //     break;
+                    default:
+                        break;
+                }
             }
         }
     }
@@ -473,6 +468,40 @@ protected:
         } else if (len == sizeof(wizmote_message)) {
             auto wizmote = (const wizmote_message*)msg;
             return !( wizmote->byte8 != 1 || wizmote->byte9 != 100 || wizmote->byte5 != 32);
+        } else {
+            auto wled = (const WLED_Message*)msg;
+            if  (!wled->u.header.isHeaderValid()) {
+                return false;
+            }
+
+            if (!wled->u.header.isCurrentVersion()){
+                return false;
+            }
+
+            if (wled->u.header.id >= static_cast<uint16_t>(WLED_Header::ID::MAX_ID)) {
+                return false;
+            }
+
+            switch(static_cast<WLED_Header::ID>(wled->u.header.id)) {
+                case WLED_Header::ID::RTC: 
+                    {
+                        static auto rtc = false;
+                        if (!rtc) {
+                            settimeofday(&(wled->u.rtc.tv), nullptr);
+                            rtc = true;
+                        } else {
+                            adjtime(&(wled->u.rtc.tv), nullptr);
+                        }
+                        return false;
+                    }
+                    break;
+                case WLED_Header::ID::Nearby:
+                    Serial.printf("Filter Nearby %d\n", rssi);
+                    return rssi > -40;
+                    break;
+                default:
+                    return true;
+            }
         }
         return false;
     }

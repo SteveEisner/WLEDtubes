@@ -81,7 +81,7 @@ class ESPNOWBroadcastImpl : public ESPNOWBroadcast {
     std::atomic<uint32_t> _loop {0};
     std::atomic<uint32_t> _exit {0};
 #endif
-
+  
     class QueuedNetworkRingBuffer {
       protected:
         //QueuedNetworkMessage messages[WLED_ESPNOW_MAX_QUEUED_MESSAGES];

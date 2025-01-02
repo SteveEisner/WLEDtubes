@@ -63,11 +63,6 @@ typedef struct BootOptions {
 #define BOOT_OPTION_POWER_SAVE_OFF 1
 #define BOOT_OPTION_POWER_SAVE_ON 2
 
-typedef struct {
-  char key;
-  uint8_t arg;
-} Action;
-
 #define NUM_VSTRIPS 3
 
 #define DEBOUNCE_TIME 40
@@ -136,7 +131,7 @@ class PatternController : public MessageReceiver {
     LightNode node;
 
     ControllerOptions options;
-    char key_buffer[20] = {0};
+    char key_buffer[sizeof(WLED_Keyboard::keys)] = {0};
 
     Energy energy=Chill;
     TubeState current_state;
@@ -942,7 +937,7 @@ class PatternController : public MessageReceiver {
     }
   }
 
-  accum88 parse_number(char *s) const {
+  accum88 parse_number(const char *s) const {
     uint16_t n=0, d=0;
     
     while (*s == ' ')
@@ -968,7 +963,7 @@ class PatternController : public MessageReceiver {
     return n+d;
   }
 
-  void keyboard_command(char *command) {
+  void keyboard_command(const char *command) {
     // If not the lead, send it to the lead.
     uint8_t b;
     accum88 arg = parse_number(command+1);
@@ -1236,6 +1231,10 @@ class PatternController : public MessageReceiver {
         if (isMasterRole())
           return false;
         set_tapped_bpm(*(accum88*)data, 0);
+        return true;
+
+      case COMMAND_KEYBOARD:
+        keyboard_command((const char*)data);
         return true;
     }
   
