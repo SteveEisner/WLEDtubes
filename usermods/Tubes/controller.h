@@ -115,6 +115,7 @@ class PatternController : public MessageReceiver {
     uint16_t wled_fader = 0;
     ControllerRole role;
     bool power_save = false;  // Default to power save mode OFF but 3 sec press turns it on
+    bool lamp_mode = false;   // Lamp mode: warm white ambient light instead of rave patterns
     uint8_t flashColor = 0;
 
     AutoUpdater updater = AutoUpdater();
@@ -423,6 +424,12 @@ class PatternController : public MessageReceiver {
   }
 
   void handleOverlayDraw() {
+    // Lamp mode: override everything with warm ambient light
+    if (lamp_mode) {
+      renderLampMode();
+      return;  // Skip all other effects in lamp mode
+    }
+
     // In manual mode WLED is always active
     if (patternOverride) {
       wled_fader = 0xFFFF;
@@ -853,6 +860,53 @@ class PatternController : public MessageReceiver {
     EEPROM.end();
   }
 
+  // Lamp mode: cozy warm white ambient light
+  void toggleLampMode() {
+    setLampMode(!lamp_mode);
+  }
+
+  void setLampMode(bool lm) {
+    lamp_mode = lm;
+    Serial.printf("lamp_mode: %d\n", lamp_mode);
+
+    if (lamp_mode) {
+      // Switch to lamp mode - gentle warm light
+      Serial.println("Entering lamp mode - warm ambient light");
+    } else {
+      // Back to rave mode - resume pattern cycling
+      Serial.println("Entering rave mode - pattern cycling");
+    }
+  }
+
+  bool isLampMode() const {
+    return lamp_mode;
+  }
+
+  // Render the warm lamp effect directly to the LED strip
+  void renderLampMode() {
+    // Warm white base color (approximates 2700K incandescent)
+    static const CRGB warmWhite = CRGB(255, 180, 107);
+
+    // Get the LED segment
+    Segment& seg = strip.getMainSegment();
+    uint16_t len = seg.virtualLength();
+
+    // Fill with base warm color
+    for (uint16_t i = 0; i < len; i++) {
+      // Use noise for organic flickering (like a candle)
+      uint8_t noise = inoise8(i * 50, millis() >> 4);
+
+      // Map noise to a small brightness range (210-255) for subtle effect
+      uint8_t brightness = map8(noise, 210, 255);
+
+      // Apply warm white with brightness variation
+      CRGB color = warmWhite;
+      color.nscale8(brightness);
+
+      seg.setPixelColor(i, color.r, color.g, color.b);
+    }
+  }
+
   void setRole(ControllerRole r) {
     role = r;
     Serial.printf("Role = %d", role);
@@ -1240,6 +1294,13 @@ class PatternController : public MessageReceiver {
         return true;
 
       case COMMAND_STATE: {
+        // In lamp mode, ignore state sync from rave mode devices
+        // This keeps the device independent while in ambient mode
+        if (lamp_mode) {
+          Serial.println("Lamp mode: ignoring state sync");
+          return true;
+        }
+
         auto update_data = (TubeStates*)data;
 
         TubeState state;
@@ -1247,7 +1308,7 @@ class PatternController : public MessageReceiver {
         memcpy(&next_state, &update_data->next, sizeof(TubeState));
         state.print();
         next_state.print();
-  
+
         // Catch up to this state
         load_pattern(state);
         load_palette(state);
