@@ -103,8 +103,8 @@ class TubesUsermod : public Usermod {
 
     bool handleButton(uint8_t b) {
       // Button 0 behaviors:
-      // - Short press (101): Toggle LED strip on/off (handled by WLED core, we just clean up)
-      // - Double press (102): Switch to next pattern (stay synced with mesh)
+      // - Short press (101): Toggle LED strip on/off
+      // - Double press (102): Toggle between lamp mode and rave mode
       // - Long press (100): Activate WLED WiFi AP mode
 
       if (b == 100) { // Long press button 0 (1-5 seconds)
@@ -124,11 +124,18 @@ class TubesUsermod : public Usermod {
       }
 
       if (b == 102) { // Double-click button 0
-        // Switch to next pattern while staying synced
+        // Toggle between lamp mode (warm ambient) and rave mode (pattern cycling)
         controller.acknowledge();
-        controller.set_next_pattern(0);
-        controller.force_next_pattern();
-        Serial.println("Button: Next pattern");
+        controller.toggleLampMode();
+
+        if (controller.isLampMode()) {
+          Serial.println("Button: Switched to LAMP mode (warm ambient)");
+        } else {
+          // When switching back to rave mode, pick a new pattern
+          controller.set_next_pattern(0);
+          controller.force_next_pattern();
+          Serial.println("Button: Switched to RAVE mode (pattern cycling)");
+        }
         return true;
       }
 

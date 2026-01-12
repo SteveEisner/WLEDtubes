@@ -42,9 +42,53 @@ void solidRed(VirtualStrip *strip)
   strip->fill(CRGB::Red);
 }
 
-void solidBlue(VirtualStrip *strip) 
+void solidBlue(VirtualStrip *strip)
 {
   strip->fill(CRGB::Blue);
+}
+
+// Warm lamp pattern - simulates a cozy home lamp with gentle shimmering
+// Uses warm white/amber colors (~2700K) with subtle flicker
+void warmLamp(VirtualStrip *strip)
+{
+  // Warm white base color (approximates 2700K incandescent)
+  // RGB values for warm white: R=255, G=180, B=107
+  static const CRGB warmWhite = CRGB(255, 180, 107);
+
+  // Fill with base warm color
+  strip->fill(warmWhite);
+
+  // Add gentle shimmer - each LED gets slight random variation
+  for (int i = 0; i < strip->num_leds; i++) {
+    // Use noise for organic flickering (like a candle)
+    uint8_t noise = inoise8(i * 50, strip->frame >> 2);
+
+    // Map noise to a small brightness range (200-255) for subtle effect
+    uint8_t brightness = map8(noise, 200, 255);
+
+    // Apply brightness variation
+    strip->leds[i].nscale8(brightness);
+  }
+
+  // Occasional very subtle "flicker" - slight dimming across all LEDs
+  uint8_t globalFlicker = inoise8(strip->frame >> 1);
+  if (globalFlicker < 30) {
+    // Rare slight dim (simulates power fluctuation in old bulb)
+    nscale8(strip->leds, strip->num_leds, 240);
+  }
+}
+
+// Warm lamp with slower, gentler movement - even more relaxed
+void warmLampGentle(VirtualStrip *strip)
+{
+  static const CRGB warmWhite = CRGB(255, 180, 107);
+  strip->fill(warmWhite);
+
+  // Very slow, gentle breathing effect
+  uint8_t breath = sin8(strip->frame >> 4);  // Slow sine wave
+  uint8_t brightness = map8(breath, 220, 255);  // Subtle range
+
+  nscale8(strip->leds, strip->num_leds, brightness);
 }
 
 void confetti(VirtualStrip *strip) 
