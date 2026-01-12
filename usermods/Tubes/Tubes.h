@@ -102,25 +102,33 @@ class TubesUsermod : public Usermod {
     }
 
     bool handleButton(uint8_t b) {
-      // Special code for handling the "power save" button
-      if (b == 100) { // Press button 0 for WLED_LONG_POWER_SAVE ms
-        controller.togglePowerSave();
-        return true;
-      }
-      if (b == 101) { // Short press button 0 (piggybacks with default)
-        controller.cancelOverrides();
-        return true;
-      }
-      if (b == 102) { // Double-click button 0
+      // Button 0 behaviors:
+      // - Short press (101): Toggle LED strip on/off (handled by WLED core, we just clean up)
+      // - Double press (102): Switch to next pattern (stay synced with mesh)
+      // - Long press (100): Activate WLED WiFi AP mode
+
+      if (b == 100) { // Long press button 0 (1-5 seconds)
+        // Activate WiFi AP mode for configuration
+        WLED::instance().initAP(true);
         controller.acknowledge();
-        if (controller.isSelecting()) {
-          if (controller.isSelected())
-            controller.deselect();
-          else
-            controller.select();
-        } else {
-          controller.request_new_bpm();
-        }
+        Serial.println("Button: Activating WiFi AP mode");
+        return true;
+      }
+
+      if (b == 101) { // Short press button 0
+        // Toggle on/off is handled by WLED core (toggleOnOff)
+        // Just cancel any manual overrides
+        controller.cancelOverrides();
+        Serial.println("Button: Toggle on/off");
+        return true;
+      }
+
+      if (b == 102) { // Double-click button 0
+        // Switch to next pattern while staying synced
+        controller.acknowledge();
+        controller.set_next_pattern(0);
+        controller.force_next_pattern();
+        Serial.println("Button: Next pattern");
         return true;
       }
 
