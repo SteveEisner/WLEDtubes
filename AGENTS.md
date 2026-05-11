@@ -220,6 +220,31 @@ If none of the above apply, the usermod may omit `getId()` (or return the defaul
     * between 20 and 300 times/second during high workload from effects and other usermods,
     * (worst case) down to 1-3 times/sec during FS activity or when serving lots of network API requests.
 
+## Tubes Fleet Compatibility
+
+The Tubes usermod runs on a large fleet of physical devices. Some devices are in our
+possession and can be flashed immediately, some are owned by friends and can be
+upgraded with effort, and some are lost track of and may never be upgraded. Those
+older devices can still re-encounter newer devices at future events.
+
+Backward compatibility is mandatory for Tubes changes, especially anything touching
+ESP-NOW, mesh behavior, command payloads, palette/effect IDs, timing sync, or role
+behavior. Devices running different firmware revisions must continue to communicate
+well enough to produce the same coordinated effects.
+
+Allowed improvement categories:
+- Internal infrastructure upgrades that preserve old behavior on the wire, such as
+  replacing custom implementation code with newer WLED APIs while keeping the same
+  protocol semantics and visible output.
+- Purely additive protocol upgrades. New messages, transports, fields, or
+  capabilities may be added, but updated devices must continue to broadcast and
+  understand the existing protocol until there is an explicit bridge/migration plan
+  for mixed flocks.
+
+Do not repurpose existing packet fields, command IDs, palette IDs, or behavioral
+meanings in a way that old firmware would interpret differently. Prefer versioned
+extension fields, parallel messages, feature detection, and fallback paths.
+
 ## CI/CD
 
 CI runs on every push/PR via GitHub Actions (`.github/workflows/wled-ci.yml`):
