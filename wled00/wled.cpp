@@ -2,6 +2,9 @@
 #include "wled.h"
 #include "wled_ethernet.h"
 #include "ota_update.h"
+#ifndef WLED_DISABLE_ESPNOW_NEW
+#include "espnow_broadcast.h"
+#endif
 #ifdef WLED_ENABLE_AOTA
   #define NO_OTA_PORT
   #include <ArduinoOTA.h>
@@ -575,6 +578,9 @@ void WLED::setup()
   DEBUG_PRINTLN(F("initServer"));
   initServer();
   DEBUG_PRINTF_P(PSTR("heap %u\n"), getFreeHeapSize());
+#ifndef WLED_DISABLE_ESPNOW_NEW
+  espnowBroadcast.setup();
+#endif
 
 #ifndef WLED_DISABLE_INFRARED
   // init IR
@@ -733,7 +739,7 @@ void WLED::initConnection()
 
   if (WLED_WIFI_CONFIGURED) {
     showWelcomePage = false;
-    
+
     DEBUG_PRINTF_P(PSTR("Connecting to %s...\n"), multiWiFi[selectedWiFi].clientSSID);
 
 #ifdef WLED_ENABLE_WPA_ENTERPRISE
@@ -882,6 +888,10 @@ void WLED::handleConnection()
   // or within first 2s if WiFi is not configured or AP is always active
   if ((wifiConfigured && multiWiFi.size() > 1 && WiFi.scanComplete() < 0) || (now < 2000 && (!wifiConfigured || apBehavior == AP_BEHAVIOR_ALWAYS)))
     return;
+
+#ifndef WLED_DISABLE_ESPNOW_NEW
+  espnowBroadcast.loop();
+#endif
 
   if (lastReconnectAttempt == 0 || forceReconnect) {
     DEBUG_PRINTF_P(PSTR("Initial connect or forced reconnect (@ %lus).\n"), nowS);

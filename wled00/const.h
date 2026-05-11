@@ -7,7 +7,11 @@
  */
 
 constexpr size_t FASTLED_PALETTE_COUNT = 7;   //  6-12 = sizeof(fastledPalettes) / sizeof(fastledPalettes[0]);
+#ifdef USERMOD_TUBES
+constexpr size_t GRADIENT_PALETTE_COUNT = 116; // 13-129 = sizeof(gGradientPalettes) / sizeof(gGradientPalettes[0]);
+#else
 constexpr size_t GRADIENT_PALETTE_COUNT = 59; // 13-72 = sizeof(gGradientPalettes) / sizeof(gGradientPalettes[0]);
+#endif
 constexpr size_t DYNAMIC_PALETTE_COUNT = 6;   //  0- 5 = dynamic palettes (0=default(virtual),1=random,2=primary,3=primary+secondary,4=primary+secondary+tertiary,5=primary+secondary(+tertiary if not black)
 constexpr size_t FIXED_PALETTE_COUNT = DYNAMIC_PALETTE_COUNT + FASTLED_PALETTE_COUNT + GRADIENT_PALETTE_COUNT; // total number of fixed palettes
 
@@ -225,6 +229,7 @@ static_assert(WLED_MAX_BUSSES <= 32, "WLED_MAX_BUSSES exceeds hard limit");
 #define USERMOD_ID_RF433                 56     //Usermod "usermod_v2_RF433.h"
 #define USERMOD_ID_BRIGHTNESS_FOLLOW_SUN 57     //Usermod "usermod_v2_brightness_follow_sun.h"
 #define USERMOD_ID_USER_FX               58     //Usermod "user_fx"
+#define USERMOD_ID_TUBES                 59     //Usermod "Tubes"
 
 //Wifi encryption type
 #ifdef WLED_ENABLE_WPA_ENTERPRISE

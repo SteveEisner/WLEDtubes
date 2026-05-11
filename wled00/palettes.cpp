@@ -804,6 +804,9 @@ const TProgmemRGBPalette16 *const fastledPalettes[] PROGMEM = {
 // This will let us programmatically choose one based on
 // a number, rather than having to activate each explicitly
 // by name every time.
+#ifdef USERMOD_TUBES
+#include "palettes_tubes.h"
+#else
 const uint8_t* const gGradientPalettes[] PROGMEM = {
   Sunset_Real_gp,               //13-00 Sunset
   es_rivendell_15_gp,           //14-01 Rivendell
@@ -865,3 +868,4 @@ const uint8_t* const gGradientPalettes[] PROGMEM = {
   candy2_gp,                    //70-57 Candy2
   trafficlight_gp               //71-58 Traffic Light
 };
+#endif
