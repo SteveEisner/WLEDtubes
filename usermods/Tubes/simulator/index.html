@@ -406,6 +406,8 @@
       border-top: 1px solid var(--line);
     }
 
+    [hidden] { display: none !important; }
+
     .section:first-of-type { margin-top: 0; }
 
     .section-title {
@@ -643,6 +645,7 @@
         <div class="tool-group-title">Devices</div>
         <div class="tool-group-content wrap">
           <button class="primary" id="addDevice">+ Add tube</button>
+          <button id="addAnchor">+ Add anchor</button>
           <button id="addEight">+ Add 8</button>
           <button class="icon-button" id="pauseToggle" aria-label="Pause simulation" title="Pause simulation">Ⅱ</button>
           <button id="resetSimulation">Reset</button>
@@ -728,7 +731,7 @@
       <div class="tool-group metrics" aria-label="Simulation statistics">
         <div class="tool-group-title">Network</div>
         <div class="tool-group-content">
-          <div class="metric"><strong id="deviceCount">1</strong><span>tubes</span></div>
+          <div class="metric"><strong id="deviceCount">1</strong><span>devices</span></div>
           <div class="metric"><strong id="rootCount">1</strong><span>leaders</span></div>
           <div class="metric"><strong id="relayCount">0</strong><span>relay tx</span></div>
           <div class="metric"><strong id="clusterCount">1</strong><span>DNA sets</span></div>
@@ -741,22 +744,22 @@
       <section class="space" id="space" aria-label="Simulation space">
         <canvas id="spaceCanvas" tabindex="0" aria-describedby="canvasHelp"></canvas>
         <div class="space-hint" id="canvasHelp">
-          <span><b>Drag</b> a tube to move it</span>
-          <span><b>Click</b> a tube to inspect it</span>
-          <span><b>Double-click</b> empty space to add one</span>
+          <span><b>Drag</b> a device to move it</span>
+          <span><b>Click</b> a device to inspect it</span>
+          <span><b>Double-click</b> empty space to add a tube</span>
         </div>
       </section>
 
       <aside class="inspector" aria-live="polite">
         <div class="inspector-head">
           <div>
-            <div class="eyebrow">Selected tube</div>
+            <div class="eyebrow" id="selectedKind">Selected tube</div>
             <h2 class="inspector-title" id="selectedId">---</h2>
           </div>
           <div class="role-badge" id="selectedRole">Leading</div>
         </div>
 
-        <div class="dna-card">
+        <div class="dna-card" id="dnaCard">
           <div class="dna-strip" id="dnaStrip"></div>
           <div class="section-title">What to do now</div>
           <div class="dna-code" id="dnaCode">P0 · C0</div>
@@ -779,10 +782,10 @@
             <div class="fact"><span>Beat / phrase</span><strong id="factClock">0.00 / 0</strong></div>
             <div class="fact"><span>Protocol version</span><strong>2</strong></div>
           </div>
-          <div class="note">With relay duty active, this tube rebroadcasts an accepted uplink packet’s command and current/next payload, but replaces the packet header with its own ID and uplink ID.</div>
+          <div class="note">With relay duty active, this device rebroadcasts an accepted uplink packet’s command and current/next payload, but replaces the packet header with its own ID and uplink ID.</div>
         </section>
 
-        <section class="section">
+        <section class="section" id="lightingScheduleSection">
           <h3 class="section-title">What to do next <em>last known schedule</em></h3>
           <div class="facts">
             <div class="fact"><span>Pattern change</span><strong id="factNextPattern">---</strong></div>
@@ -847,6 +850,7 @@
             <div class="legend-item"><span class="legend-mark" style="--mark:#70b7ff"></span>selected signal</div>
             <div class="legend-item"><span class="legend-mark" style="--mark:#aab4c8"></span>uplink</div>
             <div class="legend-item"><span style="color:#f4f7ff;font:800 14px/1 ui-monospace,monospace">⊕</span>physical X,Y center</div>
+            <div class="legend-item"><span style="color:#f6d365;font:800 14px/1 ui-monospace,monospace">◈</span>fixed no-light anchor</div>
             <div class="legend-item"><span style="color:#8ef0d0;font:800 14px/1 ui-monospace,monospace">◇</span>device-estimated position</div>
             <div class="legend-item"><span style="color:#ff8fb8;font:800 14px/1 ui-monospace,monospace">◯</span>possible-position circle</div>
             <div class="legend-item"><span style="color:#f6d365;font:800 14px/1 ui-monospace,monospace">◆</span>mirror candidates</div>
@@ -870,6 +874,7 @@
       const REBROADCAST_TIME = 30000;
       const STATUS_UPDATE_PERIOD = 2000;
       const POSITION_PROTOCOL_VERSION = 2;
+      const ANCHORED_FRAME_ID = 0xFFFF;
       const POSITION_UPDATE_PERIOD = 1000;
       const POSITION_CONVERGENCE_RATE = 0.28;
       const POSITION_CONFIDENCE_RATE = 0.22;
@@ -882,10 +887,12 @@
       const POSITION_RANGE_OUTLIER_SIGMAS = 3;
       const POSITION_ROBUST_RESIDUAL_SCALE = 15;
       const POSITION_SOLUTION = Object.freeze({
+        ANCHOR: "anchor",
         ORIGIN: "origin",
         AXIS: "axis",
         ORIENTATION: "orientation",
         RADIAL: "radial",
+        MIRRORED: "mirrored",
         POSITIONED: "positioned",
         ADJUSTING: "adjusting",
         UNPLACED: "unplaced"
@@ -924,6 +931,7 @@
       const dbToPowerRatio = decibels => 10 ** (decibels / 10);
       const formatDecibels = decibels => `${Number(decibels.toFixed(2))} dB`;
       const formatId = id => id ? id.toString(16).toUpperCase().padStart(3, "0") : "---";
+      const formatFrameId = id => id === ANCHORED_FRAME_ID ? "ANCHORED" : formatId(id);
       const dnaKey = dna => `${dna.pattern}:${dna.palette}`;
       const scheduleRemainingRatio = (lastChangePhrase, nextChangePhrase, beatFrame) => {
         const startBeat = lastChangePhrase * PHRASE_BEATS;
@@ -1034,16 +1042,17 @@
       }
 
       class TubeNode {
-        constructor(simulation, bornAt) {
+        constructor(simulation, bornAt, options = {}) {
           this.simulation = simulation;
           this.id = simulation.randomMeshId();
+          this.isAnchor = options.isAnchor === true;
           this.positionEstimate = {
-            frameId: this.id,
+            frameId: this.isAnchor ? ANCHORED_FRAME_ID : this.id,
             axisId: null,
             orientationId: null,
-            solution: POSITION_SOLUTION.ORIGIN,
-            x: 0,
-            y: 0,
+            solution: this.isAnchor ? POSITION_SOLUTION.ANCHOR : POSITION_SOLUTION.ORIGIN,
+            x: this.isAnchor ? options.x : 0,
+            y: this.isAnchor ? options.y : 0,
             confidence: 1,
             settled: true,
             sequence: 0,
@@ -1126,6 +1135,7 @@
         announcePosition() {
           return {
             version: POSITION_PROTOCOL_VERSION,
+            isAnchor: this.isAnchor,
             frameId: this.positionEstimate.frameId,
             axisId: this.positionEstimate.axisId,
             orientationId: this.positionEstimate.orientationId,
@@ -1139,13 +1149,14 @@
         }
 
         resetPositionEstimate() {
+          const entity = this.simulation.entityForNode(this);
           this.positionEstimate = {
-            frameId: this.id,
+            frameId: this.isAnchor ? ANCHORED_FRAME_ID : this.id,
             axisId: null,
             orientationId: null,
-            solution: POSITION_SOLUTION.ORIGIN,
-            x: 0,
-            y: 0,
+            solution: this.isAnchor ? POSITION_SOLUTION.ANCHOR : POSITION_SOLUTION.ORIGIN,
+            x: this.isAnchor ? entity?.x ?? 0 : 0,
+            y: this.isAnchor ? entity?.y ?? 0 : 0,
             confidence: 1,
             settled: true,
             sequence: 0,
@@ -1186,6 +1197,7 @@
           // Each peer keeps fixed-size filter state; no historical RSSI samples or physical coordinates are retained.
           const peer = {
             id: senderId,
+            isAnchor: remote.isAnchor === true,
             frameId: remote.frameId,
             axisId: Number.isFinite(remote.axisId) ? remote.axisId : null,
             orientationId: Number.isFinite(remote.orientationId) ? remote.orientationId : null,
@@ -1213,6 +1225,7 @@
 
         adoptPositionFrame(frameId, senderId) {
           const local = this.positionEstimate;
+          if (this.isAnchor) return;
           if (frameId <= local.frameId) return;
 
           const previousFrameId = local.frameId;
@@ -1235,8 +1248,45 @@
           this.simulation.log(
             this,
             "position",
-            `adopted frame ${formatId(frameId)} from ${formatId(senderId)}; previous frame ${formatId(previousFrameId)}`
+            `adopted frame ${formatFrameId(frameId)} from ${formatId(senderId)}; previous frame ${formatFrameId(previousFrameId)}`
           );
+        }
+
+        lockAnchorPosition() {
+          if (!this.isAnchor) return;
+          const entity = this.simulation.entityForNode(this);
+          if (!entity) return;
+          const local = this.positionEstimate;
+          const moved = Math.hypot(local.x - entity.x, local.y - entity.y) > 0.01;
+          local.frameId = ANCHORED_FRAME_ID;
+          local.axisId = null;
+          local.orientationId = null;
+          local.solution = POSITION_SOLUTION.ANCHOR;
+          local.x = entity.x;
+          local.y = entity.y;
+          local.confidence = 1;
+          local.settled = true;
+          local.targetDistance = null;
+          local.constraintCount = 0;
+          local.residualError = 0;
+          local.radialConstraint = null;
+          local.mirrorCandidates = [];
+          if (moved) local.sequence += 1;
+          local.updatedAt = this.simulation.time;
+        }
+
+        seedAnchoredPosition(multilateration) {
+          const local = this.positionEstimate;
+          local.x = multilateration.target.x;
+          local.y = multilateration.target.y;
+          local.solution = POSITION_SOLUTION.ADJUSTING;
+          local.confidence = multilateration.confidence;
+          local.settled = false;
+          local.constraintCount = multilateration.constraintCount;
+          local.residualError = multilateration.residualError;
+          local.radialConstraint = null;
+          local.mirrorCandidates = [];
+          local.updatedAt = this.simulation.time;
         }
 
         determineAxisId(originObservation) {
@@ -1346,6 +1396,28 @@
           return [{ x, y }, { x, y: -y }];
         }
 
+        circleIntersections(first, second) {
+          const dx = second.x - first.x;
+          const dy = second.y - first.y;
+          const baseline = Math.hypot(dx, dy);
+          if (baseline <= POSITION_SETTLED_EPSILON) return null;
+
+          const along = (
+            first.directDistance ** 2
+            - second.directDistance ** 2
+            + baseline ** 2
+          ) / (2 * baseline);
+          const perpendicular = Math.sqrt(Math.max(0, first.directDistance ** 2 - along ** 2));
+          const unitX = dx / baseline;
+          const unitY = dy / baseline;
+          const centerX = first.x + along * unitX;
+          const centerY = first.y + along * unitY;
+          return [
+            { x: centerX - perpendicular * unitY, y: centerY + perpendicular * unitX },
+            { x: centerX + perpendicular * unitY, y: centerY - perpendicular * unitX }
+          ];
+        }
+
         rangeResidualAt(point, peers) {
           const squaredError = peers.reduce((sum, peer) => {
             const residual = Math.hypot(point.x - peer.x, point.y - peer.y) - peer.directDistance;
@@ -1358,9 +1430,9 @@
           return Boolean(peer) && this.simulation.time - peer.lastHeardAt <= POSITION_PEER_MAX_AGE;
         }
 
-        usablePositionPeers() {
-          const frameId = this.positionEstimate.frameId;
+        usablePositionPeers(frameId = this.positionEstimate.frameId) {
           const usableSolutions = new Set([
+            POSITION_SOLUTION.ANCHOR,
             POSITION_SOLUTION.ORIGIN,
             POSITION_SOLUTION.AXIS,
             POSITION_SOLUTION.ORIENTATION,
@@ -1380,6 +1452,7 @@
           const age = Math.max(0, this.simulation.time - peer.lastHeardAt);
           const freshness = clamp(1 - age / POSITION_PEER_MAX_AGE, 0.1, 1);
           const isFrameReference = [
+            POSITION_SOLUTION.ANCHOR,
             POSITION_SOLUTION.ORIGIN,
             POSITION_SOLUTION.AXIS,
             POSITION_SOLUTION.ORIENTATION
@@ -1473,9 +1546,73 @@
           };
         }
 
+        anchoredFrameEvidence() {
+          const peers = this.usablePositionPeers(ANCHORED_FRAME_ID);
+          const multilateration = this.multilaterationSolution(peers);
+          const strongestPeers = peers
+            .slice()
+            .sort((a, b) => this.positionPeerWeight(b) - this.positionPeerWeight(a));
+          const mirrorCandidates = strongestPeers.length >= 2
+            ? this.circleIntersections(strongestPeers[0], strongestPeers[1])
+            : null;
+          return { peers, multilateration, mirrorCandidates };
+        }
+
+        solveAnchoredPosition() {
+          const peers = this.usablePositionPeers();
+          const multilateration = this.multilaterationSolution(peers);
+          if (multilateration) {
+            this.convergePosition(
+              multilateration.target,
+              POSITION_SOLUTION.ADJUSTING,
+              multilateration.confidence,
+              {
+                constraintCount: multilateration.constraintCount,
+                residualError: multilateration.residualError
+              }
+            );
+            return;
+          }
+
+          const ordered = peers.slice().sort((a, b) => this.positionPeerWeight(b) - this.positionPeerWeight(a));
+          if (ordered.length >= 2) {
+            const mirrorCandidates = this.circleIntersections(ordered[0], ordered[1]);
+            if (mirrorCandidates) {
+              const previous = { x: this.positionEstimate.x, y: this.positionEstimate.y };
+              const target = mirrorCandidates.slice().sort((a, b) => (
+                Math.hypot(a.x - previous.x, a.y - previous.y)
+                - Math.hypot(b.x - previous.x, b.y - previous.y)
+              ))[0];
+              this.convergePosition(
+                target,
+                POSITION_SOLUTION.MIRRORED,
+                Math.min(ordered[0].confidence, ordered[1].confidence) * 0.65,
+                {
+                  mirrorCandidates,
+                  constraintCount: 2,
+                  residualError: this.rangeResidualAt(target, ordered.slice(0, 2))
+                }
+              );
+              return;
+            }
+          }
+
+          if (ordered.length === 1) this.setRadialBelief(ordered[0]);
+        }
+
         solvePositionFromKnowledge() {
           const local = this.positionEstimate;
           const frameId = local.frameId;
+          if (this.isAnchor) {
+            this.lockAnchorPosition();
+            return;
+          }
+          if (frameId === ANCHORED_FRAME_ID) {
+            local.axisId = null;
+            local.orientationId = null;
+            this.solveAnchoredPosition();
+            return;
+          }
           const originPeer = this.knownPeers.get(frameId) || null;
           const originObservation = this.isFreshPositionPeer(originPeer) && originPeer.frameId === frameId
             && originPeer.solution === POSITION_SOLUTION.ORIGIN
@@ -1586,8 +1723,23 @@
           if (!Number.isFinite(remote.confidence) || senderId === this.id) return;
 
           this.rememberPeerPosition(remote, strength, senderId);
-          const discoveredLeaderId = Math.max(senderId, remote.frameId);
+          const discoveredLeaderId = remote.isAnchor || remote.frameId === ANCHORED_FRAME_ID
+            ? ANCHORED_FRAME_ID
+            : Math.max(senderId, remote.frameId);
+          let initialAnchoredSolution = null;
+
+          if (
+            !this.isAnchor
+            && discoveredLeaderId === ANCHORED_FRAME_ID
+            && this.positionEstimate.frameId !== ANCHORED_FRAME_ID
+          ) {
+            const evidence = this.anchoredFrameEvidence();
+            if (!evidence.multilateration) return;
+            initialAnchoredSolution = evidence.multilateration;
+          }
+
           this.adoptPositionFrame(discoveredLeaderId, senderId);
+          if (initialAnchoredSolution) this.seedAnchoredPosition(initialAnchoredSolution);
           this.solvePositionFromKnowledge();
         }
 
@@ -1767,6 +1919,7 @@
         }
 
         update(deltaMs) {
+          this.lockAnchorPosition();
           this.current.beatFrame += deltaMs * this.current.bpm * BEAT_UNITS / 60000;
           this.next.bpm = this.current.bpm;
           this.next.beatFrame = this.current.beatFrame;
@@ -1840,11 +1993,17 @@
           }
         }
 
-        addDevice(x = this.width / 2, y = this.height / 2) {
+        addDevice(x = this.width / 2, y = this.height / 2, options = {}) {
+          const entityX = clamp(x, 45, this.width - 45);
+          const entityY = clamp(y, 78, this.height - 72);
           const entity = {
-            x: clamp(x, 45, this.width - 45),
-            y: clamp(y, 78, this.height - 72),
-            network: new TubeNode(this, this.time),
+            x: entityX,
+            y: entityY,
+            network: new TubeNode(this, this.time, {
+              isAnchor: options.isAnchor === true,
+              x: entityX,
+              y: entityY
+            }),
             radioPowerStandardScore: clamp(
               this.randomNormal(),
               -MAX_RADIO_STANDARD_SCORE,
@@ -1853,8 +2012,15 @@
             radioEnvironmentKey: Math.floor(this.random() * 0xFFFFFFFF)
           };
           this.entities.push(entity);
-          this.log(entity.network, "system", `joined simulation with ${this.describeDNA(entity.network.dna)}`);
+          const description = entity.network.isAnchor
+            ? `joined as fixed anchor at (${entityX.toFixed(0)}, ${entityY.toFixed(0)})`
+            : `joined simulation with ${this.describeDNA(entity.network.dna)}`;
+          this.log(entity.network, "system", description);
           return entity;
+        }
+
+        addAnchor(x = this.width / 2, y = this.height / 2) {
+          return this.addDevice(x, y, { isAnchor: true });
         }
 
         reset() {
@@ -2101,6 +2267,7 @@
 
       const ui = {
         addDevice: document.getElementById("addDevice"),
+        addAnchor: document.getElementById("addAnchor"),
         addEight: document.getElementById("addEight"),
         pauseToggle: document.getElementById("pauseToggle"),
         resetSimulation: document.getElementById("resetSimulation"),
@@ -2130,7 +2297,10 @@
         clusterCount: document.getElementById("clusterCount"),
         deliveryRate: document.getElementById("deliveryRate"),
         selectedId: document.getElementById("selectedId"),
+        selectedKind: document.getElementById("selectedKind"),
         selectedRole: document.getElementById("selectedRole"),
+        dnaCard: document.getElementById("dnaCard"),
+        lightingScheduleSection: document.getElementById("lightingScheduleSection"),
         dnaStrip: document.getElementById("dnaStrip"),
         dnaCode: document.getElementById("dnaCode"),
         dnaName: document.getElementById("dnaName"),
@@ -2182,6 +2352,11 @@
         updateInspector(true);
       }
 
+      function addAnchorAt(x, y) {
+        selected = simulation.addAnchor(x, y);
+        updateInspector(true);
+      }
+
       function addNearCenter(count) {
         const centerX = simulation.width / 2;
         const centerY = simulation.height / 2;
@@ -2200,7 +2375,9 @@
       function hitTest(point) {
         for (let index = simulation.entities.length - 1; index >= 0; index -= 1) {
           const entity = simulation.entities[index];
-          if (Math.abs(point.x - entity.x) <= 27 && Math.abs(point.y - entity.y) <= 68) return entity;
+          const halfWidth = entity.network.isAnchor ? 25 : 27;
+          const halfHeight = entity.network.isAnchor ? 25 : 68;
+          if (Math.abs(point.x - entity.x) <= halfWidth && Math.abs(point.y - entity.y) <= halfHeight) return entity;
         }
         return null;
       }
@@ -2236,6 +2413,7 @@
         const point = canvasPoint(event);
         dragging.x = clamp(point.x + dragOffset.x, 45, simulation.width - 45);
         dragging.y = clamp(point.y + dragOffset.y, 78, simulation.height - 72);
+        dragging.network.lockAnchorPosition();
       });
 
       function endDrag(event) {
@@ -2255,6 +2433,14 @@
         const angle = simulation.random() * Math.PI * 2;
         const radius = 55 + simulation.random() * 125;
         addDeviceAt(simulation.width / 2 + Math.cos(angle) * radius, simulation.height / 2 + Math.sin(angle) * radius);
+      });
+      ui.addAnchor.addEventListener("click", () => {
+        const angle = simulation.random() * Math.PI * 2;
+        const radius = 70 + simulation.random() * 145;
+        addAnchorAt(
+          simulation.width / 2 + Math.cos(angle) * radius,
+          simulation.height / 2 + Math.sin(angle) * radius
+        );
       });
       ui.addEight.addEventListener("click", () => addNearCenter(8));
       ui.pauseToggle.addEventListener("click", () => {
@@ -2397,10 +2583,12 @@
           if (distance < 1) continue;
           const ux = dx / distance;
           const uy = dy / distance;
-          const startX = entity.x + ux * 31;
-          const startY = entity.y + uy * 31;
-          const endX = uplink.x - ux * 31;
-          const endY = uplink.y - uy * 31;
+          const startRadius = entity.network.isAnchor ? 21 : 31;
+          const endRadius = uplink.network.isAnchor ? 21 : 31;
+          const startX = entity.x + ux * startRadius;
+          const startY = entity.y + uy * startRadius;
+          const endX = uplink.x - ux * endRadius;
+          const endY = uplink.y - uy * endRadius;
 
           context.setLineDash([4, 4]);
           context.lineWidth = 1;
@@ -2480,6 +2668,7 @@
       }
 
       function estimateCanvasOrigin(frameId) {
+        if (frameId === ANCHORED_FRAME_ID) return { x: 0, y: 0 };
         const frameOwner = simulation.entities.find(entity => entity.network.id === frameId);
         if (frameOwner) return { x: frameOwner.x, y: frameOwner.y };
         return { x: simulation.width / 2, y: simulation.height / 2 };
@@ -2496,6 +2685,9 @@
 
       function estimateDisplayTransform(frameId) {
         const origin = estimateCanvasOrigin(frameId);
+        if (frameId === ANCHORED_FRAME_ID) {
+          return { origin, estimatedX: { x: 1, y: 0 }, physicalX: { x: 1, y: 0 }, reflection: 1, rotation: 0 };
+        }
         const axisEntity = positionFrameRoleEntity(frameId, "axisId");
         if (!axisEntity || axisEntity.network.positionEstimate.frameId !== frameId) {
           return { origin, estimatedX: { x: 1, y: 0 }, physicalX: { x: 1, y: 0 }, reflection: 1, rotation: 0 };
@@ -2582,16 +2774,51 @@
           context.textAlign = "left";
           const rotationDegrees = Math.round(transform.rotation * 180 / Math.PI);
           const reflectionLabel = transform.reflection < 0 ? " · MIRRORED" : "";
-          context.fillText(
-            `F ${formatId(frameId)} ORIGIN (0,0) · VIEW ${rotationDegrees}°${reflectionLabel}`,
-            origin.x + 18,
-            origin.y + 3
-          );
+          const frameLabel = frameId === ANCHORED_FRAME_ID
+            ? "ANCHORED FRAME · FIXED CANVAS COORDINATES"
+            : `F ${formatId(frameId)} ORIGIN (0,0) · VIEW ${rotationDegrees}°${reflectionLabel}`;
+          context.fillText(frameLabel, origin.x + 18, origin.y + 14);
         }
 
         if (selected) {
           const belief = selected.network.positionEstimate;
           const selectedTransform = frameTransforms.get(belief.frameId);
+          const pendingAnchoredEvidence = !selected.network.isAnchor
+            && belief.frameId !== ANCHORED_FRAME_ID
+            ? selected.network.anchoredFrameEvidence()
+            : null;
+
+          if (pendingAnchoredEvidence?.peers.length) {
+            context.setLineDash([7, 6]);
+            context.strokeStyle = "rgba(246, 211, 101, 0.48)";
+            context.lineWidth = 1.3;
+            for (const peer of pendingAnchoredEvidence.peers) {
+              context.beginPath();
+              context.arc(peer.x, peer.y, peer.directDistance, 0, Math.PI * 2);
+              context.stroke();
+            }
+            context.setLineDash([]);
+            context.fillStyle = "rgba(246, 211, 101, 0.9)";
+            context.font = "800 8px ui-monospace, monospace";
+            context.textAlign = "left";
+            context.fillText(
+              `${pendingAnchoredEvidence.peers.length} ANCHORED RANGE${pendingAnchoredEvidence.peers.length === 1 ? "" : "S"} · FLOATING ESTIMATE PRESERVED`,
+              selected.x + 22,
+              selected.y - 8
+            );
+
+            for (const candidate of pendingAnchoredEvidence.mirrorCandidates || []) {
+              context.fillStyle = "rgba(246, 211, 101, 0.72)";
+              context.beginPath();
+              context.moveTo(candidate.x, candidate.y - 6);
+              context.lineTo(candidate.x + 6, candidate.y);
+              context.lineTo(candidate.x, candidate.y + 6);
+              context.lineTo(candidate.x - 6, candidate.y);
+              context.closePath();
+              context.fill();
+            }
+          }
+
           const radial = belief.radialConstraint;
           if (radial) {
             const center = estimateCanvasCoordinates(selectedTransform, radial.x, radial.y);
@@ -2628,6 +2855,7 @@
 
         const groups = new Map();
         for (const entity of simulation.entities) {
+          if (entity.network.isAnchor) continue;
           const transform = frameTransforms.get(entity.network.positionEstimate.frameId);
           const point = estimateCanvasPoint(entity.network, transform);
           const key = `${point.x.toFixed(2)},${point.y.toFixed(2)}`;
@@ -2659,8 +2887,8 @@
             }
 
             if (isSelected) {
-              const ghostWidth = 33;
-              const ghostHeight = 100;
+              const ghostWidth = node.isAnchor ? 38 : 33;
+              const ghostHeight = node.isAnchor ? 38 : 100;
               roundedRectPath(point.x - ghostWidth / 2, point.y - ghostHeight / 2, ghostWidth, ghostHeight, 10);
               context.fillStyle = estimateColor(node, 0.035);
               context.fill();
@@ -2692,7 +2920,7 @@
             context.font = `${isSelected ? 850 : 750} 8px ui-monospace, monospace`;
             context.textAlign = "left";
             context.fillText(
-              `E ${formatId(node.id)} · F ${formatId(node.positionEstimate.frameId)} · ${node.positionEstimate.solution.toUpperCase()}`,
+              `E ${formatId(node.id)} · F ${formatFrameId(node.positionEstimate.frameId)} · ${node.positionEstimate.solution.toUpperCase()}`,
               point.x + maximumRadius + 8,
               labelY + 3
             );
@@ -2713,8 +2941,88 @@
         context.closePath();
       }
 
+      function drawAnchor(entity) {
+        const node = entity.network;
+        const isSelected = entity === selected;
+        const topologyWarning = simulation.localMaximumWarning(entity);
+        const radius = 15;
+
+        context.save();
+        context.shadowColor = isSelected ? "rgba(246, 211, 101, 0.52)" : "rgba(0, 0, 0, 0.72)";
+        context.shadowBlur = isSelected ? 18 : 10;
+        context.fillStyle = isSelected ? "rgba(246, 211, 101, 0.13)" : "rgba(3, 7, 12, 0.92)";
+        context.beginPath();
+        context.arc(entity.x, entity.y, radius + 5, 0, Math.PI * 2);
+        context.fill();
+        context.shadowBlur = 0;
+
+        context.save();
+        context.translate(entity.x, entity.y);
+        context.rotate(Math.PI / 4);
+        roundedRectPath(-radius, -radius, radius * 2, radius * 2, 5);
+        context.fillStyle = "#16202a";
+        context.fill();
+        context.strokeStyle = isSelected ? "#f6d365" : "rgba(246, 211, 101, 0.72)";
+        context.lineWidth = isSelected ? 2 : 1.3;
+        context.stroke();
+        context.restore();
+
+        context.strokeStyle = isSelected ? "#ffffff" : "rgba(220, 236, 242, 0.82)";
+        context.fillStyle = isSelected ? "#ffffff" : "rgba(220, 236, 242, 0.9)";
+        context.lineWidth = isSelected ? 1.5 : 1.1;
+        context.beginPath();
+        context.moveTo(entity.x - 9, entity.y);
+        context.lineTo(entity.x - 3, entity.y);
+        context.moveTo(entity.x + 3, entity.y);
+        context.lineTo(entity.x + 9, entity.y);
+        context.moveTo(entity.x, entity.y - 9);
+        context.lineTo(entity.x, entity.y - 3);
+        context.moveTo(entity.x, entity.y + 3);
+        context.lineTo(entity.x, entity.y + 9);
+        context.stroke();
+        context.beginPath();
+        context.arc(entity.x, entity.y, 2, 0, Math.PI * 2);
+        context.fill();
+
+        context.textAlign = "center";
+        context.font = "800 11px ui-monospace, SFMono-Regular, Menlo, monospace";
+        context.fillStyle = isSelected ? "#f4f7ff" : "rgba(226, 232, 244, 0.88)";
+        context.fillText(formatId(node.id), entity.x, entity.y - 28);
+        context.font = "800 8px ui-sans-serif, system-ui, sans-serif";
+        context.fillStyle = node.status === STATUS.RECEIVING ? "#667189" : "#f6d365";
+        const statusLabel = node.status === STATUS.RECEIVING
+          ? "ANCHOR · BOOT"
+          : node.isFollowing() ? `ANCHOR · ↑${formatId(node.uplinkId)}` : "ANCHOR · LEAD";
+        context.fillText(statusLabel, entity.x, entity.y + 31);
+
+        if (node.isRelayActive()) {
+          context.fillStyle = "#f6d365";
+          context.beginPath();
+          context.arc(entity.x + 21, entity.y - 15, 7, 0, Math.PI * 2);
+          context.fill();
+          context.fillStyle = "#201807";
+          context.font = "900 8px ui-monospace, monospace";
+          context.fillText("R", entity.x + 21, entity.y - 12);
+        }
+
+        if (topologyWarning) {
+          context.fillStyle = "#f6d365";
+          context.beginPath();
+          context.arc(entity.x - 21, entity.y - 15, 7, 0, Math.PI * 2);
+          context.fill();
+          context.fillStyle = "#201807";
+          context.font = "900 9px ui-monospace, monospace";
+          context.fillText("!", entity.x - 21, entity.y - 12);
+        }
+        context.restore();
+      }
+
       function drawDevice(entity) {
         const node = entity.network;
+        if (node.isAnchor) {
+          drawAnchor(entity);
+          return;
+        }
         const isSelected = entity === selected;
         const width = 25;
         const height = 92;
@@ -2833,10 +3141,12 @@
           .map(entity => simulation.localMaximumWarning(entity))
           .filter(Boolean);
         const leaders = simulation.entities.filter(entity => !entity.network.isFollowing()).length;
-        const clusters = new Set(simulation.entities.map(entity => dnaKey(entity.network.dna))).size;
+        const tubeEntities = simulation.entities.filter(entity => !entity.network.isAnchor);
+        const anchorEntities = simulation.entities.filter(entity => entity.network.isAnchor);
+        const clusters = new Set(tubeEntities.map(entity => dnaKey(entity.network.dna))).size;
 
         return {
-          schema: "tubes-mesh-simulator/v2",
+          schema: "tubes-mesh-simulator/v3",
           capturedAtSimulationMs: Math.round(simulation.time),
           simulation: {
             paused: simulation.paused,
@@ -2852,6 +3162,8 @@
           },
           summary: {
             nodes: simulation.entities.length,
+            tubes: tubeEntities.length,
+            anchors: anchorEntities.length,
             leaders,
             followers: simulation.entities.length - leaders,
             dnaSets: clusters,
@@ -2871,6 +3183,8 @@
               index,
               deviceLocal: {
                 id: formatId(node.id),
+                kind: node.isAnchor ? "anchor" : "tube",
+                hasLights: !node.isAnchor,
                 role: node.role(),
                 transportStatus: node.status,
                 uplinkId: node.uplinkId ? formatId(node.uplinkId) : null,
@@ -2879,7 +3193,8 @@
                   remainingMs: Math.max(0, Math.round(node.rebroadcastUntil - simulation.time))
                 },
                 positionEstimate: {
-                  frameId: formatId(node.positionEstimate.frameId),
+                  frameId: formatFrameId(node.positionEstimate.frameId),
+                  fixed: node.isAnchor,
                   axisId: node.positionEstimate.axisId ? formatId(node.positionEstimate.axisId) : null,
                   orientationId: node.positionEstimate.orientationId ? formatId(node.positionEstimate.orientationId) : null,
                   solution: node.positionEstimate.solution,
@@ -2912,7 +3227,8 @@
                 },
                 knownPeers: [...node.knownPeers.values()].map(peer => ({
                   id: formatId(peer.id),
-                  frameId: formatId(peer.frameId),
+                  kind: peer.isAnchor ? "anchor" : "tube",
+                  frameId: formatFrameId(peer.frameId),
                   axisId: peer.axisId ? formatId(peer.axisId) : null,
                   orientationId: peer.orientationId ? formatId(peer.orientationId) : null,
                   solution: peer.solution,
@@ -2971,7 +3287,8 @@
             recipients: simulation.recipientName(delivery.message.recipients),
             command: delivery.message.command,
             position: delivery.message.position ? {
-              frameId: formatId(delivery.message.position.frameId),
+              kind: delivery.message.position.isAnchor ? "anchor" : "tube",
+              frameId: formatFrameId(delivery.message.position.frameId),
               axisId: delivery.message.position.axisId ? formatId(delivery.message.position.axisId) : null,
               orientationId: delivery.message.position.orientationId
                 ? formatId(delivery.message.position.orientationId)
@@ -2998,7 +3315,7 @@
 
       function createCompactSnapshot(snapshot = createSnapshot()) {
         return {
-          v: 6,
+          v: 7,
           t: snapshot.capturedAtSimulationMs,
           p: snapshot.simulation.paused ? 1 : 0,
           r: [snapshot.simulation.radioRange, snapshot.simulation.dropoff],
@@ -3007,9 +3324,17 @@
             snapshot.simulation.radioUncertainty.transmitPowerSigmaDb,
             snapshot.simulation.radioUncertainty.linkShadowSigmaDb
           ],
-          s: [snapshot.summary.nodes, snapshot.summary.leaders, snapshot.summary.relayTransmissions, snapshot.summary.topologyWarnings],
+          s: [
+            snapshot.summary.nodes,
+            snapshot.summary.tubes,
+            snapshot.summary.anchors,
+            snapshot.summary.leaders,
+            snapshot.summary.relayTransmissions,
+            snapshot.summary.topologyWarnings
+          ],
           n: snapshot.nodes.map(node => [
             node.deviceLocal.id,
+            node.deviceLocal.kind === "anchor" ? "A" : "T",
             node.deviceLocal.uplinkId || "-",
             node.deviceLocal.role === "Leading" ? "L" : "F",
             node.deviceLocal.relayDuty.active ? 1 : 0,
@@ -3075,7 +3400,10 @@
         const pattern = PATTERNS[node.dna.pattern];
 
         ui.selectedId.textContent = formatId(node.id);
-        ui.selectedRole.textContent = node.role();
+        ui.selectedKind.textContent = node.isAnchor ? "Selected fixed anchor" : "Selected tube";
+        ui.selectedRole.textContent = node.isAnchor ? `Anchor · ${node.role()}` : node.role();
+        ui.dnaCard.hidden = node.isAnchor;
+        ui.lightingScheduleSection.hidden = node.isAnchor;
         ui.dnaStrip.style.setProperty("--dna-gradient", `linear-gradient(90deg, ${palette.colors.join(", ")})`);
         ui.dnaCode.textContent = `P${node.dna.pattern} · C${node.dna.palette}`;
         ui.dnaName.textContent = `${pattern.name} · ${palette.name}`;
@@ -3084,7 +3412,9 @@
         ui.topologyWarning.textContent = topologyWarning ? `Local maximum: ${topologyWarning.explanation}` : "";
         ui.factId.textContent = formatId(node.id);
         ui.factUplink.textContent = node.uplinkId ? formatId(node.uplinkId) : "none";
-        ui.factState.textContent = node.status === STATUS.RECEIVING ? "receiving / silent" : node.role().toLowerCase();
+        ui.factState.textContent = node.status === STATUS.RECEIVING
+          ? "receiving / silent"
+          : node.isAnchor ? `anchor / ${node.role().toLowerCase()}` : node.role().toLowerCase();
         const relaySeconds = Math.max(0, (node.rebroadcastUntil - simulation.time) / 1000);
         const relayFor = node.uplinkId ? `for ${formatId(node.uplinkId)}` : "downstream";
         ui.factRelay.textContent = node.isRelayActive() ? `active ${relayFor} · ${relaySeconds.toFixed(1)}s` : "inactive";
@@ -3092,12 +3422,23 @@
           ? "never"
           : `${Math.max(0, (simulation.time - node.lastUplinkSeenAt) / 1000).toFixed(1)} s ago`;
         ui.factEstimate.textContent = `${node.positionEstimate.x.toFixed(1)}, ${node.positionEstimate.y.toFixed(1)} · ${Math.round(node.positionEstimate.confidence * 100)}%`;
-        ui.factEstimateFrame.textContent = node.positionEstimate.frameId === node.id
+        ui.factEstimateFrame.textContent = node.positionEstimate.frameId === ANCHORED_FRAME_ID
+          ? "ANCHORED (fixed canvas)"
+          : node.positionEstimate.frameId === node.id
           ? `${formatId(node.positionEstimate.frameId)} (self)`
           : formatId(node.positionEstimate.frameId);
-        const positioningScope = simulation.entities.length === 1
+        const positioningScope = node.isAnchor
+          ? "fixed known position"
+          : simulation.entities.length === 1
           ? "waiting"
           : simulation.entities.length <= 3 ? `${simulation.entities.length}-device` : "distributed adjustment";
+        const pendingAnchoredEvidence = !node.isAnchor
+          && node.positionEstimate.frameId !== ANCHORED_FRAME_ID
+          ? node.anchoredFrameEvidence()
+          : null;
+        const pendingAnchorLabel = pendingAnchoredEvidence?.peers.length
+          ? ` · ${pendingAnchoredEvidence.peers.length} anchored range${pendingAnchoredEvidence.peers.length === 1 ? "" : "s"} pending`
+          : "";
         const axisLabel = node.positionEstimate.axisId ? ` · axis ${formatId(node.positionEstimate.axisId)}` : "";
         const orientationLabel = node.positionEstimate.orientationId
           ? ` · +Y ${formatId(node.positionEstimate.orientationId)}`
@@ -3108,10 +3449,10 @@
         const residualLabel = node.positionEstimate.residualError === null
           ? ""
           : ` · residual ${node.positionEstimate.residualError.toFixed(2)}`;
-        ui.factPositionMode.textContent = `${positioningScope} · ${node.positionEstimate.solution}${axisLabel}${orientationLabel}${constraintLabel}${residualLabel}`;
+        ui.factPositionMode.textContent = `${positioningScope} · ${node.positionEstimate.solution}${axisLabel}${orientationLabel}${constraintLabel}${residualLabel}${pendingAnchorLabel}`;
         const beat = node.current.beatFrame / BEAT_UNITS;
         const phrase = node.currentPhrase();
-        ui.factClock.textContent = `${beat.toFixed(2)} / ${phrase}`;
+        ui.factClock.textContent = node.isAnchor ? "n/a · no lights" : `${beat.toFixed(2)} / ${phrase}`;
         const patternWait = Math.max(0, node.next.patternPhrase - phrase);
         const paletteWait = Math.max(0, node.next.palettePhrase - phrase);
         const secondsUntilPhrase = targetPhrase => Math.max(
@@ -3160,7 +3501,8 @@
             const claim = document.createElement("span");
             const ageSeconds = Math.max(0, (simulation.time - peer.lastHeardAt) / 1000);
             const outlierLabel = peer.outlierLimited ? " · spike limited" : "";
-            claim.textContent = `F${formatId(peer.frameId)} · ${peer.solution} (${peer.x.toFixed(1)}, ${peer.y.toFixed(1)}) · range ${peer.rawDistance.toFixed(1)}→${peer.directDistance.toFixed(1)} σ${peer.rangeSigma.toFixed(1)} n${peer.rangeSamples}${outlierLabel} · ${ageSeconds.toFixed(1)}s ago`;
+            const peerKind = peer.isAnchor ? "ANCHOR · " : "";
+            claim.textContent = `${peerKind}F${formatFrameId(peer.frameId)} · ${peer.solution} (${peer.x.toFixed(1)}, ${peer.y.toFixed(1)}) · range ${peer.rawDistance.toFixed(1)}→${peer.directDistance.toFixed(1)} σ${peer.rangeSigma.toFixed(1)} n${peer.rangeSamples}${outlierLabel} · ${ageSeconds.toFixed(1)}s ago`;
             item.append(peerId, claim);
             ui.positionKnowledgeList.appendChild(item);
           }
@@ -3188,7 +3530,11 @@
         }
 
         const leaders = simulation.entities.filter(entity => !entity.network.isFollowing()).length;
-        const clusters = new Set(simulation.entities.map(entity => dnaKey(entity.network.dna))).size;
+        const clusters = new Set(
+          simulation.entities
+            .filter(entity => !entity.network.isAnchor)
+            .map(entity => dnaKey(entity.network.dna))
+        ).size;
         ui.deviceCount.textContent = String(simulation.entities.length);
         ui.rootCount.textContent = String(leaders);
         ui.relayCount.textContent = String(simulation.stats.rebroadcasts);
@@ -3218,8 +3564,16 @@
 
       window.TubesMeshSimulator = {
         simulation,
-        constants: { PROTOCOL_VERSION, POSITION_PROTOCOL_VERSION, POSITION_SOLUTION, RECIPIENTS, COMMAND },
+        constants: {
+          PROTOCOL_VERSION,
+          POSITION_PROTOCOL_VERSION,
+          ANCHORED_FRAME_ID,
+          POSITION_SOLUTION,
+          RECIPIENTS,
+          COMMAND
+        },
         addDevice: (x, y) => addDeviceAt(x, y),
+        addAnchor: (x, y) => addAnchorAt(x, y),
         getSnapshot: createSnapshot,
         getCompactSnapshot: () => createCompactSnapshot(createSnapshot())
       };
