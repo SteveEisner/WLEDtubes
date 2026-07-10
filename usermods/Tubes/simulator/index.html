@@ -89,33 +89,68 @@
     }
 
     .toolbar {
-      display: flex;
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
       align-items: stretch;
-      gap: 1px;
-      padding: 9px 12px;
-      overflow-x: auto;
+      gap: 7px;
+      padding: 8px 12px;
       border-bottom: 1px solid var(--line);
       background: rgba(13, 18, 30, 0.9);
-      scrollbar-width: thin;
     }
 
     .tool-group {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex: 0 0 auto;
-      padding: 0 12px;
-      min-height: 42px;
-      border-right: 1px solid var(--line);
+      min-width: 0;
+      display: grid;
+      align-content: start;
+      gap: 6px;
+      padding: 7px 9px 8px;
+      border: 1px solid rgba(151, 167, 200, 0.13);
+      border-radius: 9px;
+      background: rgba(8, 12, 21, 0.48);
     }
 
-    .tool-group:first-child { padding-left: 0; }
-    .tool-group:last-child { border-right: 0; }
+    .tool-group.devices { grid-column: span 3; }
+    .tool-group.radio-model { grid-column: span 3; }
+    .tool-group.radio-uncertainty { grid-column: span 6; }
+    .tool-group.timing { grid-column: span 4; }
+    .tool-group.view-options { grid-column: span 3; }
+    .tool-group.metrics { grid-column: span 5; }
+
+    .tool-group-title {
+      color: var(--faint);
+      font-size: 9px;
+      font-weight: 850;
+      letter-spacing: 0.13em;
+      line-height: 1;
+      text-transform: uppercase;
+    }
+
+    .tool-group-content {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .tool-group-content.wrap { flex-wrap: wrap; }
+    .tool-group-content.control-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      align-items: end;
+      gap: 9px;
+    }
+
+    .control {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: end;
+      gap: 4px 7px;
+      flex: 1 1 120px;
+    }
 
     .tool-label {
-      display: grid;
-      gap: 2px;
-      min-width: max-content;
+      min-width: 0;
       color: var(--muted);
       font-size: 10px;
       font-weight: 750;
@@ -123,13 +158,16 @@
       text-transform: uppercase;
     }
 
-    .tool-label output {
+    .control .tool-label { grid-column: 1; }
+    .control .tool-label + output {
+      grid-column: 2;
       color: var(--ink);
-      font-size: 11px;
+      font-size: 10px;
       font-variant-numeric: tabular-nums;
-      letter-spacing: 0;
-      text-transform: none;
+      white-space: nowrap;
     }
+    .control > input[type="range"] { grid-column: 1 / -1; width: 100%; }
+    .control > select { grid-column: 1 / -1; width: 100%; min-width: 0; }
 
     button,
     select {
@@ -161,7 +199,8 @@
     }
 
     input[type="range"] {
-      width: 104px;
+      width: 100%;
+      min-width: 72px;
       accent-color: var(--accent-strong);
       cursor: pointer;
     }
@@ -179,13 +218,17 @@
     .check input { accent-color: var(--accent); }
 
     .metrics {
-      display: flex;
-      gap: 12px;
-      padding-left: 4px;
+      padding-left: 9px;
+    }
+
+    .metrics .tool-group-content {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 7px;
     }
 
     .metric {
-      min-width: 52px;
+      min-width: 0;
       display: grid;
       gap: 1px;
     }
@@ -506,9 +549,34 @@
       .app { height: auto; min-height: 100%; grid-template-rows: auto auto auto; }
       .masthead { align-items: flex-start; }
       .lede { display: none; }
+      .tool-group.devices,
+      .tool-group.radio-model,
+      .tool-group.view-options,
+      .tool-group.metrics { grid-column: span 6; }
+      .tool-group.radio-uncertainty,
+      .tool-group.timing { grid-column: span 12; }
       .workbench { grid-template-columns: 1fr; grid-template-rows: 65vh auto; }
       .inspector { border-left: 0; border-top: 1px solid var(--line); }
       .space-hint { display: none; }
+    }
+
+    @media (min-width: 861px) and (max-width: 1300px) {
+      .tool-group.devices,
+      .tool-group.radio-model,
+      .tool-group.view-options { grid-column: span 4; }
+      .tool-group.radio-uncertainty,
+      .tool-group.timing { grid-column: span 6; }
+      .tool-group.metrics { grid-column: span 12; }
+    }
+
+    @media (max-width: 600px) {
+      .tool-group.devices,
+      .tool-group.radio-model,
+      .tool-group.radio-uncertainty,
+      .tool-group.timing,
+      .tool-group.view-options,
+      .tool-group.metrics { grid-column: span 12; }
+      .tool-group-content.control-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -525,60 +593,92 @@
     </header>
 
     <nav class="toolbar" aria-label="Simulation controls">
-      <div class="tool-group">
-        <button class="primary" id="addDevice">+ Add tube</button>
-        <button id="addEight">+ Add 8</button>
-        <button class="icon-button" id="pauseToggle" aria-label="Pause simulation" title="Pause simulation">Ⅱ</button>
-        <button id="resetSimulation">Reset</button>
+      <div class="tool-group devices">
+        <div class="tool-group-title">Devices</div>
+        <div class="tool-group-content wrap">
+          <button class="primary" id="addDevice">+ Add tube</button>
+          <button id="addEight">+ Add 8</button>
+          <button class="icon-button" id="pauseToggle" aria-label="Pause simulation" title="Pause simulation">Ⅱ</button>
+          <button id="resetSimulation">Reset</button>
+        </div>
       </div>
 
-      <div class="tool-group">
-        <label class="tool-label" for="rangeControl">
-          Radio range
-          <output id="rangeOutput">220 px</output>
-        </label>
-        <input id="rangeControl" type="range" min="80" max="2000" step="20" value="220">
+      <div class="tool-group radio-model">
+        <div class="tool-group-title">Radio model</div>
+        <div class="tool-group-content">
+          <div class="control">
+            <label class="tool-label" for="rangeControl">Range</label>
+            <output id="rangeOutput">600 px</output>
+            <input id="rangeControl" type="range" min="80" max="2000" step="20" value="600">
+          </div>
+          <div class="control">
+            <label class="tool-label" for="dropoffControl">Dropoff</label>
+            <select id="dropoffControl">
+              <option value="linear">Linear</option>
+              <option value="quadratic">Squared</option>
+              <option value="smooth">Smoothstep</option>
+              <option value="inverseSquare">Inverse square</option>
+            </select>
+          </div>
+        </div>
       </div>
 
-      <div class="tool-group">
-        <label class="tool-label" for="dropoffControl">Power dropoff</label>
-        <select id="dropoffControl">
-          <option value="linear">Linear</option>
-          <option value="quadratic">Squared</option>
-          <option value="smooth">Smoothstep</option>
-          <option value="inverseSquare">Inverse square</option>
-        </select>
+      <div class="tool-group radio-uncertainty" aria-label="Radio uncertainty">
+        <div class="tool-group-title">Radio uncertainty</div>
+        <div class="tool-group-content control-grid">
+          <div class="control">
+            <label class="tool-label" for="rssiJitterControl">RSSI jitter</label>
+            <output id="rssiJitterOutput">±0%</output>
+            <input id="rssiJitterControl" type="range" min="0" max="30" step="1" value="0" title="Random variation in each successfully received strength sample">
+          </div>
+          <div class="control">
+            <label class="tool-label" for="txSpreadControl">TX variation</label>
+            <output id="txSpreadOutput">±0%</output>
+            <input id="txSpreadControl" type="range" min="0" max="30" step="1" value="0" title="Stable transmit-power difference assigned to each device">
+          </div>
+          <div class="control">
+            <label class="tool-label" for="linkBiasControl">Link bias</label>
+            <output id="linkBiasOutput">±0%</output>
+            <input id="linkBiasControl" type="range" min="0" max="30" step="1" value="0" title="Stable environmental bias assigned to each device pair">
+          </div>
+        </div>
       </div>
 
-      <div class="tool-group">
-        <label class="tool-label" for="speedControl">
-          Simulation speed
-          <output id="speedOutput">2.0×</output>
-        </label>
-        <input id="speedControl" type="range" min="0.1" max="4" step="0.1" value="2">
+      <div class="tool-group timing">
+        <div class="tool-group-title">Timing</div>
+        <div class="tool-group-content">
+          <div class="control">
+            <label class="tool-label" for="speedControl">Simulation</label>
+            <output id="speedOutput">2.0×</output>
+            <input id="speedControl" type="range" min="0.1" max="4" step="0.1" value="2">
+          </div>
+          <div class="control">
+            <label class="tool-label" for="bpmControl">Leader tempo</label>
+            <output id="bpmOutput">120 BPM</output>
+            <input id="bpmControl" type="range" min="60" max="180" step="1" value="120">
+          </div>
+          <button id="forceNext" title="Move each leading tube's nearest scheduled change to the current phrase">Force next</button>
+        </div>
       </div>
 
-      <div class="tool-group">
-        <label class="tool-label" for="bpmControl">
-          Leader tempo
-          <output id="bpmOutput">120 BPM</output>
-        </label>
-        <input id="bpmControl" type="range" min="60" max="180" step="1" value="120">
-        <button id="forceNext" title="Move each leading tube's nearest scheduled change to the current phrase">Force next</button>
-      </div>
-
-      <div class="tool-group">
-        <label class="check"><input id="showTopology" type="checkbox" checked> Uplinks</label>
-        <label class="check"><input id="showRadio" type="checkbox" checked> Selected radio field</label>
-        <label class="check"><input id="showEstimates" type="checkbox" checked> Position estimates</label>
+      <div class="tool-group view-options">
+        <div class="tool-group-title">View</div>
+        <div class="tool-group-content wrap">
+          <label class="check"><input id="showTopology" type="checkbox" checked> Uplinks</label>
+          <label class="check"><input id="showRadio" type="checkbox" checked> Radio field</label>
+          <label class="check"><input id="showEstimates" type="checkbox" checked> Estimates</label>
+        </div>
       </div>
 
       <div class="tool-group metrics" aria-label="Simulation statistics">
-        <div class="metric"><strong id="deviceCount">1</strong><span>tubes</span></div>
-        <div class="metric"><strong id="rootCount">1</strong><span>leaders</span></div>
-        <div class="metric"><strong id="relayCount">0</strong><span>relay tx</span></div>
-        <div class="metric"><strong id="clusterCount">1</strong><span>DNA sets</span></div>
-        <div class="metric"><strong id="deliveryRate">—</strong><span>delivery</span></div>
+        <div class="tool-group-title">Network</div>
+        <div class="tool-group-content">
+          <div class="metric"><strong id="deviceCount">1</strong><span>tubes</span></div>
+          <div class="metric"><strong id="rootCount">1</strong><span>leaders</span></div>
+          <div class="metric"><strong id="relayCount">0</strong><span>relay tx</span></div>
+          <div class="metric"><strong id="clusterCount">1</strong><span>DNA sets</span></div>
+          <div class="metric"><strong id="deliveryRate">—</strong><span>delivery</span></div>
+        </div>
       </div>
     </nav>
 
@@ -714,21 +814,28 @@
       const UPLINK_TIMEOUT = 20000;
       const REBROADCAST_TIME = 30000;
       const STATUS_UPDATE_PERIOD = 2000;
-      const POSITION_PROTOCOL_VERSION = 1;
+      const POSITION_PROTOCOL_VERSION = 2;
       const POSITION_UPDATE_PERIOD = 1000;
       const POSITION_CONVERGENCE_RATE = 0.28;
       const POSITION_CONFIDENCE_RATE = 0.22;
       const POSITION_SETTLED_EPSILON = 0.5;
+      const POSITION_PEER_MAX_AGE = POSITION_UPDATE_PERIOD * 6;
+      const POSITION_GEOMETRY_MIN_SCORE = 0.002;
+      const POSITION_RANGE_FILTER_RATE = 0.18;
+      const POSITION_RANGE_VARIANCE_RATE = 0.12;
+      const POSITION_RANGE_MIN_SIGMA = 2;
+      const POSITION_RANGE_OUTLIER_SIGMAS = 3;
+      const POSITION_ROBUST_RESIDUAL_SCALE = 15;
       const POSITION_SOLUTION = Object.freeze({
         ORIGIN: "origin",
         AXIS: "axis",
+        ORIENTATION: "orientation",
         RADIAL: "radial",
         POSITIONED: "positioned",
+        ADJUSTING: "adjusting",
         UNPLACED: "unplaced"
       });
       const RADIO_WAVE_TIME = 1000;
-      const RADIO_TRAIL_COUNT = 3;
-      const RADIO_TRAIL_SPACING = 0.075;
       const DEFAULT_BPM = 120;
       const BEAT_UNITS = 256;
       const PHRASE_BEATS = 16;
@@ -875,6 +982,7 @@
           this.positionEstimate = {
             frameId: this.id,
             axisId: null,
+            orientationId: null,
             solution: POSITION_SOLUTION.ORIGIN,
             x: 0,
             y: 0,
@@ -884,6 +992,8 @@
             updatedAt: bornAt,
             observations: 0,
             targetDistance: null,
+            constraintCount: 0,
+            residualError: null,
             radialConstraint: null,
             mirrorCandidates: []
           };
@@ -960,6 +1070,7 @@
             version: POSITION_PROTOCOL_VERSION,
             frameId: this.positionEstimate.frameId,
             axisId: this.positionEstimate.axisId,
+            orientationId: this.positionEstimate.orientationId,
             solution: this.positionEstimate.solution,
             x: this.positionEstimate.x,
             y: this.positionEstimate.y,
@@ -973,6 +1084,7 @@
           this.positionEstimate = {
             frameId: this.id,
             axisId: null,
+            orientationId: null,
             solution: POSITION_SOLUTION.ORIGIN,
             x: 0,
             y: 0,
@@ -982,6 +1094,8 @@
             updatedAt: this.simulation.time,
             observations: 0,
             targetDistance: null,
+            constraintCount: 0,
+            residualError: null,
             radialConstraint: null,
             mirrorCandidates: []
           };
@@ -990,10 +1104,33 @@
         }
 
         rememberPeerPosition(remote, strength, senderId) {
+          const previous = this.knownPeers.get(senderId) || null;
+          const rawDistance = this.simulation.distanceFromSignalStrength(strength);
+          const rangeSamples = previous ? previous.rangeSamples + 1 : 1;
+          const previousDistance = previous ? previous.directDistance : rawDistance;
+          const previousVariance = previous ? previous.rangeVariance : 0;
+          const innovation = rawDistance - previousDistance;
+          const innovationSigma = Math.sqrt(Math.max(previousVariance, POSITION_RANGE_MIN_SIGMA ** 2));
+          const innovationLimit = POSITION_RANGE_OUTLIER_SIGMAS * innovationSigma;
+          const acceptedInnovation = rangeSamples > 4
+            ? clamp(innovation, -innovationLimit, innovationLimit)
+            : innovation;
+          const filterRate = rangeSamples <= 5 ? 1 / rangeSamples : POSITION_RANGE_FILTER_RATE;
+          const directDistance = previousDistance + acceptedInnovation * filterRate;
+          const rangeVariance = previous
+            ? previousVariance * (1 - POSITION_RANGE_VARIANCE_RATE)
+              + innovation * innovation * POSITION_RANGE_VARIANCE_RATE
+            : 0;
+          const filteredStrength = previous
+            ? previous.strength + (strength - previous.strength) * filterRate
+            : strength;
+
+          // Each peer keeps fixed-size filter state; no historical RSSI samples or physical coordinates are retained.
           const peer = {
             id: senderId,
             frameId: remote.frameId,
             axisId: Number.isFinite(remote.axisId) ? remote.axisId : null,
+            orientationId: Number.isFinite(remote.orientationId) ? remote.orientationId : null,
             solution: Object.values(POSITION_SOLUTION).includes(remote.solution)
               ? remote.solution
               : POSITION_SOLUTION.UNPLACED,
@@ -1002,8 +1139,14 @@
             confidence: clamp(remote.confidence, 0, 1),
             settled: remote.settled === true,
             sequence: Number.isFinite(remote.sequence) ? remote.sequence : 0,
-            directDistance: this.simulation.distanceFromSignalStrength(strength),
-            strength,
+            rawDistance,
+            directDistance,
+            rangeVariance,
+            rangeSigma: Math.sqrt(rangeVariance),
+            rangeSamples,
+            outlierLimited: acceptedInnovation !== innovation,
+            rawStrength: strength,
+            strength: filteredStrength,
             lastHeardAt: this.simulation.time
           };
           this.knownPeers.set(senderId, peer);
@@ -1017,6 +1160,7 @@
           const previousFrameId = local.frameId;
           local.frameId = frameId;
           local.axisId = null;
+          local.orientationId = null;
           local.solution = frameId === this.id ? POSITION_SOLUTION.ORIGIN : POSITION_SOLUTION.UNPLACED;
           local.x = 0;
           local.y = 0;
@@ -1024,6 +1168,8 @@
           local.settled = frameId === this.id;
           local.observations = 0;
           local.targetDistance = null;
+          local.constraintCount = 0;
+          local.residualError = null;
           local.radialConstraint = null;
           local.mirrorCandidates = [];
           local.sequence += 1;
@@ -1038,15 +1184,42 @@
         determineAxisId(originObservation) {
           const frameId = this.positionEstimate.frameId;
           if (this.id === frameId) {
+            // The first elected axis defines the frame's rotation and must survive later joins.
+            if (this.positionEstimate.axisId) return this.positionEstimate.axisId;
             const directlyHeardFollowers = [...this.knownPeers.keys()].filter(peerId => peerId !== frameId);
             return directlyHeardFollowers.length ? Math.max(...directlyHeardFollowers) : null;
           }
 
+          if (originObservation && originObservation.axisId) return originObservation.axisId;
+          if (this.positionEstimate.axisId) return this.positionEstimate.axisId;
+
           const candidates = [];
-          if (originObservation && originObservation.axisId) candidates.push(originObservation.axisId);
           for (const peer of this.knownPeers.values()) {
             if (peer.frameId !== frameId) continue;
             if (peer.axisId && peer.axisId !== frameId) candidates.push(peer.axisId);
+          }
+          return candidates.length ? Math.max(...candidates) : null;
+        }
+
+        determineOrientationId(originObservation) {
+          const local = this.positionEstimate;
+          const frameId = local.frameId;
+          if (this.id === frameId) {
+            // The orientation member fixes reflection by remaining on the frame's positive-y side.
+            if (local.orientationId && local.orientationId !== local.axisId) return local.orientationId;
+            const candidates = [...this.knownPeers.keys()].filter(peerId =>
+              peerId !== frameId && peerId !== local.axisId
+            );
+            return candidates.length ? Math.max(...candidates) : null;
+          }
+
+          if (originObservation && originObservation.orientationId) return originObservation.orientationId;
+          if (local.orientationId && local.orientationId !== local.axisId) return local.orientationId;
+
+          const candidates = [];
+          for (const peer of this.knownPeers.values()) {
+            if (peer.frameId !== frameId) continue;
+            if (peer.orientationId && peer.orientationId !== local.axisId) candidates.push(peer.orientationId);
           }
           return candidates.length ? Math.max(...candidates) : null;
         }
@@ -1059,6 +1232,8 @@
           local.y += (target.y - local.y) * POSITION_CONVERGENCE_RATE;
           local.solution = solution;
           local.targetDistance = details.targetDistance ?? null;
+          local.constraintCount = details.constraintCount ?? 0;
+          local.residualError = details.residualError ?? null;
           local.radialConstraint = null;
           local.mirrorCandidates = details.mirrorCandidates || [];
           local.observations += 1;
@@ -1082,6 +1257,8 @@
           local.confidence = clamp(peer.confidence * peer.strength * 0.5, 0, 1);
           local.settled = false;
           local.targetDistance = peer.directDistance;
+          local.constraintCount = 1;
+          local.residualError = null;
           local.radialConstraint = {
             centerId: peer.id,
             x: peer.x,
@@ -1106,23 +1283,148 @@
             + baseline ** 2
           ) / (2 * baseline);
           const ySquared = radiusFromOrigin ** 2 - x ** 2;
-          if (ySquared < -POSITION_SETTLED_EPSILON) return null;
-
+          // Noisy circles may miss each other; their closest axis solution is still a useful provisional estimate.
           const y = Math.sqrt(Math.max(0, ySquared));
           return [{ x, y }, { x, y: -y }];
         }
 
-        solvePositionFromKnowledge() {
-          if (this.simulation.entities.length > 3) return;
+        rangeResidualAt(point, peers) {
+          const squaredError = peers.reduce((sum, peer) => {
+            const residual = Math.hypot(point.x - peer.x, point.y - peer.y) - peer.directDistance;
+            return sum + residual * residual;
+          }, 0);
+          return Math.sqrt(squaredError / Math.max(peers.length, 1));
+        }
 
+        isFreshPositionPeer(peer) {
+          return Boolean(peer) && this.simulation.time - peer.lastHeardAt <= POSITION_PEER_MAX_AGE;
+        }
+
+        usablePositionPeers() {
+          const frameId = this.positionEstimate.frameId;
+          const usableSolutions = new Set([
+            POSITION_SOLUTION.ORIGIN,
+            POSITION_SOLUTION.AXIS,
+            POSITION_SOLUTION.ORIENTATION,
+            POSITION_SOLUTION.POSITIONED,
+            POSITION_SOLUTION.ADJUSTING
+          ]);
+          return [...this.knownPeers.values()].filter(peer =>
+            peer.frameId === frameId
+            && usableSolutions.has(peer.solution)
+            && peer.confidence > 0.02
+            && Number.isFinite(peer.directDistance)
+            && this.isFreshPositionPeer(peer)
+          );
+        }
+
+        positionPeerWeight(peer) {
+          const age = Math.max(0, this.simulation.time - peer.lastHeardAt);
+          const freshness = clamp(1 - age / POSITION_PEER_MAX_AGE, 0.1, 1);
+          const isFrameReference = [
+            POSITION_SOLUTION.ORIGIN,
+            POSITION_SOLUTION.AXIS,
+            POSITION_SOLUTION.ORIENTATION
+          ].includes(peer.solution);
+          const stability = peer.settled ? 1 : isFrameReference ? 0.75 : 0.35;
+          const uncertainty = 1 / (1 + peer.rangeSigma / POSITION_ROBUST_RESIDUAL_SCALE);
+          const maturity = clamp(peer.rangeSamples / 5, 0.2, 1);
+          return clamp(
+            peer.confidence * (0.25 + peer.strength * 0.75) * freshness * stability * uncertainty * maturity,
+            0.01,
+            1
+          );
+        }
+
+        multilaterationPass(peers, residualReference = null) {
+          const robustWeight = peer => {
+            const baseWeight = this.positionPeerWeight(peer);
+            if (!residualReference) return baseWeight;
+            const residual = Math.abs(
+              Math.hypot(residualReference.x - peer.x, residualReference.y - peer.y) - peer.directDistance
+            );
+            return baseWeight / (1 + (residual / POSITION_ROBUST_RESIDUAL_SCALE) ** 2);
+          };
+          const ordered = peers.slice().sort((a, b) => robustWeight(b) - robustWeight(a));
+          const pivot = ordered[0];
+          const pivotWeight = robustWeight(pivot);
+          let normalXX = 0;
+          let normalXY = 0;
+          let normalYY = 0;
+          let normalXValue = 0;
+          let normalYValue = 0;
+
+          for (const peer of ordered.slice(1)) {
+            const rowX = 2 * (peer.x - pivot.x);
+            const rowY = 2 * (peer.y - pivot.y);
+            const value = (
+              pivot.directDistance ** 2
+              - peer.directDistance ** 2
+              + peer.x ** 2
+              + peer.y ** 2
+              - pivot.x ** 2
+              - pivot.y ** 2
+            );
+            const weight = Math.min(pivotWeight, robustWeight(peer));
+            normalXX += weight * rowX * rowX;
+            normalXY += weight * rowX * rowY;
+            normalYY += weight * rowY * rowY;
+            normalXValue += weight * rowX * value;
+            normalYValue += weight * rowY * value;
+          }
+
+          // A near-zero score means the observed peer positions are effectively collinear.
+          const determinant = normalXX * normalYY - normalXY * normalXY;
+          const trace = normalXX + normalYY;
+          const geometryScore = trace > 0 ? clamp(4 * determinant / (trace * trace), 0, 1) : 0;
+          if (determinant <= 0 || geometryScore < POSITION_GEOMETRY_MIN_SCORE) return null;
+
+          const x = (normalXValue * normalYY - normalYValue * normalXY) / determinant;
+          const y = (normalYValue * normalXX - normalXValue * normalXY) / determinant;
+          if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+
+          return { target: { x, y }, geometryScore };
+        }
+
+        multilaterationSolution(peers) {
+          if (peers.length < 3) return null;
+
+          // The first fit exposes inconsistent links; the second fit limits their leverage without discarding them.
+          const initial = this.multilaterationPass(peers);
+          if (!initial) return null;
+          const refined = this.multilaterationPass(peers, initial.target) || initial;
+          const { x, y } = refined.target;
+
+          let weightedSquaredError = 0;
+          let totalWeight = 0;
+          for (const peer of peers) {
+            const weight = this.positionPeerWeight(peer);
+            const residual = Math.hypot(x - peer.x, y - peer.y) - peer.directDistance;
+            weightedSquaredError += weight * residual * residual;
+            totalWeight += weight;
+          }
+          const residualError = Math.sqrt(weightedSquaredError / Math.max(totalWeight, 0.01));
+          const averagePeerConfidence = peers.reduce((sum, peer) => sum + peer.confidence, 0) / peers.length;
+          const geometryConfidence = 0.45 + Math.sqrt(refined.geometryScore) * 0.55;
+          const residualConfidence = 1 / (1 + residualError / POSITION_ROBUST_RESIDUAL_SCALE);
+          return {
+            target: { x, y },
+            confidence: clamp(averagePeerConfidence * geometryConfidence * residualConfidence, 0, 1),
+            constraintCount: peers.length,
+            residualError
+          };
+        }
+
+        solvePositionFromKnowledge() {
           const local = this.positionEstimate;
           const frameId = local.frameId;
           const originPeer = this.knownPeers.get(frameId) || null;
-          const originObservation = originPeer && originPeer.frameId === frameId
+          const originObservation = this.isFreshPositionPeer(originPeer) && originPeer.frameId === frameId
             && originPeer.solution === POSITION_SOLUTION.ORIGIN
             ? originPeer
             : null;
           local.axisId = this.determineAxisId(originObservation);
+          local.orientationId = this.determineOrientationId(originObservation);
 
           if (this.id === frameId) {
             local.solution = POSITION_SOLUTION.ORIGIN;
@@ -1130,6 +1432,8 @@
             local.y = 0;
             local.confidence = 1;
             local.settled = true;
+            local.constraintCount = 0;
+            local.residualError = 0;
             local.radialConstraint = null;
             local.mirrorCandidates = [];
             return;
@@ -1140,26 +1444,55 @@
               { x: originObservation.directDistance, y: 0 },
               POSITION_SOLUTION.AXIS,
               originObservation.strength,
-              { targetDistance: originObservation.directDistance }
+              { targetDistance: originObservation.directDistance, constraintCount: 1, residualError: 0 }
             );
             return;
           }
 
           const axisObservation = local.axisId ? this.knownPeers.get(local.axisId) : null;
           const usableAxis = axisObservation
+            && this.isFreshPositionPeer(axisObservation)
             && axisObservation.frameId === frameId
             && axisObservation.solution === POSITION_SOLUTION.AXIS
-            && axisObservation.settled;
+            && axisObservation.rangeSamples >= 2;
 
           const mirrorCandidates = originObservation && usableAxis
             ? this.circleIntersectionsWithAxis(originObservation, axisObservation)
             : null;
+
+          if (local.orientationId === this.id && mirrorCandidates) {
+            const residualError = this.rangeResidualAt(mirrorCandidates[0], [originObservation, axisObservation]);
+            this.convergePosition(
+              mirrorCandidates[0],
+              POSITION_SOLUTION.ORIENTATION,
+              Math.min(originObservation.strength, axisObservation.strength, axisObservation.confidence),
+              { mirrorCandidates, constraintCount: 2, residualError }
+            );
+            return;
+          }
+
+          // Three non-collinear neighbor estimates make one 2-D position observable; all fresh ranges share the fit.
+          const multilateration = this.multilaterationSolution(this.usablePositionPeers());
+          if (multilateration) {
+            this.convergePosition(
+              multilateration.target,
+              POSITION_SOLUTION.ADJUSTING,
+              multilateration.confidence,
+              {
+                constraintCount: multilateration.constraintCount,
+                residualError: multilateration.residualError
+              }
+            );
+            return;
+          }
+
           if (mirrorCandidates) {
+            const residualError = this.rangeResidualAt(mirrorCandidates[0], [originObservation, axisObservation]);
             this.convergePosition(
               mirrorCandidates[0],
               POSITION_SOLUTION.POSITIONED,
               Math.min(originObservation.strength, axisObservation.strength, axisObservation.confidence),
-              { mirrorCandidates }
+              { mirrorCandidates, constraintCount: 2, residualError }
             );
             return;
           }
@@ -1176,8 +1509,15 @@
 
           const stablePeer = [...this.knownPeers.values()].find(peer =>
             peer.frameId === frameId
+            && this.isFreshPositionPeer(peer)
             && peer.settled
-            && [POSITION_SOLUTION.ORIGIN, POSITION_SOLUTION.AXIS, POSITION_SOLUTION.POSITIONED].includes(peer.solution)
+            && [
+              POSITION_SOLUTION.ORIGIN,
+              POSITION_SOLUTION.AXIS,
+              POSITION_SOLUTION.ORIENTATION,
+              POSITION_SOLUTION.POSITIONED,
+              POSITION_SOLUTION.ADJUSTING
+            ].includes(peer.solution)
           );
           if (stablePeer) this.setRadialBelief(stablePeer);
         }
@@ -1400,8 +1740,11 @@
           this.time = 0;
           this.paused = false;
           this.speed = 2;
-          this.range = 220;
+          this.range = 600;
           this.dropoff = "linear";
+          this.rssiJitter = 0;
+          this.txPowerSpread = 0;
+          this.linkBiasSpread = 0;
           this.leaderBpm = DEFAULT_BPM;
           this.deliveryQueue = [];
           this.waves = [];
@@ -1438,7 +1781,9 @@
           const entity = {
             x: clamp(x, 45, this.width - 45),
             y: clamp(y, 78, this.height - 72),
-            network: new TubeNode(this, this.time)
+            network: new TubeNode(this, this.time),
+            radioPowerOffset: this.random() * 2 - 1,
+            radioEnvironmentKey: Math.floor(this.random() * 0xFFFFFFFF)
           };
           this.entities.push(entity);
           this.log(entity.network, "system", `joined simulation with ${this.describeDNA(entity.network.dna)}`);
@@ -1511,6 +1856,35 @@
           return this.signalForNormalizedDistance(distance / range, dropoff);
         }
 
+        linkEnvironmentOffset(senderKey, targetKey) {
+          const lowKey = Math.min(senderKey, targetKey);
+          const highKey = Math.max(senderKey, targetKey);
+          let hash = Math.imul(lowKey, 0x45D9F3B) ^ Math.imul(highKey, 0x119DE1F3);
+          hash ^= hash >>> 16;
+          hash = Math.imul(hash, 0x45D9F3B);
+          hash ^= hash >>> 16;
+          return ((hash >>> 0) / 0xFFFFFFFF) * 2 - 1;
+        }
+
+        meanSignalBetween(senderEntity, targetEntity, distance) {
+          const distanceStrength = this.signalAtDistance(distance, this.range, this.dropoff);
+          if (distanceStrength <= 0) return 0;
+
+          // Hardware and environment offsets are stable; only the receiver's reported sample jitters per packet.
+          const transmitterScale = 1 + senderEntity.radioPowerOffset * this.txPowerSpread;
+          const environmentOffset = this.linkEnvironmentOffset(
+            senderEntity.radioEnvironmentKey,
+            targetEntity.radioEnvironmentKey
+          );
+          const environmentScale = 1 + environmentOffset * this.linkBiasSpread;
+          return clamp(distanceStrength * transmitterScale * environmentScale, 0, 1);
+        }
+
+        measuredSignalStrength(meanStrength) {
+          const jitterScale = 1 + (this.random() * 2 - 1) * this.rssiJitter;
+          return clamp(meanStrength * jitterScale, 0, 1);
+        }
+
         distanceFromSignalStrength(strength) {
           const targetStrength = clamp(strength, 0, 1);
           let near = 0;
@@ -1565,7 +1939,7 @@
           this.waves.push({
             sender: senderEntity,
             start: this.time,
-            end: this.time + RADIO_WAVE_TIME * (1 + RADIO_TRAIL_SPACING * (RADIO_TRAIL_COUNT - 1)),
+            end: this.time + RADIO_WAVE_TIME,
             range: this.range,
             dropoff: this.dropoff,
             traceId,
@@ -1577,14 +1951,14 @@
           for (const targetEntity of this.entities) {
             if (targetEntity.network === sender) continue;
             const distance = this.distance(senderEntity, targetEntity);
-            const strength = this.signalAtDistance(distance, this.range, this.dropoff);
-            if (strength <= 0) continue;
+            const meanStrength = this.meanSignalBetween(senderEntity, targetEntity, distance);
+            if (meanStrength <= 0) continue;
 
             this.stats.eligible += 1;
-            const success = this.random() < strength;
+            const success = this.random() < meanStrength;
             const start = this.time + (distance / this.range) * RADIO_WAVE_TIME;
             const end = start + 260;
-            this.pulses.push({ sender: senderEntity, target: targetEntity, success, strength, start, end, traceId, rebroadcast, hop, behalfOfId });
+            this.pulses.push({ sender: senderEntity, target: targetEntity, success, strength: meanStrength, start, end, traceId, rebroadcast, hop, behalfOfId });
 
             if (!success) {
               this.stats.dropped += 1;
@@ -1592,6 +1966,7 @@
             }
 
             this.stats.delivered += 1;
+            const measuredStrength = this.measuredSignalStrength(meanStrength);
             const latency = (distance / this.range) * RADIO_WAVE_TIME;
             this.deliveryQueue.push({
               at: this.time + latency,
@@ -1604,7 +1979,7 @@
                 data: cloneData(message.data),
                 position: { ...message.position }
               },
-              strength,
+              strength: measuredStrength,
               traceId,
               hop
             });
@@ -1657,6 +2032,12 @@
         rangeControl: document.getElementById("rangeControl"),
         rangeOutput: document.getElementById("rangeOutput"),
         dropoffControl: document.getElementById("dropoffControl"),
+        rssiJitterControl: document.getElementById("rssiJitterControl"),
+        rssiJitterOutput: document.getElementById("rssiJitterOutput"),
+        txSpreadControl: document.getElementById("txSpreadControl"),
+        txSpreadOutput: document.getElementById("txSpreadOutput"),
+        linkBiasControl: document.getElementById("linkBiasControl"),
+        linkBiasOutput: document.getElementById("linkBiasOutput"),
         speedControl: document.getElementById("speedControl"),
         speedOutput: document.getElementById("speedOutput"),
         bpmControl: document.getElementById("bpmControl"),
@@ -1799,6 +2180,18 @@
         ui.rangeOutput.value = `${simulation.range} px`;
       });
       ui.dropoffControl.addEventListener("change", () => { simulation.dropoff = ui.dropoffControl.value; });
+      ui.rssiJitterControl.addEventListener("input", () => {
+        simulation.rssiJitter = Number(ui.rssiJitterControl.value) / 100;
+        ui.rssiJitterOutput.value = `±${ui.rssiJitterControl.value}%`;
+      });
+      ui.txSpreadControl.addEventListener("input", () => {
+        simulation.txPowerSpread = Number(ui.txSpreadControl.value) / 100;
+        ui.txSpreadOutput.value = `±${ui.txSpreadControl.value}%`;
+      });
+      ui.linkBiasControl.addEventListener("input", () => {
+        simulation.linkBiasSpread = Number(ui.linkBiasControl.value) / 100;
+        ui.linkBiasOutput.value = `±${ui.linkBiasControl.value}%`;
+      });
       ui.speedControl.addEventListener("input", () => {
         simulation.speed = Number(ui.speedControl.value);
         ui.speedOutput.value = `${simulation.speed.toFixed(2).replace(/0$/, "")}×`;
@@ -1952,29 +2345,25 @@
 
       function drawRadioWaves() {
         for (const wave of simulation.waves) {
-          const elapsed = (simulation.time - wave.start) / RADIO_WAVE_TIME;
+          const progress = (simulation.time - wave.start) / RADIO_WAVE_TIME;
+          if (progress <= 0 || progress > 1) continue;
+
           const color = wave.rebroadcast ? "246, 211, 101" : "142, 240, 208";
+          const radius = progress * wave.range;
+          const strength = simulation.signalForNormalizedDistance(progress, wave.dropoff);
+          const alpha = 0.035 + strength * 0.42;
 
-          for (let trail = 0; trail < RADIO_TRAIL_COUNT; trail += 1) {
-            const progress = elapsed - trail * RADIO_TRAIL_SPACING;
-            if (progress <= 0 || progress > 1) continue;
-            const radius = progress * wave.range;
-            const strength = simulation.signalForNormalizedDistance(progress, wave.dropoff);
-            const trailScale = 1 - trail * 0.16;
-            const alpha = (0.035 + strength * 0.42) * trailScale;
+          context.strokeStyle = `rgba(${color}, ${alpha})`;
+          context.lineWidth = 0.65 + strength * 2.2;
+          context.beginPath();
+          context.arc(wave.sender.x, wave.sender.y, radius, 0, Math.PI * 2);
+          context.stroke();
 
-            context.strokeStyle = `rgba(${color}, ${alpha})`;
-            context.lineWidth = 0.65 + strength * 2.2;
-            context.beginPath();
-            context.arc(wave.sender.x, wave.sender.y, radius, 0, Math.PI * 2);
-            context.stroke();
-
-            if (trail === 0 && wave.rebroadcast && strength > 0.08) {
-              context.fillStyle = `rgba(${color}, ${Math.min(0.9, alpha + 0.25)})`;
-              context.font = "800 8px ui-monospace, monospace";
-              context.textAlign = "center";
-              context.fillText(`R${wave.hop}`, wave.sender.x, wave.sender.y - radius - 4);
-            }
+          if (wave.rebroadcast && strength > 0.08) {
+            context.fillStyle = `rgba(${color}, ${Math.min(0.9, alpha + 0.25)})`;
+            context.font = "800 8px ui-monospace, monospace";
+            context.textAlign = "center";
+            context.fillText(`R${wave.hop}`, wave.sender.x, wave.sender.y - radius - 4);
           }
         }
       }
@@ -2013,12 +2402,70 @@
         return { x: simulation.width / 2, y: simulation.height / 2 };
       }
 
-      function estimateCanvasPoint(node) {
-        const origin = estimateCanvasOrigin(node.positionEstimate.frameId);
+      function positionFrameRoleEntity(frameId, roleField) {
+        const frameOwner = simulation.entities.find(entity => entity.network.id === frameId);
+        const frameMember = frameOwner || simulation.entities.find(entity =>
+          entity.network.positionEstimate.frameId === frameId
+        );
+        const roleId = frameMember ? frameMember.network.positionEstimate[roleField] : null;
+        return roleId ? simulation.entities.find(entity => entity.network.id === roleId) || null : null;
+      }
+
+      function estimateDisplayTransform(frameId) {
+        const origin = estimateCanvasOrigin(frameId);
+        const axisEntity = positionFrameRoleEntity(frameId, "axisId");
+        if (!axisEntity || axisEntity.network.positionEstimate.frameId !== frameId) {
+          return { origin, estimatedX: { x: 1, y: 0 }, physicalX: { x: 1, y: 0 }, reflection: 1, rotation: 0 };
+        }
+
+        const estimatedAxis = axisEntity.network.positionEstimate;
+        const physicalAxis = { x: axisEntity.x - origin.x, y: axisEntity.y - origin.y };
+        const estimatedLength = Math.hypot(estimatedAxis.x, estimatedAxis.y);
+        const physicalLength = Math.hypot(physicalAxis.x, physicalAxis.y);
+        if (estimatedLength <= POSITION_SETTLED_EPSILON || physicalLength <= POSITION_SETTLED_EPSILON) {
+          return { origin, estimatedX: { x: 1, y: 0 }, physicalX: { x: 1, y: 0 }, reflection: 1, rotation: 0 };
+        }
+
+        const estimatedX = { x: estimatedAxis.x / estimatedLength, y: estimatedAxis.y / estimatedLength };
+        const physicalX = { x: physicalAxis.x / physicalLength, y: physicalAxis.y / physicalLength };
+        let reflection = 1;
+        const orientationEntity = positionFrameRoleEntity(frameId, "orientationId");
+        if (orientationEntity && orientationEntity.network.positionEstimate.frameId === frameId) {
+          const estimatedOrientation = orientationEntity.network.positionEstimate;
+          const physicalOrientation = {
+            x: orientationEntity.x - origin.x,
+            y: orientationEntity.y - origin.y
+          };
+          const estimatedSide = estimatedAxis.x * estimatedOrientation.y - estimatedAxis.y * estimatedOrientation.x;
+          const physicalSide = physicalAxis.x * physicalOrientation.y - physicalAxis.y * physicalOrientation.x;
+          if (Math.abs(estimatedSide) > POSITION_SETTLED_EPSILON && Math.abs(physicalSide) > POSITION_SETTLED_EPSILON) {
+            reflection = Math.sign(estimatedSide) === Math.sign(physicalSide) ? 1 : -1;
+          }
+        }
+
+        // Registration uses simulator-only physical vectors; device estimates and their metric errors remain untouched.
         return {
-          x: origin.x + node.positionEstimate.x,
-          y: origin.y + node.positionEstimate.y
+          origin,
+          estimatedX,
+          physicalX,
+          reflection,
+          rotation: Math.atan2(physicalX.y, physicalX.x) - Math.atan2(estimatedX.y, estimatedX.x)
         };
+      }
+
+      function estimateCanvasCoordinates(transform, x, y) {
+        const estimatedY = { x: -transform.estimatedX.y, y: transform.estimatedX.x };
+        const physicalY = { x: -transform.physicalX.y, y: transform.physicalX.x };
+        const alongAxis = x * transform.estimatedX.x + y * transform.estimatedX.y;
+        const acrossAxis = (x * estimatedY.x + y * estimatedY.y) * transform.reflection;
+        return {
+          x: transform.origin.x + alongAxis * transform.physicalX.x + acrossAxis * physicalY.x,
+          y: transform.origin.y + alongAxis * transform.physicalX.y + acrossAxis * physicalY.y
+        };
+      }
+
+      function estimateCanvasPoint(node, transform) {
+        return estimateCanvasCoordinates(transform, node.positionEstimate.x, node.positionEstimate.y);
       }
 
       function estimateColor(node, alpha = 1) {
@@ -2033,8 +2480,10 @@
 
         // Frame origins are visually registered to their physical owners for comparison only.
         const frameIds = new Set(simulation.entities.map(entity => entity.network.positionEstimate.frameId));
+        const frameTransforms = new Map([...frameIds].map(frameId => [frameId, estimateDisplayTransform(frameId)]));
         for (const frameId of frameIds) {
-          const origin = estimateCanvasOrigin(frameId);
+          const transform = frameTransforms.get(frameId);
+          const origin = transform.origin;
           context.setLineDash([2, 4]);
           context.strokeStyle = "rgba(142, 240, 208, 0.22)";
           context.lineWidth = 1;
@@ -2048,45 +2497,47 @@
           context.fillStyle = "rgba(142, 240, 208, 0.42)";
           context.font = "750 8px ui-monospace, monospace";
           context.textAlign = "left";
-          context.fillText(`F ${formatId(frameId)} ORIGIN (0,0)`, origin.x + 18, origin.y + 3);
+          const rotationDegrees = Math.round(transform.rotation * 180 / Math.PI);
+          const reflectionLabel = transform.reflection < 0 ? " · MIRRORED" : "";
+          context.fillText(
+            `F ${formatId(frameId)} ORIGIN (0,0) · VIEW ${rotationDegrees}°${reflectionLabel}`,
+            origin.x + 18,
+            origin.y + 3
+          );
         }
 
         if (selected) {
           const belief = selected.network.positionEstimate;
-          const selectedOrigin = estimateCanvasOrigin(belief.frameId);
-          const originX = selectedOrigin.x;
-          const originY = selectedOrigin.y;
+          const selectedTransform = frameTransforms.get(belief.frameId);
           const radial = belief.radialConstraint;
           if (radial) {
-            const centerX = originX + radial.x;
-            const centerY = originY + radial.y;
+            const center = estimateCanvasCoordinates(selectedTransform, radial.x, radial.y);
             context.setLineDash([7, 6]);
             context.strokeStyle = "rgba(255, 143, 184, 0.62)";
             context.lineWidth = 1.4;
             context.beginPath();
-            context.arc(centerX, centerY, radial.radius, 0, Math.PI * 2);
+            context.arc(center.x, center.y, radial.radius, 0, Math.PI * 2);
             context.stroke();
             context.setLineDash([]);
             context.fillStyle = "rgba(255, 143, 184, 0.88)";
             context.font = "800 8px ui-monospace, monospace";
             context.fillText(
               `RANGE TO ${formatId(radial.centerId)} · ${radial.radius.toFixed(1)}`,
-              centerX + radial.radius + 6,
-              centerY - 5
+              center.x + radial.radius + 6,
+              center.y - 5
             );
           }
 
           for (let index = 0; index < belief.mirrorCandidates.length; index += 1) {
             const candidate = belief.mirrorCandidates[index];
-            const candidateX = originX + candidate.x;
-            const candidateY = originY + candidate.y;
+            const candidatePoint = estimateCanvasCoordinates(selectedTransform, candidate.x, candidate.y);
             const size = index === 0 ? 6 : 5;
             context.fillStyle = index === 0 ? "rgba(246, 211, 101, 0.95)" : "rgba(246, 211, 101, 0.38)";
             context.beginPath();
-            context.moveTo(candidateX, candidateY - size);
-            context.lineTo(candidateX + size, candidateY);
-            context.lineTo(candidateX, candidateY + size);
-            context.lineTo(candidateX - size, candidateY);
+            context.moveTo(candidatePoint.x, candidatePoint.y - size);
+            context.lineTo(candidatePoint.x + size, candidatePoint.y);
+            context.lineTo(candidatePoint.x, candidatePoint.y + size);
+            context.lineTo(candidatePoint.x - size, candidatePoint.y);
             context.closePath();
             context.fill();
           }
@@ -2094,7 +2545,8 @@
 
         const groups = new Map();
         for (const entity of simulation.entities) {
-          const point = estimateCanvasPoint(entity.network);
+          const transform = frameTransforms.get(entity.network.positionEstimate.frameId);
+          const point = estimateCanvasPoint(entity.network, transform);
           const key = `${point.x.toFixed(2)},${point.y.toFixed(2)}`;
           if (!groups.has(key)) groups.set(key, { point, entities: [] });
           groups.get(key).entities.push(entity);
@@ -2308,6 +2760,11 @@
             speed: simulation.speed,
             radioRange: simulation.range,
             dropoff: simulation.dropoff,
+            radioUncertainty: {
+              rssiJitterPercent: Math.round(simulation.rssiJitter * 100),
+              transmitPowerSpreadPercent: Math.round(simulation.txPowerSpread * 100),
+              linkBiasSpreadPercent: Math.round(simulation.linkBiasSpread * 100)
+            },
             leaderBpm: simulation.leaderBpm
           },
           summary: {
@@ -2341,6 +2798,7 @@
                 positionEstimate: {
                   frameId: formatId(node.positionEstimate.frameId),
                   axisId: node.positionEstimate.axisId ? formatId(node.positionEstimate.axisId) : null,
+                  orientationId: node.positionEstimate.orientationId ? formatId(node.positionEstimate.orientationId) : null,
                   solution: node.positionEstimate.solution,
                   x: +node.positionEstimate.x.toFixed(2),
                   y: +node.positionEstimate.y.toFixed(2),
@@ -2352,6 +2810,10 @@
                   targetDistance: node.positionEstimate.targetDistance === null
                     ? null
                     : +node.positionEstimate.targetDistance.toFixed(2),
+                  constraintCount: node.positionEstimate.constraintCount,
+                  residualError: node.positionEstimate.residualError === null
+                    ? null
+                    : +node.positionEstimate.residualError.toFixed(3),
                   radialConstraint: node.positionEstimate.radialConstraint
                     ? {
                         centerId: formatId(node.positionEstimate.radialConstraint.centerId),
@@ -2369,11 +2831,16 @@
                   id: formatId(peer.id),
                   frameId: formatId(peer.frameId),
                   axisId: peer.axisId ? formatId(peer.axisId) : null,
+                  orientationId: peer.orientationId ? formatId(peer.orientationId) : null,
                   solution: peer.solution,
                   estimate: { x: +peer.x.toFixed(2), y: +peer.y.toFixed(2) },
                   confidence: +peer.confidence.toFixed(3),
                   settled: peer.settled,
+                  rawDistance: +peer.rawDistance.toFixed(2),
                   directDistance: +peer.directDistance.toFixed(2),
+                  rangeSigma: +peer.rangeSigma.toFixed(2),
+                  rangeSamples: peer.rangeSamples,
+                  outlierLimited: peer.outlierLimited,
                   strength: +peer.strength.toFixed(3),
                   lastHeardAtMs: Math.round(peer.lastHeardAt)
                 })),
@@ -2388,6 +2855,8 @@
               },
               simulatorOnly: {
                 position: { x: Math.round(entity.x), y: Math.round(entity.y) },
+                radioPowerOffset: +entity.radioPowerOffset.toFixed(3),
+                activeTransmitPowerBiasPercent: +(entity.radioPowerOffset * simulation.txPowerSpread * 100).toFixed(2),
                 idsInsideHardRange: inRange,
                 warning: simulation.localMaximumWarning(entity)
               }
@@ -2421,6 +2890,9 @@
             position: delivery.message.position ? {
               frameId: formatId(delivery.message.position.frameId),
               axisId: delivery.message.position.axisId ? formatId(delivery.message.position.axisId) : null,
+              orientationId: delivery.message.position.orientationId
+                ? formatId(delivery.message.position.orientationId)
+                : null,
               solution: delivery.message.position.solution,
               x: +delivery.message.position.x.toFixed(2),
               y: +delivery.message.position.y.toFixed(2),
@@ -2443,10 +2915,15 @@
 
       function createCompactSnapshot(snapshot = createSnapshot()) {
         return {
-          v: 3,
+          v: 5,
           t: snapshot.capturedAtSimulationMs,
           p: snapshot.simulation.paused ? 1 : 0,
           r: [snapshot.simulation.radioRange, snapshot.simulation.dropoff],
+          u: [
+            snapshot.simulation.radioUncertainty.rssiJitterPercent,
+            snapshot.simulation.radioUncertainty.transmitPowerSpreadPercent,
+            snapshot.simulation.radioUncertainty.linkBiasSpreadPercent
+          ],
           s: [snapshot.summary.nodes, snapshot.summary.leaders, snapshot.summary.relayTransmissions, snapshot.summary.topologyWarnings],
           n: snapshot.nodes.map(node => [
             node.deviceLocal.id,
@@ -2467,6 +2944,7 @@
             node.deviceLocal.positionEstimate.y,
             node.deviceLocal.positionEstimate.confidence,
             node.deviceLocal.positionEstimate.axisId || "-",
+            node.deviceLocal.positionEstimate.orientationId || "-",
             node.deviceLocal.positionEstimate.solution
           ]),
           w: snapshot.warnings.map(warning => [
@@ -2536,9 +3014,18 @@
           : formatId(node.positionEstimate.frameId);
         const positioningScope = simulation.entities.length === 1
           ? "waiting"
-          : simulation.entities.length <= 3 ? `${simulation.entities.length}-device` : "paused at 4+";
+          : simulation.entities.length <= 3 ? `${simulation.entities.length}-device` : "distributed adjustment";
         const axisLabel = node.positionEstimate.axisId ? ` · axis ${formatId(node.positionEstimate.axisId)}` : "";
-        ui.factPositionMode.textContent = `${positioningScope} · ${node.positionEstimate.solution}${axisLabel}`;
+        const orientationLabel = node.positionEstimate.orientationId
+          ? ` · +Y ${formatId(node.positionEstimate.orientationId)}`
+          : "";
+        const constraintLabel = node.positionEstimate.constraintCount
+          ? ` · ${node.positionEstimate.constraintCount} range${node.positionEstimate.constraintCount === 1 ? "" : "s"}`
+          : "";
+        const residualLabel = node.positionEstimate.residualError === null
+          ? ""
+          : ` · residual ${node.positionEstimate.residualError.toFixed(2)}`;
+        ui.factPositionMode.textContent = `${positioningScope} · ${node.positionEstimate.solution}${axisLabel}${orientationLabel}${constraintLabel}${residualLabel}`;
         const beat = node.current.beatFrame / BEAT_UNITS;
         const phrase = node.currentPhrase();
         ui.factClock.textContent = `${beat.toFixed(2)} / ${phrase}`;
@@ -2568,7 +3055,7 @@
 
         const signals = simulation.entities
           .filter(entity => entity !== selected)
-          .map(entity => simulation.signalAtDistance(simulation.distance(selected, entity)))
+          .map(entity => simulation.meanSignalBetween(entity, selected, simulation.distance(selected, entity)))
           .filter(strength => strength > 0);
         ui.factNeighbors.textContent = String(signals.length);
         ui.factSignal.textContent = signals.length ? `${Math.round(Math.max(...signals) * 100)}%` : "none";
@@ -2589,7 +3076,8 @@
             peerId.textContent = formatId(peer.id);
             const claim = document.createElement("span");
             const ageSeconds = Math.max(0, (simulation.time - peer.lastHeardAt) / 1000);
-            claim.textContent = `F${formatId(peer.frameId)} · ${peer.solution} (${peer.x.toFixed(1)}, ${peer.y.toFixed(1)}) · direct d=${peer.directDistance.toFixed(1)} · ${ageSeconds.toFixed(1)}s ago`;
+            const outlierLabel = peer.outlierLimited ? " · spike limited" : "";
+            claim.textContent = `F${formatId(peer.frameId)} · ${peer.solution} (${peer.x.toFixed(1)}, ${peer.y.toFixed(1)}) · range ${peer.rawDistance.toFixed(1)}→${peer.directDistance.toFixed(1)} σ${peer.rangeSigma.toFixed(1)} n${peer.rangeSamples}${outlierLabel} · ${ageSeconds.toFixed(1)}s ago`;
             item.append(peerId, claim);
             ui.positionKnowledgeList.appendChild(item);
           }
