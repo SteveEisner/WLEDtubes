@@ -652,6 +652,12 @@
         </section>
 
         <section class="section">
+          <h3 class="section-title">Position knowledge <em>direct observations</em></h3>
+          <ul class="traffic-list" id="positionKnowledgeList"></ul>
+          <div class="note">Each entry combines the peer’s advertised estimate with this device’s own range measurement to that immediate radio sender.</div>
+        </section>
+
+        <section class="section">
           <h3 class="section-title">Simulator view <em>not visible to device</em></h3>
           <div class="facts">
             <div class="fact"><span>Physical position</span><strong id="factPosition">0, 0</strong></div>
@@ -687,6 +693,8 @@
             <div class="legend-item"><span class="legend-mark" style="--mark:#aab4c8"></span>uplink</div>
             <div class="legend-item"><span style="color:#f4f7ff;font:800 14px/1 ui-monospace,monospace">⊕</span>physical X,Y center</div>
             <div class="legend-item"><span style="color:#8ef0d0;font:800 14px/1 ui-monospace,monospace">◇</span>device-estimated position</div>
+            <div class="legend-item"><span style="color:#ff8fb8;font:800 14px/1 ui-monospace,monospace">◯</span>possible-position circle</div>
+            <div class="legend-item"><span style="color:#f6d365;font:800 14px/1 ui-monospace,monospace">◆</span>mirror candidates</div>
           </div>
           <div class="note">A wavefront travels from antenna to maximum range in one simulated time unit (1 second). Ring opacity is the selected power-decay function evaluated at that radius.</div>
         </section>
@@ -710,6 +718,14 @@
       const POSITION_UPDATE_PERIOD = 1000;
       const POSITION_CONVERGENCE_RATE = 0.28;
       const POSITION_CONFIDENCE_RATE = 0.22;
+      const POSITION_SETTLED_EPSILON = 0.5;
+      const POSITION_SOLUTION = Object.freeze({
+        ORIGIN: "origin",
+        AXIS: "axis",
+        RADIAL: "radial",
+        POSITIONED: "positioned",
+        UNPLACED: "unplaced"
+      });
       const RADIO_WAVE_TIME = 1000;
       const RADIO_TRAIL_COUNT = 3;
       const RADIO_TRAIL_SPACING = 0.075;
@@ -858,14 +874,20 @@
           this.id = simulation.randomMeshId();
           this.positionEstimate = {
             frameId: this.id,
+            axisId: null,
+            solution: POSITION_SOLUTION.ORIGIN,
             x: 0,
             y: 0,
             confidence: 1,
+            settled: true,
             sequence: 0,
             updatedAt: bornAt,
             observations: 0,
-            targetDistance: null
+            targetDistance: null,
+            radialConstraint: null,
+            mirrorCandidates: []
           };
+          this.knownPeers = new Map();
           this.lastPositionLogAt = -Infinity;
           this.uplinkId = 0;
           this.version = PROTOCOL_VERSION;
@@ -937,9 +959,12 @@
           return {
             version: POSITION_PROTOCOL_VERSION,
             frameId: this.positionEstimate.frameId,
+            axisId: this.positionEstimate.axisId,
+            solution: this.positionEstimate.solution,
             x: this.positionEstimate.x,
             y: this.positionEstimate.y,
             confidence: this.positionEstimate.confidence,
+            settled: this.positionEstimate.settled,
             sequence: this.positionEstimate.sequence
           };
         }
@@ -947,73 +972,225 @@
         resetPositionEstimate() {
           this.positionEstimate = {
             frameId: this.id,
+            axisId: null,
+            solution: POSITION_SOLUTION.ORIGIN,
             x: 0,
             y: 0,
             confidence: 1,
+            settled: true,
             sequence: 0,
             updatedAt: this.simulation.time,
             observations: 0,
-            targetDistance: null
+            targetDistance: null,
+            radialConstraint: null,
+            mirrorCandidates: []
           };
+          this.knownPeers = new Map();
           this.lastPositionLogAt = -Infinity;
         }
 
-        receivePosition(remote, strength, senderId) {
-          // The next geometric case is intentionally undefined until we design the three-device solver.
-          if (this.simulation.entities.length !== 2) return;
-          if (!remote || remote.version !== POSITION_PROTOCOL_VERSION) return;
-          if (!Number.isFinite(remote.frameId) || !Number.isFinite(remote.x) || !Number.isFinite(remote.y)) return;
-          if (!Number.isFinite(remote.confidence) || senderId === this.id) return;
+        rememberPeerPosition(remote, strength, senderId) {
+          const peer = {
+            id: senderId,
+            frameId: remote.frameId,
+            axisId: Number.isFinite(remote.axisId) ? remote.axisId : null,
+            solution: Object.values(POSITION_SOLUTION).includes(remote.solution)
+              ? remote.solution
+              : POSITION_SOLUTION.UNPLACED,
+            x: remote.x,
+            y: remote.y,
+            confidence: clamp(remote.confidence, 0, 1),
+            settled: remote.settled === true,
+            sequence: Number.isFinite(remote.sequence) ? remote.sequence : 0,
+            directDistance: this.simulation.distanceFromSignalStrength(strength),
+            strength,
+            lastHeardAt: this.simulation.time
+          };
+          this.knownPeers.set(senderId, peer);
+          return peer;
+        }
 
+        adoptPositionFrame(frameId, senderId) {
           const local = this.positionEstimate;
-          if (remote.frameId !== local.frameId) {
-            // For two Tubes, the higher-ID lighting leader also owns the positioning origin.
-            const remoteLeaderWins = remote.frameId > local.frameId;
-            if (!remoteLeaderWins) return;
+          if (frameId <= local.frameId) return;
 
-            const previousFrameId = local.frameId;
-            local.frameId = remote.frameId;
-            local.x = 0;
-            local.y = 0;
-            local.confidence = 0;
-            local.observations = 0;
-            local.targetDistance = null;
-            local.sequence += 1;
-            local.updatedAt = this.simulation.time;
-            this.simulation.log(
-              this,
-              "position",
-              `adopted frame ${formatId(remote.frameId)} from ${formatId(senderId)}; previous frame ${formatId(previousFrameId)}`
-            );
+          const previousFrameId = local.frameId;
+          local.frameId = frameId;
+          local.axisId = null;
+          local.solution = frameId === this.id ? POSITION_SOLUTION.ORIGIN : POSITION_SOLUTION.UNPLACED;
+          local.x = 0;
+          local.y = 0;
+          local.confidence = frameId === this.id ? 1 : 0;
+          local.settled = frameId === this.id;
+          local.observations = 0;
+          local.targetDistance = null;
+          local.radialConstraint = null;
+          local.mirrorCandidates = [];
+          local.sequence += 1;
+          local.updatedAt = this.simulation.time;
+          this.simulation.log(
+            this,
+            "position",
+            `adopted frame ${formatId(frameId)} from ${formatId(senderId)}; previous frame ${formatId(previousFrameId)}`
+          );
+        }
+
+        determineAxisId(originObservation) {
+          const frameId = this.positionEstimate.frameId;
+          if (this.id === frameId) {
+            const directlyHeardFollowers = [...this.knownPeers.keys()].filter(peerId => peerId !== frameId);
+            return directlyHeardFollowers.length ? Math.max(...directlyHeardFollowers) : null;
           }
 
-          if (local.frameId === this.id || remote.frameId !== local.frameId) return;
-          if (senderId !== local.frameId) return;
+          const candidates = [];
+          if (originObservation && originObservation.axisId) candidates.push(originObservation.axisId);
+          for (const peer of this.knownPeers.values()) {
+            if (peer.frameId !== frameId) continue;
+            if (peer.axisId && peer.axisId !== frameId) candidates.push(peer.axisId);
+          }
+          return candidates.length ? Math.max(...candidates) : null;
+        }
 
-          // Two range-only devices choose the positive X axis as their otherwise-unobservable orientation.
-          const measuredDistance = this.simulation.distanceFromSignalStrength(strength);
-          const targetX = remote.x + measuredDistance;
-          const targetY = remote.y;
+        convergePosition(target, solution, confidence, details = {}) {
+          const local = this.positionEstimate;
           const previousX = local.x;
           const previousY = local.y;
-          local.x += (targetX - local.x) * POSITION_CONVERGENCE_RATE;
-          local.y += (targetY - local.y) * POSITION_CONVERGENCE_RATE;
-          local.targetDistance = measuredDistance;
+          local.x += (target.x - local.x) * POSITION_CONVERGENCE_RATE;
+          local.y += (target.y - local.y) * POSITION_CONVERGENCE_RATE;
+          local.solution = solution;
+          local.targetDistance = details.targetDistance ?? null;
+          local.radialConstraint = null;
+          local.mirrorCandidates = details.mirrorCandidates || [];
           local.observations += 1;
-          const observationConfidence = clamp(remote.confidence * strength, 0, 1);
-          local.confidence += (observationConfidence - local.confidence) * POSITION_CONFIDENCE_RATE;
+          local.confidence += (clamp(confidence, 0, 1) - local.confidence) * POSITION_CONFIDENCE_RATE;
+          local.settled = Math.hypot(target.x - local.x, target.y - local.y) <= POSITION_SETTLED_EPSILON;
           local.sequence += 1;
           local.updatedAt = this.simulation.time;
 
           const movement = Math.hypot(local.x - previousX, local.y - previousY);
           if (movement > 0.2 && this.simulation.time - this.lastPositionLogAt >= POSITION_UPDATE_PERIOD) {
             this.lastPositionLogAt = this.simulation.time;
-            this.simulation.log(
-              this,
-              "position",
-              `nudged toward (${targetX.toFixed(1)}, ${targetY.toFixed(1)}) from signal range ${measuredDistance.toFixed(1)}`
-            );
+            this.simulation.log(this, "position", `${solution} → (${target.x.toFixed(1)}, ${target.y.toFixed(1)})`);
           }
+        }
+
+        setRadialBelief(peer) {
+          const local = this.positionEstimate;
+          local.solution = POSITION_SOLUTION.RADIAL;
+          local.x = peer.x + peer.directDistance;
+          local.y = peer.y;
+          local.confidence = clamp(peer.confidence * peer.strength * 0.5, 0, 1);
+          local.settled = false;
+          local.targetDistance = peer.directDistance;
+          local.radialConstraint = {
+            centerId: peer.id,
+            x: peer.x,
+            y: peer.y,
+            radius: peer.directDistance
+          };
+          local.mirrorCandidates = [];
+          local.observations += 1;
+          local.sequence += 1;
+          local.updatedAt = this.simulation.time;
+        }
+
+        circleIntersectionsWithAxis(originObservation, axisObservation) {
+          const baseline = Math.hypot(axisObservation.x, axisObservation.y);
+          if (baseline <= POSITION_SETTLED_EPSILON) return null;
+
+          const radiusFromOrigin = originObservation.directDistance;
+          const radiusFromAxis = axisObservation.directDistance;
+          const x = (
+            radiusFromOrigin ** 2
+            - radiusFromAxis ** 2
+            + baseline ** 2
+          ) / (2 * baseline);
+          const ySquared = radiusFromOrigin ** 2 - x ** 2;
+          if (ySquared < -POSITION_SETTLED_EPSILON) return null;
+
+          const y = Math.sqrt(Math.max(0, ySquared));
+          return [{ x, y }, { x, y: -y }];
+        }
+
+        solvePositionFromKnowledge() {
+          if (this.simulation.entities.length > 3) return;
+
+          const local = this.positionEstimate;
+          const frameId = local.frameId;
+          const originPeer = this.knownPeers.get(frameId) || null;
+          const originObservation = originPeer && originPeer.frameId === frameId
+            && originPeer.solution === POSITION_SOLUTION.ORIGIN
+            ? originPeer
+            : null;
+          local.axisId = this.determineAxisId(originObservation);
+
+          if (this.id === frameId) {
+            local.solution = POSITION_SOLUTION.ORIGIN;
+            local.x = 0;
+            local.y = 0;
+            local.confidence = 1;
+            local.settled = true;
+            local.radialConstraint = null;
+            local.mirrorCandidates = [];
+            return;
+          }
+
+          if (local.axisId === this.id && originObservation) {
+            this.convergePosition(
+              { x: originObservation.directDistance, y: 0 },
+              POSITION_SOLUTION.AXIS,
+              originObservation.strength,
+              { targetDistance: originObservation.directDistance }
+            );
+            return;
+          }
+
+          const axisObservation = local.axisId ? this.knownPeers.get(local.axisId) : null;
+          const usableAxis = axisObservation
+            && axisObservation.frameId === frameId
+            && axisObservation.solution === POSITION_SOLUTION.AXIS
+            && axisObservation.settled;
+
+          const mirrorCandidates = originObservation && usableAxis
+            ? this.circleIntersectionsWithAxis(originObservation, axisObservation)
+            : null;
+          if (mirrorCandidates) {
+            this.convergePosition(
+              mirrorCandidates[0],
+              POSITION_SOLUTION.POSITIONED,
+              Math.min(originObservation.strength, axisObservation.strength, axisObservation.confidence),
+              { mirrorCandidates }
+            );
+            return;
+          }
+
+          if (originObservation) {
+            this.setRadialBelief({
+              ...originObservation,
+              x: 0,
+              y: 0,
+              confidence: 1
+            });
+            return;
+          }
+
+          const stablePeer = [...this.knownPeers.values()].find(peer =>
+            peer.frameId === frameId
+            && peer.settled
+            && [POSITION_SOLUTION.ORIGIN, POSITION_SOLUTION.AXIS, POSITION_SOLUTION.POSITIONED].includes(peer.solution)
+          );
+          if (stablePeer) this.setRadialBelief(stablePeer);
+        }
+
+        receivePosition(remote, strength, senderId) {
+          if (!remote || remote.version !== POSITION_PROTOCOL_VERSION) return;
+          if (!Number.isFinite(remote.frameId) || !Number.isFinite(remote.x) || !Number.isFinite(remote.y)) return;
+          if (!Number.isFinite(remote.confidence) || senderId === this.id) return;
+
+          this.rememberPeerPosition(remote, strength, senderId);
+          const discoveredLeaderId = Math.max(senderId, remote.frameId);
+          this.adoptPositionFrame(discoveredLeaderId, senderId);
+          this.solvePositionFromKnowledge();
         }
 
         scheduleNextPattern(phrase) {
@@ -1526,6 +1703,7 @@
         mirrorSnapshot: document.getElementById("mirrorSnapshot"),
         copyStatus: document.getElementById("copyStatus"),
         debugSnapshot: document.getElementById("debugSnapshot"),
+        positionKnowledgeList: document.getElementById("positionKnowledgeList"),
         trafficList: document.getElementById("trafficList")
       };
 
@@ -1829,10 +2007,17 @@
         }
       }
 
+      function estimateCanvasOrigin(frameId) {
+        const frameOwner = simulation.entities.find(entity => entity.network.id === frameId);
+        if (frameOwner) return { x: frameOwner.x, y: frameOwner.y };
+        return { x: simulation.width / 2, y: simulation.height / 2 };
+      }
+
       function estimateCanvasPoint(node) {
+        const origin = estimateCanvasOrigin(node.positionEstimate.frameId);
         return {
-          x: simulation.width / 2 + node.positionEstimate.x,
-          y: simulation.height / 2 + node.positionEstimate.y
+          x: origin.x + node.positionEstimate.x,
+          y: origin.y + node.positionEstimate.y
         };
       }
 
@@ -1844,25 +2029,68 @@
       function drawEstimatedPositions() {
         if (!ui.showEstimates.checked) return;
 
-        const originX = simulation.width / 2;
-        const originY = simulation.height / 2;
         context.save();
 
-        // This origin exists only in the diagnostic estimate layer. It is not physical truth.
-        context.setLineDash([2, 4]);
-        context.strokeStyle = "rgba(142, 240, 208, 0.22)";
-        context.lineWidth = 1;
-        context.beginPath();
-        context.moveTo(originX - 15, originY);
-        context.lineTo(originX + 15, originY);
-        context.moveTo(originX, originY - 15);
-        context.lineTo(originX, originY + 15);
-        context.stroke();
-        context.setLineDash([]);
-        context.fillStyle = "rgba(142, 240, 208, 0.42)";
-        context.font = "750 8px ui-monospace, monospace";
-        context.textAlign = "left";
-        context.fillText("ESTIMATE ORIGIN (0,0)", originX + 18, originY + 3);
+        // Frame origins are visually registered to their physical owners for comparison only.
+        const frameIds = new Set(simulation.entities.map(entity => entity.network.positionEstimate.frameId));
+        for (const frameId of frameIds) {
+          const origin = estimateCanvasOrigin(frameId);
+          context.setLineDash([2, 4]);
+          context.strokeStyle = "rgba(142, 240, 208, 0.22)";
+          context.lineWidth = 1;
+          context.beginPath();
+          context.moveTo(origin.x - 15, origin.y);
+          context.lineTo(origin.x + 15, origin.y);
+          context.moveTo(origin.x, origin.y - 15);
+          context.lineTo(origin.x, origin.y + 15);
+          context.stroke();
+          context.setLineDash([]);
+          context.fillStyle = "rgba(142, 240, 208, 0.42)";
+          context.font = "750 8px ui-monospace, monospace";
+          context.textAlign = "left";
+          context.fillText(`F ${formatId(frameId)} ORIGIN (0,0)`, origin.x + 18, origin.y + 3);
+        }
+
+        if (selected) {
+          const belief = selected.network.positionEstimate;
+          const selectedOrigin = estimateCanvasOrigin(belief.frameId);
+          const originX = selectedOrigin.x;
+          const originY = selectedOrigin.y;
+          const radial = belief.radialConstraint;
+          if (radial) {
+            const centerX = originX + radial.x;
+            const centerY = originY + radial.y;
+            context.setLineDash([7, 6]);
+            context.strokeStyle = "rgba(255, 143, 184, 0.62)";
+            context.lineWidth = 1.4;
+            context.beginPath();
+            context.arc(centerX, centerY, radial.radius, 0, Math.PI * 2);
+            context.stroke();
+            context.setLineDash([]);
+            context.fillStyle = "rgba(255, 143, 184, 0.88)";
+            context.font = "800 8px ui-monospace, monospace";
+            context.fillText(
+              `RANGE TO ${formatId(radial.centerId)} · ${radial.radius.toFixed(1)}`,
+              centerX + radial.radius + 6,
+              centerY - 5
+            );
+          }
+
+          for (let index = 0; index < belief.mirrorCandidates.length; index += 1) {
+            const candidate = belief.mirrorCandidates[index];
+            const candidateX = originX + candidate.x;
+            const candidateY = originY + candidate.y;
+            const size = index === 0 ? 6 : 5;
+            context.fillStyle = index === 0 ? "rgba(246, 211, 101, 0.95)" : "rgba(246, 211, 101, 0.38)";
+            context.beginPath();
+            context.moveTo(candidateX, candidateY - size);
+            context.lineTo(candidateX + size, candidateY);
+            context.lineTo(candidateX, candidateY + size);
+            context.lineTo(candidateX - size, candidateY);
+            context.closePath();
+            context.fill();
+          }
+        }
 
         const groups = new Map();
         for (const entity of simulation.entities) {
@@ -1928,7 +2156,11 @@
             context.fillStyle = estimateColor(node, isSelected ? 1 : 0.78);
             context.font = `${isSelected ? 850 : 750} 8px ui-monospace, monospace`;
             context.textAlign = "left";
-            context.fillText(`E ${formatId(node.id)} · F ${formatId(node.positionEstimate.frameId)}`, point.x + maximumRadius + 8, labelY + 3);
+            context.fillText(
+              `E ${formatId(node.id)} · F ${formatId(node.positionEstimate.frameId)} · ${node.positionEstimate.solution.toUpperCase()}`,
+              point.x + maximumRadius + 8,
+              labelY + 3
+            );
           }
         }
 
@@ -2108,16 +2340,43 @@
                 },
                 positionEstimate: {
                   frameId: formatId(node.positionEstimate.frameId),
+                  axisId: node.positionEstimate.axisId ? formatId(node.positionEstimate.axisId) : null,
+                  solution: node.positionEstimate.solution,
                   x: +node.positionEstimate.x.toFixed(2),
                   y: +node.positionEstimate.y.toFixed(2),
                   confidence: +node.positionEstimate.confidence.toFixed(3),
+                  settled: node.positionEstimate.settled,
                   sequence: node.positionEstimate.sequence,
                   updatedAtMs: Math.round(node.positionEstimate.updatedAt),
                   observations: node.positionEstimate.observations,
                   targetDistance: node.positionEstimate.targetDistance === null
                     ? null
-                    : +node.positionEstimate.targetDistance.toFixed(2)
+                    : +node.positionEstimate.targetDistance.toFixed(2),
+                  radialConstraint: node.positionEstimate.radialConstraint
+                    ? {
+                        centerId: formatId(node.positionEstimate.radialConstraint.centerId),
+                        x: +node.positionEstimate.radialConstraint.x.toFixed(2),
+                        y: +node.positionEstimate.radialConstraint.y.toFixed(2),
+                        radius: +node.positionEstimate.radialConstraint.radius.toFixed(2)
+                      }
+                    : null,
+                  mirrorCandidates: node.positionEstimate.mirrorCandidates.map(candidate => ({
+                    x: +candidate.x.toFixed(2),
+                    y: +candidate.y.toFixed(2)
+                  }))
                 },
+                knownPeers: [...node.knownPeers.values()].map(peer => ({
+                  id: formatId(peer.id),
+                  frameId: formatId(peer.frameId),
+                  axisId: peer.axisId ? formatId(peer.axisId) : null,
+                  solution: peer.solution,
+                  estimate: { x: +peer.x.toFixed(2), y: +peer.y.toFixed(2) },
+                  confidence: +peer.confidence.toFixed(3),
+                  settled: peer.settled,
+                  directDistance: +peer.directDistance.toFixed(2),
+                  strength: +peer.strength.toFixed(3),
+                  lastHeardAtMs: Math.round(peer.lastHeardAt)
+                })),
                 current: cloneTubeState(node.current),
                 next: cloneTubeState(node.next),
                 currentPhrase: node.currentPhrase(),
@@ -2161,9 +2420,12 @@
             command: delivery.message.command,
             position: delivery.message.position ? {
               frameId: formatId(delivery.message.position.frameId),
+              axisId: delivery.message.position.axisId ? formatId(delivery.message.position.axisId) : null,
+              solution: delivery.message.position.solution,
               x: +delivery.message.position.x.toFixed(2),
               y: +delivery.message.position.y.toFixed(2),
               confidence: +delivery.message.position.confidence.toFixed(3),
+              settled: delivery.message.position.settled,
               sequence: delivery.message.position.sequence
             } : null,
             strength: +delivery.strength.toFixed(3),
@@ -2181,7 +2443,7 @@
 
       function createCompactSnapshot(snapshot = createSnapshot()) {
         return {
-          v: 2,
+          v: 3,
           t: snapshot.capturedAtSimulationMs,
           p: snapshot.simulation.paused ? 1 : 0,
           r: [snapshot.simulation.radioRange, snapshot.simulation.dropoff],
@@ -2203,7 +2465,9 @@
             node.deviceLocal.positionEstimate.frameId,
             node.deviceLocal.positionEstimate.x,
             node.deviceLocal.positionEstimate.y,
-            node.deviceLocal.positionEstimate.confidence
+            node.deviceLocal.positionEstimate.confidence,
+            node.deviceLocal.positionEstimate.axisId || "-",
+            node.deviceLocal.positionEstimate.solution
           ]),
           w: snapshot.warnings.map(warning => [
             formatId(warning.nodeId),
@@ -2270,9 +2534,11 @@
         ui.factEstimateFrame.textContent = node.positionEstimate.frameId === node.id
           ? `${formatId(node.positionEstimate.frameId)} (self)`
           : formatId(node.positionEstimate.frameId);
-        ui.factPositionMode.textContent = simulation.entities.length === 1
-          ? "waiting for peer"
-          : simulation.entities.length === 2 ? "two-device active" : "paused at 3+ devices";
+        const positioningScope = simulation.entities.length === 1
+          ? "waiting"
+          : simulation.entities.length <= 3 ? `${simulation.entities.length}-device` : "paused at 4+";
+        const axisLabel = node.positionEstimate.axisId ? ` · axis ${formatId(node.positionEstimate.axisId)}` : "";
+        ui.factPositionMode.textContent = `${positioningScope} · ${node.positionEstimate.solution}${axisLabel}`;
         const beat = node.current.beatFrame / BEAT_UNITS;
         const phrase = node.currentPhrase();
         ui.factClock.textContent = `${beat.toFixed(2)} / ${phrase}`;
@@ -2306,6 +2572,28 @@
           .filter(strength => strength > 0);
         ui.factNeighbors.textContent = String(signals.length);
         ui.factSignal.textContent = signals.length ? `${Math.round(Math.max(...signals) * 100)}%` : "none";
+
+        const knownPeers = [...node.knownPeers.values()].sort((a, b) => b.id - a.id);
+        ui.positionKnowledgeList.replaceChildren();
+        if (!knownPeers.length) {
+          const item = document.createElement("li");
+          item.className = "empty-state";
+          item.textContent = "No positioning broadcasts received yet.";
+          ui.positionKnowledgeList.appendChild(item);
+        } else {
+          for (const peer of knownPeers) {
+            const item = document.createElement("li");
+            item.className = "traffic-item";
+            const peerId = document.createElement("span");
+            peerId.className = "traffic-time";
+            peerId.textContent = formatId(peer.id);
+            const claim = document.createElement("span");
+            const ageSeconds = Math.max(0, (simulation.time - peer.lastHeardAt) / 1000);
+            claim.textContent = `F${formatId(peer.frameId)} · ${peer.solution} (${peer.x.toFixed(1)}, ${peer.y.toFixed(1)}) · direct d=${peer.directDistance.toFixed(1)} · ${ageSeconds.toFixed(1)}s ago`;
+            item.append(peerId, claim);
+            ui.positionKnowledgeList.appendChild(item);
+          }
+        }
 
         const relevant = simulation.logs.filter(log => log.node === node).slice(0, 7);
         ui.trafficList.replaceChildren();
@@ -2359,7 +2647,7 @@
 
       window.TubesMeshSimulator = {
         simulation,
-        constants: { PROTOCOL_VERSION, POSITION_PROTOCOL_VERSION, RECIPIENTS, COMMAND },
+        constants: { PROTOCOL_VERSION, POSITION_PROTOCOL_VERSION, POSITION_SOLUTION, RECIPIENTS, COMMAND },
         addDevice: (x, y) => addDeviceAt(x, y),
         getSnapshot: createSnapshot,
         getCompactSnapshot: () => createCompactSnapshot(createSnapshot())
