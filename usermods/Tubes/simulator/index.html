@@ -570,6 +570,7 @@
       <div class="tool-group">
         <label class="check"><input id="showTopology" type="checkbox" checked> Uplinks</label>
         <label class="check"><input id="showRadio" type="checkbox" checked> Selected radio field</label>
+        <label class="check"><input id="showEstimates" type="checkbox" checked> Position estimates</label>
       </div>
 
       <div class="tool-group metrics" aria-label="Simulation statistics">
@@ -617,6 +618,9 @@
             <div class="fact"><span>Network state</span><strong id="factState">receiving</strong></div>
             <div class="fact"><span>Relay duty</span><strong id="factRelay">inactive</strong></div>
             <div class="fact"><span>Uplink last heard</span><strong id="factLastHeard">never</strong></div>
+            <div class="fact"><span>Estimated position</span><strong id="factEstimate">0, 0</strong></div>
+            <div class="fact"><span>Position frame</span><strong id="factEstimateFrame">self</strong></div>
+            <div class="fact"><span>Position solver</span><strong id="factPositionMode">waiting for peer</strong></div>
             <div class="fact"><span>Beat / phrase</span><strong id="factClock">0.00 / 0</strong></div>
             <div class="fact"><span>Protocol version</span><strong>2</strong></div>
           </div>
@@ -681,6 +685,8 @@
             <div class="legend-item"><span class="legend-mark" style="--mark:#ff7f91"></span>dropped packet</div>
             <div class="legend-item"><span class="legend-mark" style="--mark:#70b7ff"></span>selected signal</div>
             <div class="legend-item"><span class="legend-mark" style="--mark:#aab4c8"></span>uplink</div>
+            <div class="legend-item"><span style="color:#f4f7ff;font:800 14px/1 ui-monospace,monospace">⊕</span>physical X,Y center</div>
+            <div class="legend-item"><span style="color:#8ef0d0;font:800 14px/1 ui-monospace,monospace">◇</span>device-estimated position</div>
           </div>
           <div class="note">A wavefront travels from antenna to maximum range in one simulated time unit (1 second). Ring opacity is the selected power-decay function evaluated at that radius.</div>
         </section>
@@ -694,12 +700,16 @@
 
       const PROTOCOL_VERSION = 2;
       const RECIPIENTS = Object.freeze({ ALL: 0, ROOT: 1, INFO: 2 });
-      const COMMAND = Object.freeze({ STATE: 0x20, ACTION: 0x30, INFO: 0x40 });
+      const COMMAND = Object.freeze({ STATE: 0x20, ACTION: 0x30, INFO: 0x40, POSITION: 0x50 });
       const STATUS = Object.freeze({ RECEIVING: "receiving", STARTED: "started" });
       const STATUS_TIMEOUT_BASE = 3000;
       const UPLINK_TIMEOUT = 20000;
       const REBROADCAST_TIME = 30000;
       const STATUS_UPDATE_PERIOD = 2000;
+      const POSITION_PROTOCOL_VERSION = 1;
+      const POSITION_UPDATE_PERIOD = 1000;
+      const POSITION_CONVERGENCE_RATE = 0.28;
+      const POSITION_CONFIDENCE_RATE = 0.22;
       const RADIO_WAVE_TIME = 1000;
       const RADIO_TRAIL_COUNT = 3;
       const RADIO_TRAIL_SPACING = 0.075;
@@ -846,6 +856,17 @@
         constructor(simulation, bornAt) {
           this.simulation = simulation;
           this.id = simulation.randomMeshId();
+          this.positionEstimate = {
+            frameId: this.id,
+            x: 0,
+            y: 0,
+            confidence: 1,
+            sequence: 0,
+            updatedAt: bornAt,
+            observations: 0,
+            targetDistance: null
+          };
+          this.lastPositionLogAt = -Infinity;
           this.uplinkId = 0;
           this.version = PROTOCOL_VERSION;
           this.bornAt = bornAt;
@@ -853,6 +874,7 @@
           this.timebase = (simulation.random() - 0.5) * 80;
           this.activeAt = bornAt + Math.max(700, STATUS_TIMEOUT_BASE - this.id / 2);
           this.nextBroadcastAt = this.activeAt + simulation.random() * STATUS_UPDATE_PERIOD;
+          this.nextPositionBroadcastAt = this.activeAt + simulation.random() * POSITION_UPDATE_PERIOD;
           this.uplinkDeadline = 0;
           this.lastUplinkSeenAt = null;
           this.rebroadcastUntil = -1;
@@ -909,6 +931,89 @@
 
         snapshotStates() {
           return cloneTubeStates({ current: this.current, next: this.next });
+        }
+
+        announcePosition() {
+          return {
+            version: POSITION_PROTOCOL_VERSION,
+            frameId: this.positionEstimate.frameId,
+            x: this.positionEstimate.x,
+            y: this.positionEstimate.y,
+            confidence: this.positionEstimate.confidence,
+            sequence: this.positionEstimate.sequence
+          };
+        }
+
+        resetPositionEstimate() {
+          this.positionEstimate = {
+            frameId: this.id,
+            x: 0,
+            y: 0,
+            confidence: 1,
+            sequence: 0,
+            updatedAt: this.simulation.time,
+            observations: 0,
+            targetDistance: null
+          };
+          this.lastPositionLogAt = -Infinity;
+        }
+
+        receivePosition(remote, strength, senderId) {
+          // The next geometric case is intentionally undefined until we design the three-device solver.
+          if (this.simulation.entities.length !== 2) return;
+          if (!remote || remote.version !== POSITION_PROTOCOL_VERSION) return;
+          if (!Number.isFinite(remote.frameId) || !Number.isFinite(remote.x) || !Number.isFinite(remote.y)) return;
+          if (!Number.isFinite(remote.confidence) || senderId === this.id) return;
+
+          const local = this.positionEstimate;
+          if (remote.frameId !== local.frameId) {
+            // For two Tubes, the higher-ID lighting leader also owns the positioning origin.
+            const remoteLeaderWins = remote.frameId > local.frameId;
+            if (!remoteLeaderWins) return;
+
+            const previousFrameId = local.frameId;
+            local.frameId = remote.frameId;
+            local.x = 0;
+            local.y = 0;
+            local.confidence = 0;
+            local.observations = 0;
+            local.targetDistance = null;
+            local.sequence += 1;
+            local.updatedAt = this.simulation.time;
+            this.simulation.log(
+              this,
+              "position",
+              `adopted frame ${formatId(remote.frameId)} from ${formatId(senderId)}; previous frame ${formatId(previousFrameId)}`
+            );
+          }
+
+          if (local.frameId === this.id || remote.frameId !== local.frameId) return;
+          if (senderId !== local.frameId) return;
+
+          // Two range-only devices choose the positive X axis as their otherwise-unobservable orientation.
+          const measuredDistance = this.simulation.distanceFromSignalStrength(strength);
+          const targetX = remote.x + measuredDistance;
+          const targetY = remote.y;
+          const previousX = local.x;
+          const previousY = local.y;
+          local.x += (targetX - local.x) * POSITION_CONVERGENCE_RATE;
+          local.y += (targetY - local.y) * POSITION_CONVERGENCE_RATE;
+          local.targetDistance = measuredDistance;
+          local.observations += 1;
+          const observationConfidence = clamp(remote.confidence * strength, 0, 1);
+          local.confidence += (observationConfidence - local.confidence) * POSITION_CONFIDENCE_RATE;
+          local.sequence += 1;
+          local.updatedAt = this.simulation.time;
+
+          const movement = Math.hypot(local.x - previousX, local.y - previousY);
+          if (movement > 0.2 && this.simulation.time - this.lastPositionLogAt >= POSITION_UPDATE_PERIOD) {
+            this.lastPositionLogAt = this.simulation.time;
+            this.simulation.log(
+              this,
+              "position",
+              `nudged toward (${targetX.toFixed(1)}, ${targetY.toFixed(1)}) from signal range ${measuredDistance.toFixed(1)}`
+            );
+          }
         }
 
         scheduleNextPattern(phrase) {
@@ -980,6 +1085,8 @@
           this.rebroadcastUntil = -1;
           this.activeAt = this.simulation.time + Math.max(700, STATUS_TIMEOUT_BASE - this.id / 2);
           this.nextBroadcastAt = this.activeAt + this.simulation.random() * STATUS_UPDATE_PERIOD;
+          this.nextPositionBroadcastAt = this.activeAt + this.simulation.random() * POSITION_UPDATE_PERIOD;
+          this.resetPositionEstimate();
           this.simulation.log(this, "conflict", `ID collision ${formatId(previous)} → ${formatId(this.id)}`);
         }
 
@@ -1006,7 +1113,9 @@
         receive(message, strength, traceId, hop = 0) {
           if (!message || message.header.version !== this.version) return;
           this.receivedCount += 1;
+          const hadIdConflict = message.header.id === this.id;
           this.onPeerPing(message.header);
+          if (!hadIdConflict) this.receivePosition(message.position, strength, message.header.id);
 
           let ignore = false;
           switch (message.recipients) {
@@ -1066,6 +1175,14 @@
           });
         }
 
+        sendPosition() {
+          this.simulation.broadcast(this, {
+            recipients: RECIPIENTS.INFO,
+            command: COMMAND.POSITION,
+            data: null
+          });
+        }
+
         forceNext() {
           const phrase = this.currentPhrase();
           const nextPhrase = Math.min(this.next.patternPhrase, this.next.palettePhrase) - phrase;
@@ -1089,6 +1206,11 @@
             if (this.status === STATUS.STARTED && (!this.isFollowing() || this.simulation.random() < 0.25)) {
               this.sendState();
             }
+          }
+
+          while (this.simulation.time >= this.nextPositionBroadcastAt) {
+            this.nextPositionBroadcastAt += POSITION_UPDATE_PERIOD;
+            if (this.status === STATUS.STARTED) this.sendPosition();
           }
         }
       }
@@ -1212,6 +1334,26 @@
           return this.signalForNormalizedDistance(distance / range, dropoff);
         }
 
+        distanceFromSignalStrength(strength) {
+          const targetStrength = clamp(strength, 0, 1);
+          let near = 0;
+          let far = this.range;
+          for (let iteration = 0; iteration < 24; iteration += 1) {
+            const candidate = (near + far) / 2;
+            const candidateStrength = this.signalAtDistance(candidate, this.range, this.dropoff);
+            if (candidateStrength > targetStrength) near = candidate;
+            else far = candidate;
+          }
+          return (near + far) / 2;
+        }
+
+        commandName(command) {
+          if (command === COMMAND.STATE) return "STATE";
+          if (command === COMMAND.POSITION) return "POSITION";
+          if (command === COMMAND.INFO) return "INFO";
+          return "ACTION";
+        }
+
         broadcast(sender, partialMessage, inheritedTrace = null, rebroadcast = false, hop = 0, behalfOfId = null) {
           if (sender.status !== STATUS.STARTED) return false;
           const senderEntity = this.entityForNode(sender);
@@ -1223,18 +1365,19 @@
             recipients: partialMessage.recipients,
             timebase: sender.visualTime(),
             command: partialMessage.command,
-            data: cloneData(partialMessage.data)
+            data: cloneData(partialMessage.data),
+            position: sender.announcePosition()
           };
 
           if (!rebroadcast) {
-            const commandName = message.command === COMMAND.STATE ? "STATE" : "ACTION";
+            const commandName = this.commandName(message.command);
             const detail = message.command === COMMAND.STATE
               ? ` now ${this.describeDNA(sender.dna)}; next P${sender.next.patternId}@${sender.next.patternPhrase}, C${sender.next.paletteId}@${sender.next.palettePhrase}`
               : "";
             this.log(sender, "tx", `broadcast ${commandName}:${this.recipientName(message.recipients)}${detail}`);
           } else {
             this.stats.rebroadcasts += 1;
-            const commandName = message.command === COMMAND.STATE ? "STATE" : "ACTION";
+            const commandName = this.commandName(message.command);
             this.log(
               sender,
               "relay",
@@ -1281,7 +1424,8 @@
                 recipients: message.recipients,
                 timebase: message.timebase,
                 command: message.command,
-                data: cloneData(message.data)
+                data: cloneData(message.data),
+                position: { ...message.position }
               },
               strength,
               traceId,
@@ -1343,6 +1487,7 @@
         forceNext: document.getElementById("forceNext"),
         showTopology: document.getElementById("showTopology"),
         showRadio: document.getElementById("showRadio"),
+        showEstimates: document.getElementById("showEstimates"),
         deviceCount: document.getElementById("deviceCount"),
         rootCount: document.getElementById("rootCount"),
         relayCount: document.getElementById("relayCount"),
@@ -1359,6 +1504,9 @@
         factState: document.getElementById("factState"),
         factRelay: document.getElementById("factRelay"),
         factLastHeard: document.getElementById("factLastHeard"),
+        factEstimate: document.getElementById("factEstimate"),
+        factEstimateFrame: document.getElementById("factEstimateFrame"),
+        factPositionMode: document.getElementById("factPositionMode"),
         factClock: document.getElementById("factClock"),
         factNextPattern: document.getElementById("factNextPattern"),
         factNextPalette: document.getElementById("factNextPalette"),
@@ -1681,6 +1829,112 @@
         }
       }
 
+      function estimateCanvasPoint(node) {
+        return {
+          x: simulation.width / 2 + node.positionEstimate.x,
+          y: simulation.height / 2 + node.positionEstimate.y
+        };
+      }
+
+      function estimateColor(node, alpha = 1) {
+        const hue = (node.id * 137.508) % 360;
+        return `hsla(${hue}, 82%, 72%, ${alpha})`;
+      }
+
+      function drawEstimatedPositions() {
+        if (!ui.showEstimates.checked) return;
+
+        const originX = simulation.width / 2;
+        const originY = simulation.height / 2;
+        context.save();
+
+        // This origin exists only in the diagnostic estimate layer. It is not physical truth.
+        context.setLineDash([2, 4]);
+        context.strokeStyle = "rgba(142, 240, 208, 0.22)";
+        context.lineWidth = 1;
+        context.beginPath();
+        context.moveTo(originX - 15, originY);
+        context.lineTo(originX + 15, originY);
+        context.moveTo(originX, originY - 15);
+        context.lineTo(originX, originY + 15);
+        context.stroke();
+        context.setLineDash([]);
+        context.fillStyle = "rgba(142, 240, 208, 0.42)";
+        context.font = "750 8px ui-monospace, monospace";
+        context.textAlign = "left";
+        context.fillText("ESTIMATE ORIGIN (0,0)", originX + 18, originY + 3);
+
+        const groups = new Map();
+        for (const entity of simulation.entities) {
+          const point = estimateCanvasPoint(entity.network);
+          const key = `${point.x.toFixed(2)},${point.y.toFixed(2)}`;
+          if (!groups.has(key)) groups.set(key, { point, entities: [] });
+          groups.get(key).entities.push(entity);
+        }
+
+        for (const group of groups.values()) {
+          group.entities.sort((a, b) => a.network.id - b.network.id);
+          const maximumRadius = 8 + Math.max(0, group.entities.length - 1) * 4;
+
+          for (let index = 0; index < group.entities.length; index += 1) {
+            const entity = group.entities[index];
+            const node = entity.network;
+            const point = group.point;
+            const radius = 8 + index * 4;
+            const isSelected = entity === selected;
+            const confidenceAlpha = 0.32 + clamp(node.positionEstimate.confidence, 0, 1) * 0.55;
+
+            if (isSelected && Math.hypot(point.x - entity.x, point.y - entity.y) > 2) {
+              context.setLineDash([3, 5]);
+              context.strokeStyle = estimateColor(node, 0.38);
+              context.lineWidth = 1;
+              context.beginPath();
+              context.moveTo(entity.x, entity.y);
+              context.lineTo(point.x, point.y);
+              context.stroke();
+              context.setLineDash([]);
+            }
+
+            if (isSelected) {
+              const ghostWidth = 33;
+              const ghostHeight = 100;
+              roundedRectPath(point.x - ghostWidth / 2, point.y - ghostHeight / 2, ghostWidth, ghostHeight, 10);
+              context.fillStyle = estimateColor(node, 0.035);
+              context.fill();
+              context.setLineDash([5, 4]);
+              context.strokeStyle = estimateColor(node, 0.7);
+              context.lineWidth = 1.4;
+              context.stroke();
+              context.setLineDash([]);
+            }
+
+            context.setLineDash([3, 3]);
+            context.strokeStyle = estimateColor(node, confidenceAlpha);
+            context.lineWidth = isSelected ? 1.8 : 1.2;
+            context.beginPath();
+            context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+            context.stroke();
+            context.setLineDash([]);
+
+            context.strokeStyle = estimateColor(node, confidenceAlpha);
+            context.beginPath();
+            context.moveTo(point.x - 4, point.y);
+            context.lineTo(point.x + 4, point.y);
+            context.moveTo(point.x, point.y - 4);
+            context.lineTo(point.x, point.y + 4);
+            context.stroke();
+
+            const labelY = point.y + (index - (group.entities.length - 1) / 2) * 11;
+            context.fillStyle = estimateColor(node, isSelected ? 1 : 0.78);
+            context.font = `${isSelected ? 850 : 750} 8px ui-monospace, monospace`;
+            context.textAlign = "left";
+            context.fillText(`E ${formatId(node.id)} · F ${formatId(node.positionEstimate.frameId)}`, point.x + maximumRadius + 8, labelY + 3);
+          }
+        }
+
+        context.restore();
+      }
+
       function roundedRectPath(x, y, width, height, radius) {
         const r = Math.min(radius, width / 2, height / 2);
         context.beginPath();
@@ -1731,6 +1985,25 @@
             : animationColor(node.dna, index, ledCount, node.animationTime());
           context.fill();
         }
+
+        const centerArm = isSelected ? 9 : 7;
+        const centerGap = isSelected ? 3.5 : 3;
+        context.strokeStyle = isSelected ? "rgba(255,255,255,0.95)" : "rgba(235,241,252,0.64)";
+        context.fillStyle = isSelected ? "#ffffff" : "rgba(235,241,252,0.78)";
+        context.lineWidth = isSelected ? 1.4 : 1;
+        context.beginPath();
+        context.moveTo(entity.x - centerArm, entity.y);
+        context.lineTo(entity.x - centerGap, entity.y);
+        context.moveTo(entity.x + centerGap, entity.y);
+        context.lineTo(entity.x + centerArm, entity.y);
+        context.moveTo(entity.x, entity.y - centerArm);
+        context.lineTo(entity.x, entity.y - centerGap);
+        context.moveTo(entity.x, entity.y + centerGap);
+        context.lineTo(entity.x, entity.y + centerArm);
+        context.stroke();
+        context.beginPath();
+        context.arc(entity.x, entity.y, isSelected ? 2 : 1.5, 0, Math.PI * 2);
+        context.fill();
 
         context.textAlign = "center";
         context.font = "800 11px ui-monospace, SFMono-Regular, Menlo, monospace";
@@ -1783,6 +2056,7 @@
         drawTopology();
         drawRadioWaves();
         drawPulses();
+        drawEstimatedPositions();
         const ordered = [...simulation.entities].sort((a, b) => (a === selected ? 1 : 0) - (b === selected ? 1 : 0));
         for (const entity of ordered) drawDevice(entity);
       }
@@ -1832,6 +2106,18 @@
                   active: node.isRelayActive(),
                   remainingMs: Math.max(0, Math.round(node.rebroadcastUntil - simulation.time))
                 },
+                positionEstimate: {
+                  frameId: formatId(node.positionEstimate.frameId),
+                  x: +node.positionEstimate.x.toFixed(2),
+                  y: +node.positionEstimate.y.toFixed(2),
+                  confidence: +node.positionEstimate.confidence.toFixed(3),
+                  sequence: node.positionEstimate.sequence,
+                  updatedAtMs: Math.round(node.positionEstimate.updatedAt),
+                  observations: node.positionEstimate.observations,
+                  targetDistance: node.positionEstimate.targetDistance === null
+                    ? null
+                    : +node.positionEstimate.targetDistance.toFixed(2)
+                },
                 current: cloneTubeState(node.current),
                 next: cloneTubeState(node.next),
                 currentPhrase: node.currentPhrase(),
@@ -1873,6 +2159,13 @@
             senderUplinkId: delivery.message.header.uplinkId ? formatId(delivery.message.header.uplinkId) : null,
             recipients: simulation.recipientName(delivery.message.recipients),
             command: delivery.message.command,
+            position: delivery.message.position ? {
+              frameId: formatId(delivery.message.position.frameId),
+              x: +delivery.message.position.x.toFixed(2),
+              y: +delivery.message.position.y.toFixed(2),
+              confidence: +delivery.message.position.confidence.toFixed(3),
+              sequence: delivery.message.position.sequence
+            } : null,
             strength: +delivery.strength.toFixed(3),
             traceId: delivery.traceId,
             hop: delivery.hop
@@ -1888,7 +2181,7 @@
 
       function createCompactSnapshot(snapshot = createSnapshot()) {
         return {
-          v: 1,
+          v: 2,
           t: snapshot.capturedAtSimulationMs,
           p: snapshot.simulation.paused ? 1 : 0,
           r: [snapshot.simulation.radioRange, snapshot.simulation.dropoff],
@@ -1906,7 +2199,11 @@
             node.deviceLocal.next.paletteId,
             node.deviceLocal.next.palettePhrase,
             node.simulatorOnly.position.x,
-            node.simulatorOnly.position.y
+            node.simulatorOnly.position.y,
+            node.deviceLocal.positionEstimate.frameId,
+            node.deviceLocal.positionEstimate.x,
+            node.deviceLocal.positionEstimate.y,
+            node.deviceLocal.positionEstimate.confidence
           ]),
           w: snapshot.warnings.map(warning => [
             formatId(warning.nodeId),
@@ -1969,6 +2266,13 @@
         ui.factLastHeard.textContent = node.lastUplinkSeenAt === null
           ? "never"
           : `${Math.max(0, (simulation.time - node.lastUplinkSeenAt) / 1000).toFixed(1)} s ago`;
+        ui.factEstimate.textContent = `${node.positionEstimate.x.toFixed(1)}, ${node.positionEstimate.y.toFixed(1)} · ${Math.round(node.positionEstimate.confidence * 100)}%`;
+        ui.factEstimateFrame.textContent = node.positionEstimate.frameId === node.id
+          ? `${formatId(node.positionEstimate.frameId)} (self)`
+          : formatId(node.positionEstimate.frameId);
+        ui.factPositionMode.textContent = simulation.entities.length === 1
+          ? "waiting for peer"
+          : simulation.entities.length === 2 ? "two-device active" : "paused at 3+ devices";
         const beat = node.current.beatFrame / BEAT_UNITS;
         const phrase = node.currentPhrase();
         ui.factClock.textContent = `${beat.toFixed(2)} / ${phrase}`;
@@ -2055,7 +2359,7 @@
 
       window.TubesMeshSimulator = {
         simulation,
-        constants: { PROTOCOL_VERSION, RECIPIENTS, COMMAND },
+        constants: { PROTOCOL_VERSION, POSITION_PROTOCOL_VERSION, RECIPIENTS, COMMAND },
         addDevice: (x, y) => addDeviceAt(x, y),
         getSnapshot: createSnapshot,
         getCompactSnapshot: () => createCompactSnapshot(createSnapshot())
