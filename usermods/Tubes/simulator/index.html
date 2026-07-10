@@ -166,8 +166,54 @@
       font-variant-numeric: tabular-nums;
       white-space: nowrap;
     }
-    .control > input[type="range"] { grid-column: 1 / -1; width: 100%; }
+    .control > input[type="range"],
+    .control > .range-with-preset { grid-column: 1 / -1; width: 100%; }
     .control > select { grid-column: 1 / -1; width: 100%; min-width: 0; }
+
+    .range-with-preset {
+      position: relative;
+      min-height: 33px;
+    }
+
+    .range-with-preset input[type="range"] {
+      display: block;
+      width: 100%;
+      margin: 0;
+    }
+
+    .range-preset {
+      position: absolute;
+      left: var(--preset-position);
+      bottom: 0;
+      width: max-content;
+      height: auto;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: none;
+      color: #d9c88f;
+      font-size: 8px;
+      font-weight: 750;
+      line-height: 1;
+      transform: translateX(-50%);
+    }
+
+    .range-preset::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      bottom: calc(100% + 2px);
+      height: 7px;
+      border-left: 1px solid #f6d365;
+    }
+
+    .range-preset:hover,
+    .range-preset:active {
+      border: 0;
+      background: none;
+      color: #f6d365;
+      transform: translateX(-50%);
+    }
 
     button,
     select {
@@ -627,19 +673,28 @@
         <div class="tool-group-title">Radio uncertainty</div>
         <div class="tool-group-content control-grid">
           <div class="control">
-            <label class="tool-label" for="rssiJitterControl">RSSI jitter</label>
-            <output id="rssiJitterOutput">±0%</output>
-            <input id="rssiJitterControl" type="range" min="0" max="30" step="1" value="0" title="Random variation in each successfully received strength sample">
+            <label class="tool-label" for="rssiJitterControl">RSSI noise σ</label>
+            <output id="rssiJitterOutput">0 dB</output>
+            <div class="range-with-preset" style="--preset-position:25%">
+              <input id="rssiJitterControl" type="range" min="0" max="8" step="0.25" value="0" title="Gaussian packet-to-packet RSSI noise, expressed as one standard deviation in dB">
+              <button class="range-preset" id="rssiJitterPreset" type="button" data-value="2" aria-label="Set normal indoor RSSI noise to 2 dB sigma" title="Set normal indoor RSSI noise: 2 dB σ">normal 2</button>
+            </div>
           </div>
           <div class="control">
-            <label class="tool-label" for="txSpreadControl">TX variation</label>
-            <output id="txSpreadOutput">±0%</output>
-            <input id="txSpreadControl" type="range" min="0" max="30" step="1" value="0" title="Stable transmit-power difference assigned to each device">
+            <label class="tool-label" for="txSpreadControl">TX bias σ</label>
+            <output id="txSpreadOutput">0 dB</output>
+            <div class="range-with-preset" style="--preset-position:25%">
+              <input id="txSpreadControl" type="range" min="0" max="3" step="0.25" value="0" title="Stable Gaussian transmit-power bias assigned to each device, expressed as one standard deviation in dB">
+              <button class="range-preset" id="txSpreadPreset" type="button" data-value="0.75" aria-label="Set normal ESP32 TX bias to 0.75 dB sigma" title="Set normal ESP32 TX bias: 0.75 dB σ">normal 0.75</button>
+            </div>
           </div>
           <div class="control">
-            <label class="tool-label" for="linkBiasControl">Link bias</label>
-            <output id="linkBiasOutput">±0%</output>
-            <input id="linkBiasControl" type="range" min="0" max="30" step="1" value="0" title="Stable environmental bias assigned to each device pair">
+            <label class="tool-label" for="linkBiasControl">Link shadow σ</label>
+            <output id="linkBiasOutput">0 dB</output>
+            <div class="range-with-preset" style="--preset-position:35%">
+              <input id="linkBiasControl" type="range" min="0" max="10" step="0.25" value="0" title="Stable Gaussian obstacle and orientation bias assigned to each device pair, expressed as one standard deviation in dB">
+              <button class="range-preset" id="linkBiasPreset" type="button" data-value="3.5" aria-label="Set normal indoor link shadowing to 3.5 dB sigma" title="Set normal indoor link shadowing: 3.5 dB σ">normal 3.5</button>
+            </div>
           </div>
         </div>
       </div>
@@ -836,6 +891,7 @@
         UNPLACED: "unplaced"
       });
       const RADIO_WAVE_TIME = 1000;
+      const MAX_RADIO_STANDARD_SCORE = 3;
       const DEFAULT_BPM = 120;
       const BEAT_UNITS = 256;
       const PHRASE_BEATS = 16;
@@ -865,6 +921,8 @@
       ];
 
       const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+      const dbToPowerRatio = decibels => 10 ** (decibels / 10);
+      const formatDecibels = decibels => `${Number(decibels.toFixed(2))} dB`;
       const formatId = id => id ? id.toString(16).toUpperCase().padStart(3, "0") : "---";
       const dnaKey = dna => `${dna.pattern}:${dna.palette}`;
       const scheduleRemainingRatio = (lastChangePhrase, nextChangePhrase, beatFrame) => {
@@ -1742,9 +1800,9 @@
           this.speed = 2;
           this.range = 600;
           this.dropoff = "linear";
-          this.rssiJitter = 0;
-          this.txPowerSpread = 0;
-          this.linkBiasSpread = 0;
+          this.rssiJitterSigmaDb = 0;
+          this.txPowerSigmaDb = 0;
+          this.linkShadowSigmaDb = 0;
           this.leaderBpm = DEFAULT_BPM;
           this.deliveryQueue = [];
           this.waves = [];
@@ -1757,6 +1815,11 @@
         }
 
         random() { return this.rng(); }
+        randomNormal() {
+          const firstUniform = Math.max(this.random(), Number.EPSILON);
+          const secondUniform = this.random();
+          return Math.sqrt(-2 * Math.log(firstUniform)) * Math.cos(2 * Math.PI * secondUniform);
+        }
         randomInt(minimum, maximum) { return Math.floor(minimum + this.random() * (maximum - minimum)); }
         randomMeshId() { return Math.floor(256 + this.random() * (4000 - 256)); }
         randomDNA() {
@@ -1782,7 +1845,11 @@
             x: clamp(x, 45, this.width - 45),
             y: clamp(y, 78, this.height - 72),
             network: new TubeNode(this, this.time),
-            radioPowerOffset: this.random() * 2 - 1,
+            radioPowerStandardScore: clamp(
+              this.randomNormal(),
+              -MAX_RADIO_STANDARD_SCORE,
+              MAX_RADIO_STANDARD_SCORE
+            ),
             radioEnvironmentKey: Math.floor(this.random() * 0xFFFFFFFF)
           };
           this.entities.push(entity);
@@ -1856,33 +1923,41 @@
           return this.signalForNormalizedDistance(distance / range, dropoff);
         }
 
-        linkEnvironmentOffset(senderKey, targetKey) {
+        stableUnitInterval(senderKey, targetKey, salt) {
           const lowKey = Math.min(senderKey, targetKey);
           const highKey = Math.max(senderKey, targetKey);
-          let hash = Math.imul(lowKey, 0x45D9F3B) ^ Math.imul(highKey, 0x119DE1F3);
+          let hash = Math.imul(lowKey, 0x45D9F3B) ^ Math.imul(highKey, 0x119DE1F3) ^ salt;
           hash ^= hash >>> 16;
           hash = Math.imul(hash, 0x45D9F3B);
           hash ^= hash >>> 16;
-          return ((hash >>> 0) / 0xFFFFFFFF) * 2 - 1;
+          return ((hash >>> 0) + 1) / 0x100000001;
+        }
+
+        linkEnvironmentStandardScore(senderKey, targetKey) {
+          const firstUniform = this.stableUnitInterval(senderKey, targetKey, 0x51ED270B);
+          const secondUniform = this.stableUnitInterval(senderKey, targetKey, 0x1B873593);
+          const standardScore = Math.sqrt(-2 * Math.log(firstUniform))
+            * Math.cos(2 * Math.PI * secondUniform);
+          return clamp(standardScore, -MAX_RADIO_STANDARD_SCORE, MAX_RADIO_STANDARD_SCORE);
         }
 
         meanSignalBetween(senderEntity, targetEntity, distance) {
           const distanceStrength = this.signalAtDistance(distance, this.range, this.dropoff);
           if (distanceStrength <= 0) return 0;
 
-          // Hardware and environment offsets are stable; only the receiver's reported sample jitters per packet.
-          const transmitterScale = 1 + senderEntity.radioPowerOffset * this.txPowerSpread;
-          const environmentOffset = this.linkEnvironmentOffset(
+          // Device and link biases stay fixed while RSSI measurement noise is sampled for every received packet.
+          const transmitterBiasDb = senderEntity.radioPowerStandardScore * this.txPowerSigmaDb;
+          const linkStandardScore = this.linkEnvironmentStandardScore(
             senderEntity.radioEnvironmentKey,
             targetEntity.radioEnvironmentKey
           );
-          const environmentScale = 1 + environmentOffset * this.linkBiasSpread;
-          return clamp(distanceStrength * transmitterScale * environmentScale, 0, 1);
+          const linkBiasDb = linkStandardScore * this.linkShadowSigmaDb;
+          return clamp(distanceStrength * dbToPowerRatio(transmitterBiasDb + linkBiasDb), 0, 1);
         }
 
         measuredSignalStrength(meanStrength) {
-          const jitterScale = 1 + (this.random() * 2 - 1) * this.rssiJitter;
-          return clamp(meanStrength * jitterScale, 0, 1);
+          const sampleNoiseDb = this.randomNormal() * this.rssiJitterSigmaDb;
+          return clamp(meanStrength * dbToPowerRatio(sampleNoiseDb), 0, 1);
         }
 
         distanceFromSignalStrength(strength) {
@@ -2034,10 +2109,13 @@
         dropoffControl: document.getElementById("dropoffControl"),
         rssiJitterControl: document.getElementById("rssiJitterControl"),
         rssiJitterOutput: document.getElementById("rssiJitterOutput"),
+        rssiJitterPreset: document.getElementById("rssiJitterPreset"),
         txSpreadControl: document.getElementById("txSpreadControl"),
         txSpreadOutput: document.getElementById("txSpreadOutput"),
+        txSpreadPreset: document.getElementById("txSpreadPreset"),
         linkBiasControl: document.getElementById("linkBiasControl"),
         linkBiasOutput: document.getElementById("linkBiasOutput"),
+        linkBiasPreset: document.getElementById("linkBiasPreset"),
         speedControl: document.getElementById("speedControl"),
         speedOutput: document.getElementById("speedOutput"),
         bpmControl: document.getElementById("bpmControl"),
@@ -2127,6 +2205,20 @@
         return null;
       }
 
+      function bindDecibelControl(control, output, preset, simulationProperty) {
+        const applyValue = () => {
+          const decibels = Number(control.value);
+          simulation[simulationProperty] = decibels;
+          output.value = formatDecibels(decibels);
+        };
+        control.addEventListener("input", applyValue);
+        preset.addEventListener("click", () => {
+          control.value = preset.dataset.value;
+          applyValue();
+        });
+        applyValue();
+      }
+
       canvas.addEventListener("pointerdown", event => {
         const point = canvasPoint(event);
         const hit = hitTest(point);
@@ -2180,18 +2272,9 @@
         ui.rangeOutput.value = `${simulation.range} px`;
       });
       ui.dropoffControl.addEventListener("change", () => { simulation.dropoff = ui.dropoffControl.value; });
-      ui.rssiJitterControl.addEventListener("input", () => {
-        simulation.rssiJitter = Number(ui.rssiJitterControl.value) / 100;
-        ui.rssiJitterOutput.value = `±${ui.rssiJitterControl.value}%`;
-      });
-      ui.txSpreadControl.addEventListener("input", () => {
-        simulation.txPowerSpread = Number(ui.txSpreadControl.value) / 100;
-        ui.txSpreadOutput.value = `±${ui.txSpreadControl.value}%`;
-      });
-      ui.linkBiasControl.addEventListener("input", () => {
-        simulation.linkBiasSpread = Number(ui.linkBiasControl.value) / 100;
-        ui.linkBiasOutput.value = `±${ui.linkBiasControl.value}%`;
-      });
+      bindDecibelControl(ui.rssiJitterControl, ui.rssiJitterOutput, ui.rssiJitterPreset, "rssiJitterSigmaDb");
+      bindDecibelControl(ui.txSpreadControl, ui.txSpreadOutput, ui.txSpreadPreset, "txPowerSigmaDb");
+      bindDecibelControl(ui.linkBiasControl, ui.linkBiasOutput, ui.linkBiasPreset, "linkShadowSigmaDb");
       ui.speedControl.addEventListener("input", () => {
         simulation.speed = Number(ui.speedControl.value);
         ui.speedOutput.value = `${simulation.speed.toFixed(2).replace(/0$/, "")}×`;
@@ -2753,7 +2836,7 @@
         const clusters = new Set(simulation.entities.map(entity => dnaKey(entity.network.dna))).size;
 
         return {
-          schema: "tubes-mesh-simulator/v1",
+          schema: "tubes-mesh-simulator/v2",
           capturedAtSimulationMs: Math.round(simulation.time),
           simulation: {
             paused: simulation.paused,
@@ -2761,9 +2844,9 @@
             radioRange: simulation.range,
             dropoff: simulation.dropoff,
             radioUncertainty: {
-              rssiJitterPercent: Math.round(simulation.rssiJitter * 100),
-              transmitPowerSpreadPercent: Math.round(simulation.txPowerSpread * 100),
-              linkBiasSpreadPercent: Math.round(simulation.linkBiasSpread * 100)
+              rssiJitterSigmaDb: simulation.rssiJitterSigmaDb,
+              transmitPowerSigmaDb: simulation.txPowerSigmaDb,
+              linkShadowSigmaDb: simulation.linkShadowSigmaDb
             },
             leaderBpm: simulation.leaderBpm
           },
@@ -2855,8 +2938,8 @@
               },
               simulatorOnly: {
                 position: { x: Math.round(entity.x), y: Math.round(entity.y) },
-                radioPowerOffset: +entity.radioPowerOffset.toFixed(3),
-                activeTransmitPowerBiasPercent: +(entity.radioPowerOffset * simulation.txPowerSpread * 100).toFixed(2),
+                radioPowerStandardScore: +entity.radioPowerStandardScore.toFixed(3),
+                activeTransmitPowerBiasDb: +(entity.radioPowerStandardScore * simulation.txPowerSigmaDb).toFixed(2),
                 idsInsideHardRange: inRange,
                 warning: simulation.localMaximumWarning(entity)
               }
@@ -2915,14 +2998,14 @@
 
       function createCompactSnapshot(snapshot = createSnapshot()) {
         return {
-          v: 5,
+          v: 6,
           t: snapshot.capturedAtSimulationMs,
           p: snapshot.simulation.paused ? 1 : 0,
           r: [snapshot.simulation.radioRange, snapshot.simulation.dropoff],
           u: [
-            snapshot.simulation.radioUncertainty.rssiJitterPercent,
-            snapshot.simulation.radioUncertainty.transmitPowerSpreadPercent,
-            snapshot.simulation.radioUncertainty.linkBiasSpreadPercent
+            snapshot.simulation.radioUncertainty.rssiJitterSigmaDb,
+            snapshot.simulation.radioUncertainty.transmitPowerSigmaDb,
+            snapshot.simulation.radioUncertainty.linkShadowSigmaDb
           ],
           s: [snapshot.summary.nodes, snapshot.summary.leaders, snapshot.summary.relayTransmissions, snapshot.summary.topologyWarnings],
           n: snapshot.nodes.map(node => [
