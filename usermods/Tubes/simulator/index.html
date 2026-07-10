@@ -1,0 +1,2066 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Tubes Mesh Laboratory</title>
+  <style>
+    :root {
+      --ink: #f4f7ff;
+      --muted: #94a0b8;
+      --faint: #667189;
+      --panel: rgba(13, 18, 30, 0.92);
+      --panel-strong: #111827;
+      --line: rgba(151, 167, 200, 0.16);
+      --accent: #8ef0d0;
+      --accent-strong: #51dcb5;
+      --blue: #70b7ff;
+      --danger: #ff7f91;
+      --shadow: 0 18px 54px rgba(0, 0, 0, 0.32);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #070a11;
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    button, select, input { font: inherit; }
+
+    button:focus-visible,
+    select:focus-visible,
+    input:focus-visible,
+    canvas:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .app {
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      height: 100%;
+      background:
+        radial-gradient(circle at 25% -20%, rgba(65, 115, 165, 0.18), transparent 36rem),
+        #070a11;
+    }
+
+    .masthead {
+      min-height: 70px;
+      padding: 15px 20px 13px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(8, 11, 19, 0.84);
+      backdrop-filter: blur(18px);
+    }
+
+    .brand { min-width: 0; }
+
+    .eyebrow {
+      color: var(--accent);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 2px 0 0;
+      font-size: clamp(20px, 2vw, 28px);
+      line-height: 1.05;
+      letter-spacing: -0.035em;
+    }
+
+    .lede {
+      max-width: 630px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+      text-align: right;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: stretch;
+      gap: 1px;
+      padding: 9px 12px;
+      overflow-x: auto;
+      border-bottom: 1px solid var(--line);
+      background: rgba(13, 18, 30, 0.9);
+      scrollbar-width: thin;
+    }
+
+    .tool-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 0 0 auto;
+      padding: 0 12px;
+      min-height: 42px;
+      border-right: 1px solid var(--line);
+    }
+
+    .tool-group:first-child { padding-left: 0; }
+    .tool-group:last-child { border-right: 0; }
+
+    .tool-label {
+      display: grid;
+      gap: 2px;
+      min-width: max-content;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 750;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .tool-label output {
+      color: var(--ink);
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0;
+      text-transform: none;
+    }
+
+    button,
+    select {
+      height: 34px;
+      border: 1px solid rgba(155, 172, 205, 0.22);
+      border-radius: 8px;
+      background: #182133;
+      color: var(--ink);
+      cursor: pointer;
+    }
+
+    button {
+      padding: 0 12px;
+      font-size: 12px;
+      font-weight: 750;
+      transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+    }
+
+    button:hover { border-color: rgba(142, 240, 208, 0.55); background: #202d43; }
+    button:active { transform: translateY(1px); }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #07120f; }
+    button.primary:hover { background: #adf8df; }
+    button.icon-button { width: 38px; padding: 0; font-size: 15px; }
+
+    select {
+      min-width: 136px;
+      padding: 0 30px 0 10px;
+      font-size: 12px;
+    }
+
+    input[type="range"] {
+      width: 104px;
+      accent-color: var(--accent-strong);
+      cursor: pointer;
+    }
+
+    .check {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+
+    .check input { accent-color: var(--accent); }
+
+    .metrics {
+      display: flex;
+      gap: 12px;
+      padding-left: 4px;
+    }
+
+    .metric {
+      min-width: 52px;
+      display: grid;
+      gap: 1px;
+    }
+
+    .metric strong {
+      font-size: 15px;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .metric span {
+      color: var(--faint);
+      font-size: 9px;
+      font-weight: 750;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .workbench {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 310px;
+    }
+
+    .space {
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      background: #090d16;
+    }
+
+    #spaceCanvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+      cursor: default;
+    }
+
+    #spaceCanvas.dragging { cursor: grabbing; }
+
+    .space-hint {
+      position: absolute;
+      left: 16px;
+      bottom: 14px;
+      pointer-events: none;
+      display: flex;
+      gap: 15px;
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(8, 12, 20, 0.76);
+      color: var(--faint);
+      font-size: 10px;
+      backdrop-filter: blur(12px);
+    }
+
+    .space-hint b { color: var(--muted); font-weight: 750; }
+
+    .inspector {
+      min-height: 0;
+      overflow-y: auto;
+      padding: 18px;
+      border-left: 1px solid var(--line);
+      background: var(--panel);
+      scrollbar-width: thin;
+    }
+
+    .inspector-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 17px;
+    }
+
+    .inspector-title {
+      margin: 0;
+      font: 800 24px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      letter-spacing: -0.04em;
+    }
+
+    .role-badge {
+      padding: 5px 7px;
+      border: 1px solid rgba(142, 240, 208, 0.24);
+      border-radius: 999px;
+      background: rgba(142, 240, 208, 0.08);
+      color: var(--accent);
+      font-size: 9px;
+      font-weight: 850;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .dna-card {
+      position: relative;
+      overflow: hidden;
+      margin-bottom: 18px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: rgba(24, 33, 51, 0.68);
+    }
+
+    .dna-strip {
+      height: 7px;
+      margin: -14px -14px 12px;
+      background: var(--dna-gradient, linear-gradient(90deg, #fff, #777));
+    }
+
+    .dna-code {
+      color: var(--accent);
+      font: 800 11px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .dna-name {
+      margin-top: 4px;
+      font-size: 17px;
+      font-weight: 760;
+      letter-spacing: -0.02em;
+    }
+
+    .section {
+      margin-top: 18px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+    }
+
+    .section:first-of-type { margin-top: 0; }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 850;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .section-title em {
+      color: var(--faint);
+      font-size: 9px;
+      font-style: normal;
+      font-weight: 650;
+      letter-spacing: 0;
+      text-transform: none;
+    }
+
+    .facts { display: grid; gap: 8px; }
+
+    .fact {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 15px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .fact strong {
+      color: var(--ink);
+      font: 700 11px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      text-align: right;
+    }
+
+    .traffic-list {
+      display: grid;
+      gap: 7px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .traffic-item {
+      display: grid;
+      grid-template-columns: 39px 1fr;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.35;
+    }
+
+    .traffic-time {
+      color: var(--faint);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .empty-state {
+      color: var(--faint);
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .note {
+      margin-top: 10px;
+      padding: 9px 10px;
+      border-radius: 8px;
+      background: rgba(112, 183, 255, 0.07);
+      color: #8291aa;
+      font-size: 10px;
+      line-height: 1.45;
+    }
+
+    .warning-note {
+      margin: 0 0 16px;
+      padding: 10px 11px;
+      border: 1px solid rgba(246, 211, 101, 0.32);
+      border-radius: 9px;
+      background: rgba(246, 211, 101, 0.08);
+      color: #d9c88f;
+      font-size: 10px;
+      line-height: 1.5;
+    }
+
+    .warning-note strong { color: #f6d365; }
+
+    .diagnostic-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 9px;
+    }
+
+    .copy-status { color: var(--accent); font-size: 10px; }
+
+    .snapshot {
+      max-height: 230px;
+      overflow: auto;
+      margin: 0;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(4, 7, 12, 0.72);
+      color: #aab7cc;
+      font: 9px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre-wrap;
+      word-break: break-word;
+      scrollbar-width: thin;
+    }
+
+    .schedule-progress {
+      display: grid;
+      gap: 10px;
+      margin-top: 13px;
+    }
+
+    .progress-row { display: grid; gap: 5px; }
+
+    .progress-heading {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 750;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .progress-heading output {
+      color: var(--ink);
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0;
+      text-transform: none;
+    }
+
+    .progress-track {
+      position: relative;
+      height: 9px;
+      overflow: hidden;
+      border: 1px solid rgba(155, 172, 205, 0.18);
+      border-radius: 999px;
+      background:
+        repeating-linear-gradient(90deg, transparent 0, transparent calc(10% - 1px), rgba(176, 190, 217, 0.12) calc(10% - 1px), rgba(176, 190, 217, 0.12) 10%),
+        rgba(4, 7, 12, 0.72);
+    }
+
+    .progress-fill {
+      width: 100%;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--progress-color, var(--accent));
+      box-shadow: 0 0 12px color-mix(in srgb, var(--progress-color, var(--accent)) 45%, transparent);
+      transition: width 100ms linear;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 14px;
+      margin-top: 2px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .legend-mark {
+      width: 16px;
+      height: 2px;
+      border-radius: 9px;
+      background: var(--mark);
+    }
+
+    @media (max-width: 860px) {
+      html, body { overflow: auto; }
+      .app { height: auto; min-height: 100%; grid-template-rows: auto auto auto; }
+      .masthead { align-items: flex-start; }
+      .lede { display: none; }
+      .workbench { grid-template-columns: 1fr; grid-template-rows: 65vh auto; }
+      .inspector { border-left: 0; border-top: 1px solid var(--line); }
+      .space-hint { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="masthead">
+      <div class="brand">
+        <div class="eyebrow">ESP-NOW behavior model</div>
+        <h1>Tubes Mesh Laboratory</h1>
+      </div>
+      <div class="lede">
+        Move physical devices through space and watch higher-ID leaders propagate both the current lighting DNA and its phrase-timed future schedule.
+      </div>
+    </header>
+
+    <nav class="toolbar" aria-label="Simulation controls">
+      <div class="tool-group">
+        <button class="primary" id="addDevice">+ Add tube</button>
+        <button id="addEight">+ Add 8</button>
+        <button class="icon-button" id="pauseToggle" aria-label="Pause simulation" title="Pause simulation">Ⅱ</button>
+        <button id="resetSimulation">Reset</button>
+      </div>
+
+      <div class="tool-group">
+        <label class="tool-label" for="rangeControl">
+          Radio range
+          <output id="rangeOutput">220 px</output>
+        </label>
+        <input id="rangeControl" type="range" min="80" max="2000" step="20" value="220">
+      </div>
+
+      <div class="tool-group">
+        <label class="tool-label" for="dropoffControl">Power dropoff</label>
+        <select id="dropoffControl">
+          <option value="linear">Linear</option>
+          <option value="quadratic">Squared</option>
+          <option value="smooth">Smoothstep</option>
+          <option value="inverseSquare">Inverse square</option>
+        </select>
+      </div>
+
+      <div class="tool-group">
+        <label class="tool-label" for="speedControl">
+          Simulation speed
+          <output id="speedOutput">2.0×</output>
+        </label>
+        <input id="speedControl" type="range" min="0.1" max="4" step="0.1" value="2">
+      </div>
+
+      <div class="tool-group">
+        <label class="tool-label" for="bpmControl">
+          Leader tempo
+          <output id="bpmOutput">120 BPM</output>
+        </label>
+        <input id="bpmControl" type="range" min="60" max="180" step="1" value="120">
+        <button id="forceNext" title="Move each leading tube's nearest scheduled change to the current phrase">Force next</button>
+      </div>
+
+      <div class="tool-group">
+        <label class="check"><input id="showTopology" type="checkbox" checked> Uplinks</label>
+        <label class="check"><input id="showRadio" type="checkbox" checked> Selected radio field</label>
+      </div>
+
+      <div class="tool-group metrics" aria-label="Simulation statistics">
+        <div class="metric"><strong id="deviceCount">1</strong><span>tubes</span></div>
+        <div class="metric"><strong id="rootCount">1</strong><span>leaders</span></div>
+        <div class="metric"><strong id="relayCount">0</strong><span>relay tx</span></div>
+        <div class="metric"><strong id="clusterCount">1</strong><span>DNA sets</span></div>
+        <div class="metric"><strong id="deliveryRate">—</strong><span>delivery</span></div>
+      </div>
+    </nav>
+
+    <main class="workbench">
+      <section class="space" id="space" aria-label="Simulation space">
+        <canvas id="spaceCanvas" tabindex="0" aria-describedby="canvasHelp"></canvas>
+        <div class="space-hint" id="canvasHelp">
+          <span><b>Drag</b> a tube to move it</span>
+          <span><b>Click</b> a tube to inspect it</span>
+          <span><b>Double-click</b> empty space to add one</span>
+        </div>
+      </section>
+
+      <aside class="inspector" aria-live="polite">
+        <div class="inspector-head">
+          <div>
+            <div class="eyebrow">Selected tube</div>
+            <h2 class="inspector-title" id="selectedId">---</h2>
+          </div>
+          <div class="role-badge" id="selectedRole">Leading</div>
+        </div>
+
+        <div class="dna-card">
+          <div class="dna-strip" id="dnaStrip"></div>
+          <div class="section-title">What to do now</div>
+          <div class="dna-code" id="dnaCode">P0 · C0</div>
+          <div class="dna-name" id="dnaName">Wave · Aurora</div>
+        </div>
+
+        <div class="warning-note" id="topologyWarning" hidden></div>
+
+        <section class="section">
+          <h3 class="section-title">Device-local knowledge <em>protocol-visible only</em></h3>
+          <div class="facts">
+            <div class="fact"><span>Own identifier</span><strong id="factId">---</strong></div>
+            <div class="fact"><span>Chosen uplink</span><strong id="factUplink">none</strong></div>
+            <div class="fact"><span>Network state</span><strong id="factState">receiving</strong></div>
+            <div class="fact"><span>Relay duty</span><strong id="factRelay">inactive</strong></div>
+            <div class="fact"><span>Uplink last heard</span><strong id="factLastHeard">never</strong></div>
+            <div class="fact"><span>Beat / phrase</span><strong id="factClock">0.00 / 0</strong></div>
+            <div class="fact"><span>Protocol version</span><strong>2</strong></div>
+          </div>
+          <div class="note">With relay duty active, this tube rebroadcasts an accepted uplink packet’s command and current/next payload, but replaces the packet header with its own ID and uplink ID.</div>
+        </section>
+
+        <section class="section">
+          <h3 class="section-title">What to do next <em>last known schedule</em></h3>
+          <div class="facts">
+            <div class="fact"><span>Pattern change</span><strong id="factNextPattern">---</strong></div>
+            <div class="fact"><span>Palette change</span><strong id="factNextPalette">---</strong></div>
+            <div class="fact"><span>Tempo</span><strong id="factBpm">120 BPM</strong></div>
+          </div>
+          <div class="schedule-progress">
+            <div class="progress-row">
+              <div class="progress-heading"><span id="patternProgressLabel">Pattern</span><output id="patternProgressValue">100%</output></div>
+              <div class="progress-track" role="progressbar" aria-label="Time remaining until pattern change" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" id="patternProgressTrack">
+                <div class="progress-fill" id="patternProgressFill" style="--progress-color:#8ef0d0"></div>
+              </div>
+            </div>
+            <div class="progress-row">
+              <div class="progress-heading"><span id="paletteProgressLabel">Palette</span><output id="paletteProgressValue">100%</output></div>
+              <div class="progress-track" role="progressbar" aria-label="Time remaining until palette change" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" id="paletteProgressTrack">
+                <div class="progress-fill" id="paletteProgressFill"></div>
+              </div>
+            </div>
+          </div>
+          <div class="note">Pattern and palette have independent phrase deadlines. This tube advances them from its own beat clock whether or not another packet arrives.</div>
+        </section>
+
+        <section class="section">
+          <h3 class="section-title">Simulator view <em>not visible to device</em></h3>
+          <div class="facts">
+            <div class="fact"><span>Physical position</span><strong id="factPosition">0, 0</strong></div>
+            <div class="fact"><span>Inside hard range</span><strong id="factNeighbors">0</strong></div>
+            <div class="fact"><span>Strongest received signal</span><strong id="factSignal">none</strong></div>
+          </div>
+          <div class="note">Position, neighbor count, and the global map belong only to the simulator. They are never supplied to the node’s network stack.</div>
+        </section>
+
+        <section class="section">
+          <h3 class="section-title">Agent diagnostics <em>serializable live state</em></h3>
+          <div class="diagnostic-actions">
+            <button id="copySnapshot">Copy full JSON</button>
+            <label class="check"><input id="mirrorSnapshot" type="checkbox"> Mirror compact state in URL</label>
+            <span class="copy-status" id="copyStatus"></span>
+          </div>
+          <pre class="snapshot" id="debugSnapshot" data-testid="agent-snapshot"></pre>
+          <div class="note">The full snapshot is also available as <code>TubesMeshSimulator.getSnapshot()</code>. URL mirroring is useful when this page remains open directly as a local file.</div>
+        </section>
+
+        <section class="section">
+          <h3 class="section-title">Recent traffic</h3>
+          <ul class="traffic-list" id="trafficList"></ul>
+        </section>
+
+        <section class="section">
+          <h3 class="section-title">Visual key</h3>
+          <div class="legend">
+            <div class="legend-item"><span class="legend-mark" style="--mark:#8ef0d0"></span>broadcast wave</div>
+            <div class="legend-item"><span class="legend-mark" style="--mark:#f6d365"></span>rebroadcast wave</div>
+            <div class="legend-item"><span class="legend-mark" style="--mark:#ff7f91"></span>dropped packet</div>
+            <div class="legend-item"><span class="legend-mark" style="--mark:#70b7ff"></span>selected signal</div>
+            <div class="legend-item"><span class="legend-mark" style="--mark:#aab4c8"></span>uplink</div>
+          </div>
+          <div class="note">A wavefront travels from antenna to maximum range in one simulated time unit (1 second). Ring opacity is the selected power-decay function evaluated at that radius.</div>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const PROTOCOL_VERSION = 2;
+      const RECIPIENTS = Object.freeze({ ALL: 0, ROOT: 1, INFO: 2 });
+      const COMMAND = Object.freeze({ STATE: 0x20, ACTION: 0x30, INFO: 0x40 });
+      const STATUS = Object.freeze({ RECEIVING: "receiving", STARTED: "started" });
+      const STATUS_TIMEOUT_BASE = 3000;
+      const UPLINK_TIMEOUT = 20000;
+      const REBROADCAST_TIME = 30000;
+      const STATUS_UPDATE_PERIOD = 2000;
+      const RADIO_WAVE_TIME = 1000;
+      const RADIO_TRAIL_COUNT = 3;
+      const RADIO_TRAIL_SPACING = 0.075;
+      const DEFAULT_BPM = 120;
+      const BEAT_UNITS = 256;
+      const PHRASE_BEATS = 16;
+      const PHRASE_UNITS = BEAT_UNITS * PHRASE_BEATS;
+      const MIN_COLOR_CHANGE_PHRASES = 4;
+      const MAX_COLOR_CHANGE_PHRASES = 10;
+      const MIN_VISUAL_BRIGHTNESS = 0.32;
+
+      const PATTERNS = [
+        { name: "Wave", duration: [15, 25] },
+        { name: "Chase", duration: [5, 15] },
+        { name: "Breath", duration: [20, 40] },
+        { name: "Bands", duration: [15, 25] },
+        { name: "Spark", duration: [2, 6] },
+        { name: "Scanner", duration: [5, 15] }
+      ];
+
+      const PALETTES = [
+        { name: "Aurora", colors: ["#55efc4", "#45aaf2", "#a55eea"] },
+        { name: "Ember", colors: ["#ff4757", "#ff7f50", "#ffd32a"] },
+        { name: "Lagoon", colors: ["#00d2d3", "#2e86de", "#54a0ff"] },
+        { name: "Orchid", colors: ["#ff6bcb", "#be2edd", "#686de0"] },
+        { name: "Citrus", colors: ["#f9ca24", "#badc58", "#6ab04c"] },
+        { name: "Ice", colors: ["#f5f6fa", "#7ed6df", "#22a6b3"] },
+        { name: "Voltage", colors: ["#f6e58d", "#ffbe76", "#7d5fff"] },
+        { name: "Ruby", colors: ["#ff7979", "#eb4d4b", "#6d214f"] }
+      ];
+
+      const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+      const formatId = id => id ? id.toString(16).toUpperCase().padStart(3, "0") : "---";
+      const dnaKey = dna => `${dna.pattern}:${dna.palette}`;
+      const scheduleRemainingRatio = (lastChangePhrase, nextChangePhrase, beatFrame) => {
+        const startBeat = lastChangePhrase * PHRASE_BEATS;
+        const deadlineBeat = nextChangePhrase * PHRASE_BEATS;
+        const currentBeat = beatFrame / BEAT_UNITS;
+        const totalBeats = deadlineBeat - startBeat;
+        if (totalBeats <= 0) return 0;
+        return clamp((deadlineBeat - currentBeat) / totalBeats, 0, 1);
+      };
+      const cloneTubeState = state => ({
+        bpm: state.bpm,
+        beatFrame: state.beatFrame,
+        patternPhrase: state.patternPhrase,
+        patternId: state.patternId,
+        palettePhrase: state.palettePhrase,
+        paletteId: state.paletteId
+      });
+      const cloneTubeStates = states => ({
+        current: cloneTubeState(states.current),
+        next: cloneTubeState(states.next)
+      });
+      const cloneData = data => data && data.states
+        ? { states: cloneTubeStates(data.states) }
+        : { action: data ? data.action : null };
+
+      function mulberry32(seed) {
+        let value = seed >>> 0;
+        return () => {
+          value += 0x6D2B79F5;
+          let t = value;
+          t = Math.imul(t ^ (t >>> 15), t | 1);
+          t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+          return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+      }
+
+      function hexToRgb(hex) {
+        const value = Number.parseInt(hex.slice(1), 16);
+        return { r: value >> 16, g: (value >> 8) & 255, b: value & 255 };
+      }
+
+      function mixColor(a, b, amount) {
+        const first = hexToRgb(a);
+        const second = hexToRgb(b);
+        return {
+          r: Math.round(first.r + (second.r - first.r) * amount),
+          g: Math.round(first.g + (second.g - first.g) * amount),
+          b: Math.round(first.b + (second.b - first.b) * amount)
+        };
+      }
+
+      function scaleColor(color, amount) {
+        const peak = Math.max(color.r, color.g, color.b);
+        if (peak <= 0) return "rgb(0, 0, 0)";
+        const normalizedScale = 255 / peak;
+        const visibleAmount = clamp(amount, MIN_VISUAL_BRIGHTNESS, 1);
+        return `rgb(${Math.round(color.r * normalizedScale * visibleAmount)}, ${Math.round(color.g * normalizedScale * visibleAmount)}, ${Math.round(color.b * normalizedScale * visibleAmount)})`;
+      }
+
+      function paletteColor(palette, position, brightness = 1) {
+        const colors = palette.colors;
+        const normalized = ((position % 1) + 1) % 1;
+        const scaled = normalized * colors.length;
+        const index = Math.floor(scaled) % colors.length;
+        const next = (index + 1) % colors.length;
+        return scaleColor(mixColor(colors[index], colors[next], scaled - Math.floor(scaled)), brightness);
+      }
+
+      function deterministicNoise(a, b) {
+        let value = (a * 374761393 + b * 668265263) >>> 0;
+        value = (value ^ (value >> 13)) * 1274126177;
+        return ((value ^ (value >> 16)) >>> 0) / 4294967295;
+      }
+
+      function animationColor(dna, ledIndex, ledCount, clockMs) {
+        const palette = PALETTES[dna.palette];
+        const seconds = clockMs / 1000;
+        const position = ledIndex / ledCount;
+
+        switch (dna.pattern) {
+          case 0:
+            return paletteColor(palette, position + seconds * 0.16, 0.95);
+          case 1: {
+            const chase = ((ledIndex - Math.floor(seconds * 7)) % 6 + 6) % 6;
+            return paletteColor(palette, position + seconds * 0.12, chase < 2 ? 1 : MIN_VISUAL_BRIGHTNESS);
+          }
+          case 2: {
+            const breath = MIN_VISUAL_BRIGHTNESS + (1 - MIN_VISUAL_BRIGHTNESS) * (0.5 + 0.5 * Math.sin(seconds * 2.2));
+            return paletteColor(palette, 0.12 + position * 0.12, breath);
+          }
+          case 3: {
+            const band = Math.floor(ledIndex / 3 + seconds * 1.6) % palette.colors.length;
+            return paletteColor(palette, band / palette.colors.length, 0.9);
+          }
+          case 4: {
+            const tick = Math.floor(seconds * 8);
+            const noise = deterministicNoise(tick + dna.palette * 71, ledIndex + dna.pattern * 19);
+            return paletteColor(palette, noise, noise > 0.76 ? 1 : MIN_VISUAL_BRIGHTNESS);
+          }
+          case 5: {
+            const scanner = (Math.sin(seconds * 2.8) * 0.5 + 0.5) * (ledCount - 1);
+            const distance = Math.abs(scanner - ledIndex);
+            return paletteColor(palette, position + seconds * 0.08, clamp(1 - distance / 4, MIN_VISUAL_BRIGHTNESS, 1));
+          }
+          default:
+            return paletteColor(palette, position, 1);
+        }
+      }
+
+      class TubeNode {
+        constructor(simulation, bornAt) {
+          this.simulation = simulation;
+          this.id = simulation.randomMeshId();
+          this.uplinkId = 0;
+          this.version = PROTOCOL_VERSION;
+          this.bornAt = bornAt;
+          this.clockRate = 1 + ((simulation.random() - 0.5) * 70) / 1000000;
+          this.timebase = (simulation.random() - 0.5) * 80;
+          this.activeAt = bornAt + Math.max(700, STATUS_TIMEOUT_BASE - this.id / 2);
+          this.nextBroadcastAt = this.activeAt + simulation.random() * STATUS_UPDATE_PERIOD;
+          this.uplinkDeadline = 0;
+          this.lastUplinkSeenAt = null;
+          this.rebroadcastUntil = -1;
+          const initialDNA = simulation.randomDNA();
+          this.current = {
+            bpm: simulation.leaderBpm,
+            beatFrame: 0,
+            patternPhrase: 0,
+            patternId: initialDNA.pattern,
+            palettePhrase: 0,
+            paletteId: initialDNA.palette
+          };
+          this.next = cloneTubeState(this.current);
+          this.scheduleNextPattern(0);
+          this.scheduleNextPalette(0);
+          if (this.next.patternPhrase === this.next.palettePhrase) {
+            this.next.palettePhrase += simulation.randomInt(1, 3);
+          }
+          this.receivedCount = 0;
+          this.executedCount = 0;
+          this.ignoredCount = 0;
+        }
+
+        get status() {
+          return this.simulation.time >= this.activeAt ? STATUS.STARTED : STATUS.RECEIVING;
+        }
+
+        get dna() {
+          return { pattern: this.current.patternId, palette: this.current.paletteId };
+        }
+
+        isFollowing() { return this.uplinkId !== 0; }
+        isRelayActive() { return this.simulation.time <= this.rebroadcastUntil; }
+
+        role() {
+          return this.isFollowing() ? "Following" : "Leading";
+        }
+
+        localMillis(atTime = this.simulation.time) {
+          return Math.max(0, atTime - this.bornAt) * this.clockRate;
+        }
+
+        visualTime(atTime = this.simulation.time) {
+          return this.timebase + this.localMillis(atTime);
+        }
+
+        animationTime() {
+          return (this.current.beatFrame / BEAT_UNITS) * 500;
+        }
+
+        currentPhrase() {
+          return Math.floor(this.current.beatFrame / PHRASE_UNITS);
+        }
+
+        snapshotStates() {
+          return cloneTubeStates({ current: this.current, next: this.next });
+        }
+
+        scheduleNextPattern(phrase) {
+          let patternId = this.simulation.randomInt(0, PATTERNS.length);
+          while (patternId === this.current.patternId) patternId = this.simulation.randomInt(0, PATTERNS.length);
+          const [minimum, maximum] = PATTERNS[patternId].duration;
+          this.next.patternId = patternId;
+          this.next.patternPhrase = phrase + this.simulation.randomInt(minimum, maximum);
+        }
+
+        scheduleNextPalette(phrase) {
+          let paletteId = this.simulation.randomInt(0, PALETTES.length);
+          while (paletteId === this.current.paletteId) paletteId = this.simulation.randomInt(0, PALETTES.length);
+          this.next.paletteId = paletteId;
+          this.next.palettePhrase = phrase + this.simulation.randomInt(MIN_COLOR_CHANGE_PHRASES, MAX_COLOR_CHANGE_PHRASES);
+        }
+
+        applyDueSchedule() {
+          const phrase = this.currentPhrase();
+          const changes = [];
+
+          if (phrase >= this.next.patternPhrase) {
+            this.current.patternPhrase = this.next.patternPhrase;
+            this.current.patternId = this.next.patternId;
+            changes.push(`pattern P${this.current.patternId}`);
+            this.scheduleNextPattern(phrase);
+            while (this.next.patternPhrase === this.next.palettePhrase) {
+              this.next.patternPhrase += this.simulation.randomInt(1, 3);
+            }
+          }
+
+          if (phrase >= this.next.palettePhrase) {
+            this.current.palettePhrase = this.next.palettePhrase;
+            this.current.paletteId = this.next.paletteId;
+            changes.push(`palette C${this.current.paletteId}`);
+            this.scheduleNextPalette(phrase);
+            while (this.next.palettePhrase === this.next.patternPhrase) {
+              this.next.palettePhrase += this.simulation.randomInt(1, 3);
+            }
+          }
+
+          if (changes.length) {
+            this.simulation.log(this, "schedule", `phrase ${phrase}: changed ${changes.join(" + ")}`);
+          }
+        }
+
+        follow(header) {
+          if (!header) {
+            if (this.uplinkId !== 0) {
+              this.simulation.log(this, "route", `uplink ${formatId(this.uplinkId)} timed out`);
+            }
+            this.uplinkId = 0;
+            this.uplinkDeadline = 0;
+            this.lastUplinkSeenAt = null;
+            return;
+          }
+
+          if (this.uplinkId === header.id) return;
+          this.uplinkId = header.id;
+          this.simulation.log(this, "route", `following higher ID ${formatId(header.id)}`);
+        }
+
+        resetForIdConflict() {
+          const previous = this.id;
+          this.id = this.simulation.randomMeshId();
+          this.uplinkId = 0;
+          this.uplinkDeadline = 0;
+          this.lastUplinkSeenAt = null;
+          this.rebroadcastUntil = -1;
+          this.activeAt = this.simulation.time + Math.max(700, STATUS_TIMEOUT_BASE - this.id / 2);
+          this.nextBroadcastAt = this.activeAt + this.simulation.random() * STATUS_UPDATE_PERIOD;
+          this.simulation.log(this, "conflict", `ID collision ${formatId(previous)} → ${formatId(this.id)}`);
+        }
+
+        onPeerPing(header) {
+          if (header.id === this.id) {
+            this.resetForIdConflict();
+            return;
+          }
+
+          if (header.id > this.uplinkId && header.id > this.id) {
+            this.follow(header);
+          }
+
+          if (header.id === this.uplinkId) {
+            this.uplinkDeadline = this.simulation.time + UPLINK_TIMEOUT;
+            this.lastUplinkSeenAt = this.simulation.time;
+          }
+
+          if (header.uplinkId === this.id || (header.uplinkId === 0 && header.id < this.id)) {
+            this.rebroadcastUntil = this.simulation.time + REBROADCAST_TIME;
+          }
+        }
+
+        receive(message, strength, traceId, hop = 0) {
+          if (!message || message.header.version !== this.version) return;
+          this.receivedCount += 1;
+          this.onPeerPing(message.header);
+
+          let ignore = false;
+          switch (message.recipients) {
+            case RECIPIENTS.ALL:
+              ignore = message.header.id !== this.uplinkId;
+              break;
+            case RECIPIENTS.ROOT:
+              ignore = message.header.uplinkId !== this.id;
+              break;
+            case RECIPIENTS.INFO:
+              ignore = false;
+              break;
+            default:
+              ignore = true;
+          }
+
+          if (ignore) {
+            this.ignoredCount += 1;
+            return;
+          }
+
+          if (message.recipients !== RECIPIENTS.ROOT || !this.isFollowing()) {
+            const corrected = message.timebase - this.localMillis() + 3;
+            if (Math.abs(corrected - this.timebase) > 10) this.timebase = corrected;
+
+            if (message.command === COMMAND.STATE && message.data && message.data.states) {
+              const before = dnaKey(this.dna);
+              this.current = cloneTubeState(message.data.states.current);
+              this.next = cloneTubeState(message.data.states.next);
+              this.executedCount += 1;
+              if (before !== dnaKey(this.dna)) {
+                this.simulation.log(this, "state", `adopted now ${this.simulation.describeDNA(this.dna)}`);
+              }
+              this.simulation.log(
+                this,
+                "schedule",
+                `knows P${this.next.patternId}@${this.next.patternPhrase}, C${this.next.paletteId}@${this.next.palettePhrase}`
+              );
+            }
+          }
+
+          if (this.isRelayActive() && message.recipients !== RECIPIENTS.INFO) {
+            const relayed = {
+              recipients: this.isFollowing() ? message.recipients : RECIPIENTS.ALL,
+              command: message.command,
+              data: cloneData(message.data)
+            };
+            this.simulation.broadcast(this, relayed, traceId, true, hop + 1, message.header.id);
+          }
+        }
+
+        sendState() {
+          this.simulation.broadcast(this, {
+            recipients: RECIPIENTS.ALL,
+            command: COMMAND.STATE,
+            data: { states: this.snapshotStates() }
+          });
+        }
+
+        forceNext() {
+          const phrase = this.currentPhrase();
+          const nextPhrase = Math.min(this.next.patternPhrase, this.next.palettePhrase) - phrase;
+          this.next.patternPhrase -= nextPhrase;
+          this.next.palettePhrase -= nextPhrase;
+          this.sendState();
+        }
+
+        update(deltaMs) {
+          this.current.beatFrame += deltaMs * this.current.bpm * BEAT_UNITS / 60000;
+          this.next.bpm = this.current.bpm;
+          this.next.beatFrame = this.current.beatFrame;
+          this.applyDueSchedule();
+
+          if (this.isFollowing() && this.uplinkDeadline && this.simulation.time > this.uplinkDeadline) {
+            this.follow(null);
+          }
+
+          while (this.simulation.time >= this.nextBroadcastAt) {
+            this.nextBroadcastAt += STATUS_UPDATE_PERIOD;
+            if (this.status === STATUS.STARTED && (!this.isFollowing() || this.simulation.random() < 0.25)) {
+              this.sendState();
+            }
+          }
+        }
+      }
+
+      class Simulation {
+        constructor() {
+          this.seed = 0x7A8E5;
+          this.rng = mulberry32(this.seed);
+          this.entities = [];
+          this.time = 0;
+          this.paused = false;
+          this.speed = 2;
+          this.range = 220;
+          this.dropoff = "linear";
+          this.leaderBpm = DEFAULT_BPM;
+          this.deliveryQueue = [];
+          this.waves = [];
+          this.pulses = [];
+          this.logs = [];
+          this.trace = 0;
+          this.stats = { eligible: 0, delivered: 0, dropped: 0, rebroadcasts: 0 };
+          this.width = 900;
+          this.height = 600;
+        }
+
+        random() { return this.rng(); }
+        randomInt(minimum, maximum) { return Math.floor(minimum + this.random() * (maximum - minimum)); }
+        randomMeshId() { return Math.floor(256 + this.random() * (4000 - 256)); }
+        randomDNA() {
+          return {
+            pattern: Math.floor(this.random() * PATTERNS.length),
+            palette: Math.floor(this.random() * PALETTES.length)
+          };
+        }
+
+        describeDNA(dna) { return `${PATTERNS[dna.pattern].name} / ${PALETTES[dna.palette].name}`; }
+
+        setBounds(width, height) {
+          this.width = Math.max(320, width);
+          this.height = Math.max(280, height);
+          for (const entity of this.entities) {
+            entity.x = clamp(entity.x, 45, this.width - 45);
+            entity.y = clamp(entity.y, 78, this.height - 72);
+          }
+        }
+
+        addDevice(x = this.width / 2, y = this.height / 2) {
+          const entity = {
+            x: clamp(x, 45, this.width - 45),
+            y: clamp(y, 78, this.height - 72),
+            network: new TubeNode(this, this.time)
+          };
+          this.entities.push(entity);
+          this.log(entity.network, "system", `joined simulation with ${this.describeDNA(entity.network.dna)}`);
+          return entity;
+        }
+
+        reset() {
+          this.seed = (this.seed + 0x9E3779B9) >>> 0;
+          this.rng = mulberry32(this.seed);
+          this.entities = [];
+          this.time = 0;
+          this.deliveryQueue = [];
+          this.waves = [];
+          this.pulses = [];
+          this.logs = [];
+          this.trace = 0;
+          this.stats = { eligible: 0, delivered: 0, dropped: 0, rebroadcasts: 0 };
+          return this.addDevice(this.width / 2, this.height / 2);
+        }
+
+        entityForNode(node) { return this.entities.find(entity => entity.network === node); }
+
+        distance(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+
+        localMaximumWarning(entity) {
+          const node = entity.network;
+          if (node.isFollowing() || node.status !== STATUS.STARTED) return null;
+
+          const inRange = this.entities.filter(candidate =>
+            candidate !== entity && this.distance(entity, candidate) < this.range
+          );
+          if (inRange.some(candidate => candidate.network.id > node.id)) return null;
+
+          const bridges = inRange.filter(candidate =>
+            candidate.network.id < node.id && candidate.network.uplinkId > node.id
+          );
+          if (!bridges.length) return null;
+
+          const best = bridges.sort((a, b) => b.network.uplinkId - a.network.uplinkId)[0];
+          return {
+            type: "local-maximum",
+            nodeId: node.id,
+            relayId: best.network.id,
+            advertisedUplinkId: best.network.uplinkId,
+            distance: this.distance(entity, best),
+            explanation: `${formatId(node.id)} hears lower-ID ${formatId(best.network.id)}, which advertises higher uplink ${formatId(best.network.uplinkId)}. Current node.h compares only the immediate sender ID, so ${formatId(node.id)} remains leading.`
+          };
+        }
+
+        signalForNormalizedDistance(normalizedDistance, dropoff = this.dropoff) {
+          const n = clamp(normalizedDistance, 0, 1);
+          switch (dropoff) {
+            case "quadratic":
+              return (1 - n) ** 2;
+            case "smooth":
+              return 1 - (n * n * (3 - 2 * n));
+            case "inverseSquare": {
+              const raw = 1 / (1 + 8 * n * n);
+              const edge = 1 / 9;
+              return clamp((raw - edge) / (1 - edge), 0, 1);
+            }
+            case "linear":
+            default:
+              return 1 - n;
+          }
+        }
+
+        signalAtDistance(distance, range = this.range, dropoff = this.dropoff) {
+          if (distance >= range) return 0;
+          return this.signalForNormalizedDistance(distance / range, dropoff);
+        }
+
+        broadcast(sender, partialMessage, inheritedTrace = null, rebroadcast = false, hop = 0, behalfOfId = null) {
+          if (sender.status !== STATUS.STARTED) return false;
+          const senderEntity = this.entityForNode(sender);
+          if (!senderEntity) return false;
+
+          const traceId = inheritedTrace || ++this.trace;
+          const message = {
+            header: { id: sender.id, uplinkId: sender.uplinkId, version: sender.version },
+            recipients: partialMessage.recipients,
+            timebase: sender.visualTime(),
+            command: partialMessage.command,
+            data: cloneData(partialMessage.data)
+          };
+
+          if (!rebroadcast) {
+            const commandName = message.command === COMMAND.STATE ? "STATE" : "ACTION";
+            const detail = message.command === COMMAND.STATE
+              ? ` now ${this.describeDNA(sender.dna)}; next P${sender.next.patternId}@${sender.next.patternPhrase}, C${sender.next.paletteId}@${sender.next.palettePhrase}`
+              : "";
+            this.log(sender, "tx", `broadcast ${commandName}:${this.recipientName(message.recipients)}${detail}`);
+          } else {
+            this.stats.rebroadcasts += 1;
+            const commandName = message.command === COMMAND.STATE ? "STATE" : "ACTION";
+            this.log(
+              sender,
+              "relay",
+              `rebroadcast ${commandName}:${this.recipientName(message.recipients)} as ${formatId(sender.id)} on behalf of ${formatId(behalfOfId)} · hop ${hop} · trace #${traceId}`
+            );
+          }
+
+          this.waves.push({
+            sender: senderEntity,
+            start: this.time,
+            end: this.time + RADIO_WAVE_TIME * (1 + RADIO_TRAIL_SPACING * (RADIO_TRAIL_COUNT - 1)),
+            range: this.range,
+            dropoff: this.dropoff,
+            traceId,
+            rebroadcast,
+            hop,
+            behalfOfId
+          });
+
+          for (const targetEntity of this.entities) {
+            if (targetEntity.network === sender) continue;
+            const distance = this.distance(senderEntity, targetEntity);
+            const strength = this.signalAtDistance(distance, this.range, this.dropoff);
+            if (strength <= 0) continue;
+
+            this.stats.eligible += 1;
+            const success = this.random() < strength;
+            const start = this.time + (distance / this.range) * RADIO_WAVE_TIME;
+            const end = start + 260;
+            this.pulses.push({ sender: senderEntity, target: targetEntity, success, strength, start, end, traceId, rebroadcast, hop, behalfOfId });
+
+            if (!success) {
+              this.stats.dropped += 1;
+              continue;
+            }
+
+            this.stats.delivered += 1;
+            const latency = (distance / this.range) * RADIO_WAVE_TIME;
+            this.deliveryQueue.push({
+              at: this.time + latency,
+              target: targetEntity.network,
+              message: {
+                header: { ...message.header },
+                recipients: message.recipients,
+                timebase: message.timebase,
+                command: message.command,
+                data: cloneData(message.data)
+              },
+              strength,
+              traceId,
+              hop
+            });
+          }
+          return true;
+        }
+
+        recipientName(value) {
+          return value === RECIPIENTS.ROOT ? "ROOT" : value === RECIPIENTS.INFO ? "INFO" : "ALL";
+        }
+
+        log(node, type, message) {
+          this.logs.unshift({ at: this.time, node, type, message });
+          if (this.logs.length > 100) this.logs.length = 100;
+        }
+
+        update(realDeltaMs) {
+          if (this.paused) return;
+          const delta = Math.min(realDeltaMs, 80) * this.speed;
+          this.time += delta;
+
+          this.deliveryQueue.sort((a, b) => a.at - b.at);
+          while (this.deliveryQueue.length && this.deliveryQueue[0].at <= this.time) {
+            const delivery = this.deliveryQueue.shift();
+            delivery.target.receive(delivery.message, delivery.strength, delivery.traceId, delivery.hop);
+          }
+
+          for (const entity of this.entities) entity.network.update(delta);
+          this.waves = this.waves.filter(wave => wave.end > this.time);
+          this.pulses = this.pulses.filter(pulse => pulse.end > this.time);
+        }
+      }
+
+      const canvas = document.getElementById("spaceCanvas");
+      const context = canvas.getContext("2d");
+      const space = document.getElementById("space");
+      const simulation = new Simulation();
+      let selected = null;
+      let dragging = null;
+      let dragOffset = { x: 0, y: 0 };
+      let lastFrame = performance.now();
+      let inspectorLastUpdated = 0;
+      let diagnosticsLastUpdated = 0;
+
+      const ui = {
+        addDevice: document.getElementById("addDevice"),
+        addEight: document.getElementById("addEight"),
+        pauseToggle: document.getElementById("pauseToggle"),
+        resetSimulation: document.getElementById("resetSimulation"),
+        rangeControl: document.getElementById("rangeControl"),
+        rangeOutput: document.getElementById("rangeOutput"),
+        dropoffControl: document.getElementById("dropoffControl"),
+        speedControl: document.getElementById("speedControl"),
+        speedOutput: document.getElementById("speedOutput"),
+        bpmControl: document.getElementById("bpmControl"),
+        bpmOutput: document.getElementById("bpmOutput"),
+        forceNext: document.getElementById("forceNext"),
+        showTopology: document.getElementById("showTopology"),
+        showRadio: document.getElementById("showRadio"),
+        deviceCount: document.getElementById("deviceCount"),
+        rootCount: document.getElementById("rootCount"),
+        relayCount: document.getElementById("relayCount"),
+        clusterCount: document.getElementById("clusterCount"),
+        deliveryRate: document.getElementById("deliveryRate"),
+        selectedId: document.getElementById("selectedId"),
+        selectedRole: document.getElementById("selectedRole"),
+        dnaStrip: document.getElementById("dnaStrip"),
+        dnaCode: document.getElementById("dnaCode"),
+        dnaName: document.getElementById("dnaName"),
+        topologyWarning: document.getElementById("topologyWarning"),
+        factId: document.getElementById("factId"),
+        factUplink: document.getElementById("factUplink"),
+        factState: document.getElementById("factState"),
+        factRelay: document.getElementById("factRelay"),
+        factLastHeard: document.getElementById("factLastHeard"),
+        factClock: document.getElementById("factClock"),
+        factNextPattern: document.getElementById("factNextPattern"),
+        factNextPalette: document.getElementById("factNextPalette"),
+        factBpm: document.getElementById("factBpm"),
+        patternProgressLabel: document.getElementById("patternProgressLabel"),
+        patternProgressValue: document.getElementById("patternProgressValue"),
+        patternProgressTrack: document.getElementById("patternProgressTrack"),
+        patternProgressFill: document.getElementById("patternProgressFill"),
+        paletteProgressLabel: document.getElementById("paletteProgressLabel"),
+        paletteProgressValue: document.getElementById("paletteProgressValue"),
+        paletteProgressTrack: document.getElementById("paletteProgressTrack"),
+        paletteProgressFill: document.getElementById("paletteProgressFill"),
+        factPosition: document.getElementById("factPosition"),
+        factNeighbors: document.getElementById("factNeighbors"),
+        factSignal: document.getElementById("factSignal"),
+        copySnapshot: document.getElementById("copySnapshot"),
+        mirrorSnapshot: document.getElementById("mirrorSnapshot"),
+        copyStatus: document.getElementById("copyStatus"),
+        debugSnapshot: document.getElementById("debugSnapshot"),
+        trafficList: document.getElementById("trafficList")
+      };
+
+      function resizeCanvas() {
+        const rect = space.getBoundingClientRect();
+        const ratio = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.max(1, Math.floor(rect.width * ratio));
+        canvas.height = Math.max(1, Math.floor(rect.height * ratio));
+        canvas.style.width = `${rect.width}px`;
+        canvas.style.height = `${rect.height}px`;
+        context.setTransform(ratio, 0, 0, ratio, 0, 0);
+        simulation.setBounds(rect.width, rect.height);
+      }
+
+      function addDeviceAt(x, y) {
+        selected = simulation.addDevice(x, y);
+        updateInspector(true);
+      }
+
+      function addNearCenter(count) {
+        const centerX = simulation.width / 2;
+        const centerY = simulation.height / 2;
+        for (let index = 0; index < count; index += 1) {
+          const angle = (index / Math.max(count, 1)) * Math.PI * 2 + simulation.random() * 0.35;
+          const radius = 85 + simulation.random() * Math.min(230, simulation.width * 0.28);
+          addDeviceAt(centerX + Math.cos(angle) * radius, centerY + Math.sin(angle) * radius);
+        }
+      }
+
+      function canvasPoint(event) {
+        const rect = canvas.getBoundingClientRect();
+        return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      }
+
+      function hitTest(point) {
+        for (let index = simulation.entities.length - 1; index >= 0; index -= 1) {
+          const entity = simulation.entities[index];
+          if (Math.abs(point.x - entity.x) <= 27 && Math.abs(point.y - entity.y) <= 68) return entity;
+        }
+        return null;
+      }
+
+      canvas.addEventListener("pointerdown", event => {
+        const point = canvasPoint(event);
+        const hit = hitTest(point);
+        if (!hit) return;
+        selected = hit;
+        dragging = hit;
+        dragOffset = { x: hit.x - point.x, y: hit.y - point.y };
+        canvas.classList.add("dragging");
+        canvas.setPointerCapture(event.pointerId);
+        updateInspector(true);
+      });
+
+      canvas.addEventListener("pointermove", event => {
+        if (!dragging) return;
+        const point = canvasPoint(event);
+        dragging.x = clamp(point.x + dragOffset.x, 45, simulation.width - 45);
+        dragging.y = clamp(point.y + dragOffset.y, 78, simulation.height - 72);
+      });
+
+      function endDrag(event) {
+        dragging = null;
+        canvas.classList.remove("dragging");
+        if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+      }
+
+      canvas.addEventListener("pointerup", endDrag);
+      canvas.addEventListener("pointercancel", endDrag);
+      canvas.addEventListener("dblclick", event => {
+        const point = canvasPoint(event);
+        if (!hitTest(point)) addDeviceAt(point.x, point.y);
+      });
+
+      ui.addDevice.addEventListener("click", () => {
+        const angle = simulation.random() * Math.PI * 2;
+        const radius = 55 + simulation.random() * 125;
+        addDeviceAt(simulation.width / 2 + Math.cos(angle) * radius, simulation.height / 2 + Math.sin(angle) * radius);
+      });
+      ui.addEight.addEventListener("click", () => addNearCenter(8));
+      ui.pauseToggle.addEventListener("click", () => {
+        simulation.paused = !simulation.paused;
+        ui.pauseToggle.textContent = simulation.paused ? "▶" : "Ⅱ";
+        ui.pauseToggle.title = simulation.paused ? "Resume simulation" : "Pause simulation";
+        ui.pauseToggle.setAttribute("aria-label", ui.pauseToggle.title);
+      });
+      ui.resetSimulation.addEventListener("click", () => {
+        selected = simulation.reset();
+        updateInspector(true);
+      });
+      ui.rangeControl.addEventListener("input", () => {
+        simulation.range = Number(ui.rangeControl.value);
+        ui.rangeOutput.value = `${simulation.range} px`;
+      });
+      ui.dropoffControl.addEventListener("change", () => { simulation.dropoff = ui.dropoffControl.value; });
+      ui.speedControl.addEventListener("input", () => {
+        simulation.speed = Number(ui.speedControl.value);
+        ui.speedOutput.value = `${simulation.speed.toFixed(2).replace(/0$/, "")}×`;
+      });
+      ui.bpmControl.addEventListener("input", () => {
+        simulation.leaderBpm = Number(ui.bpmControl.value);
+        ui.bpmOutput.value = `${simulation.leaderBpm} BPM`;
+        for (const entity of simulation.entities) {
+          if (!entity.network.isFollowing()) {
+            entity.network.current.bpm = simulation.leaderBpm;
+            entity.network.next.bpm = simulation.leaderBpm;
+          }
+        }
+      });
+      ui.forceNext.addEventListener("click", () => {
+        for (const entity of simulation.entities) {
+          if (!entity.network.isFollowing()) entity.network.forceNext();
+        }
+      });
+      ui.copySnapshot.addEventListener("click", async () => {
+        const text = JSON.stringify(createSnapshot(), null, 2);
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+          } else {
+            const textarea = document.createElement("textarea");
+            textarea.value = text;
+            textarea.style.position = "fixed";
+            textarea.style.opacity = "0";
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand("copy");
+            textarea.remove();
+          }
+          ui.copyStatus.textContent = "Copied";
+        } catch (error) {
+          ui.copyStatus.textContent = "Copy unavailable";
+        }
+        setTimeout(() => { ui.copyStatus.textContent = ""; }, 1600);
+      });
+      ui.mirrorSnapshot.addEventListener("change", () => {
+        if (!ui.mirrorSnapshot.checked && location.hash.startsWith("#tubes=")) {
+          history.replaceState(null, "", location.href.split("#")[0]);
+        }
+        updateDiagnostics(performance.now(), true);
+      });
+
+      function drawGrid() {
+        const { width, height } = simulation;
+        context.clearRect(0, 0, width, height);
+        context.fillStyle = "#090d16";
+        context.fillRect(0, 0, width, height);
+
+        const spacing = 32;
+        context.beginPath();
+        for (let x = 0.5; x < width; x += spacing) { context.moveTo(x, 0); context.lineTo(x, height); }
+        for (let y = 0.5; y < height; y += spacing) { context.moveTo(0, y); context.lineTo(width, y); }
+        context.strokeStyle = "rgba(133, 151, 184, 0.055)";
+        context.lineWidth = 1;
+        context.stroke();
+
+        context.fillStyle = "rgba(143, 158, 187, 0.24)";
+        context.font = "700 9px ui-monospace, monospace";
+        context.fillText("SIMULATION SPACE · POSITION IS OMNISCIENT", 15, 19);
+      }
+
+      function drawRadioField() {
+        if (!selected || !ui.showRadio.checked) return;
+        const range = simulation.range;
+
+        const gradient = context.createRadialGradient(selected.x, selected.y, 0, selected.x, selected.y, range);
+        gradient.addColorStop(0, "rgba(112, 183, 255, 0.10)");
+        gradient.addColorStop(0.7, "rgba(112, 183, 255, 0.025)");
+        gradient.addColorStop(1, "rgba(112, 183, 255, 0)");
+        context.fillStyle = gradient;
+        context.beginPath();
+        context.arc(selected.x, selected.y, range, 0, Math.PI * 2);
+        context.fill();
+
+        context.setLineDash([5, 5]);
+        context.strokeStyle = "rgba(112, 183, 255, 0.32)";
+        context.lineWidth = 1;
+        context.beginPath();
+        context.arc(selected.x, selected.y, range, 0, Math.PI * 2);
+        context.stroke();
+        context.setLineDash([]);
+
+        for (const target of simulation.entities) {
+          if (target === selected) continue;
+          const distance = simulation.distance(selected, target);
+          const strength = simulation.signalAtDistance(distance);
+          if (strength <= 0) continue;
+          context.strokeStyle = `rgba(112, 183, 255, ${0.05 + strength * 0.2})`;
+          context.lineWidth = 0.5 + strength * 1.5;
+          context.beginPath();
+          context.moveTo(selected.x, selected.y);
+          context.lineTo(target.x, target.y);
+          context.stroke();
+        }
+      }
+
+      function findUplinkEntity(entity) {
+        if (!entity.network.uplinkId) return null;
+        const candidates = simulation.entities.filter(candidate => candidate.network.id === entity.network.uplinkId);
+        if (!candidates.length) return null;
+        return candidates.sort((a, b) => simulation.distance(entity, a) - simulation.distance(entity, b))[0];
+      }
+
+      function drawTopology() {
+        if (!ui.showTopology.checked) return;
+        for (const entity of simulation.entities) {
+          const uplink = findUplinkEntity(entity);
+          if (!uplink) continue;
+          const color = entity === selected || uplink === selected
+            ? "rgba(244, 247, 255, 0.62)"
+            : "rgba(170, 180, 200, 0.22)";
+          const dx = uplink.x - entity.x;
+          const dy = uplink.y - entity.y;
+          const distance = Math.hypot(dx, dy);
+          if (distance < 1) continue;
+          const ux = dx / distance;
+          const uy = dy / distance;
+          const startX = entity.x + ux * 31;
+          const startY = entity.y + uy * 31;
+          const endX = uplink.x - ux * 31;
+          const endY = uplink.y - uy * 31;
+
+          context.setLineDash([4, 4]);
+          context.lineWidth = 1;
+          context.strokeStyle = color;
+          context.beginPath();
+          context.moveTo(startX, startY);
+          context.lineTo(endX, endY);
+          context.stroke();
+
+          const arrowLength = 9;
+          const arrowWidth = 5;
+          const baseX = endX - ux * arrowLength;
+          const baseY = endY - uy * arrowLength;
+          context.setLineDash([]);
+          context.fillStyle = color;
+          context.beginPath();
+          context.moveTo(endX, endY);
+          context.lineTo(baseX - uy * arrowWidth, baseY + ux * arrowWidth);
+          context.lineTo(baseX + uy * arrowWidth, baseY - ux * arrowWidth);
+          context.closePath();
+          context.fill();
+        }
+        context.setLineDash([]);
+      }
+
+      function drawRadioWaves() {
+        for (const wave of simulation.waves) {
+          const elapsed = (simulation.time - wave.start) / RADIO_WAVE_TIME;
+          const color = wave.rebroadcast ? "246, 211, 101" : "142, 240, 208";
+
+          for (let trail = 0; trail < RADIO_TRAIL_COUNT; trail += 1) {
+            const progress = elapsed - trail * RADIO_TRAIL_SPACING;
+            if (progress <= 0 || progress > 1) continue;
+            const radius = progress * wave.range;
+            const strength = simulation.signalForNormalizedDistance(progress, wave.dropoff);
+            const trailScale = 1 - trail * 0.16;
+            const alpha = (0.035 + strength * 0.42) * trailScale;
+
+            context.strokeStyle = `rgba(${color}, ${alpha})`;
+            context.lineWidth = 0.65 + strength * 2.2;
+            context.beginPath();
+            context.arc(wave.sender.x, wave.sender.y, radius, 0, Math.PI * 2);
+            context.stroke();
+
+            if (trail === 0 && wave.rebroadcast && strength > 0.08) {
+              context.fillStyle = `rgba(${color}, ${Math.min(0.9, alpha + 0.25)})`;
+              context.font = "800 8px ui-monospace, monospace";
+              context.textAlign = "center";
+              context.fillText(`R${wave.hop}`, wave.sender.x, wave.sender.y - radius - 4);
+            }
+          }
+        }
+      }
+
+      function drawPulses() {
+        for (const pulse of simulation.pulses) {
+          if (simulation.time < pulse.start) continue;
+          const span = Math.max(1, pulse.end - pulse.start);
+          const progress = clamp((simulation.time - pulse.start) / span, 0, 1);
+          const alpha = Math.sin(progress * Math.PI);
+          const color = !pulse.success
+            ? "255, 127, 145"
+            : pulse.rebroadcast ? "246, 211, 101" : "142, 240, 208";
+
+          context.strokeStyle = `rgba(${color}, ${alpha * (0.3 + pulse.strength * 0.5)})`;
+          context.lineWidth = pulse.success ? 1.4 : 1;
+          context.beginPath();
+          context.arc(pulse.target.x, pulse.target.y, 5 + progress * 7, 0, Math.PI * 2);
+          context.stroke();
+
+          if (!pulse.success && alpha > 0.25) {
+            const size = 3.5;
+            context.beginPath();
+            context.moveTo(pulse.target.x - size, pulse.target.y - size);
+            context.lineTo(pulse.target.x + size, pulse.target.y + size);
+            context.moveTo(pulse.target.x + size, pulse.target.y - size);
+            context.lineTo(pulse.target.x - size, pulse.target.y + size);
+            context.stroke();
+          }
+        }
+      }
+
+      function roundedRectPath(x, y, width, height, radius) {
+        const r = Math.min(radius, width / 2, height / 2);
+        context.beginPath();
+        context.moveTo(x + r, y);
+        context.arcTo(x + width, y, x + width, y + height, r);
+        context.arcTo(x + width, y + height, x, y + height, r);
+        context.arcTo(x, y + height, x, y, r);
+        context.arcTo(x, y, x + width, y, r);
+        context.closePath();
+      }
+
+      function drawDevice(entity) {
+        const node = entity.network;
+        const isSelected = entity === selected;
+        const width = 25;
+        const height = 92;
+        const x = entity.x - width / 2;
+        const y = entity.y - height / 2;
+        const palette = PALETTES[node.dna.palette];
+        const topologyWarning = simulation.localMaximumWarning(entity);
+
+        context.save();
+        context.shadowColor = isSelected ? "rgba(142, 240, 208, 0.42)" : "rgba(0, 0, 0, 0.72)";
+        context.shadowBlur = isSelected ? 18 : 11;
+        roundedRectPath(x - 4, y - 4, width + 8, height + 8, 11);
+        context.fillStyle = isSelected ? "rgba(142, 240, 208, 0.10)" : "rgba(2, 4, 8, 0.88)";
+        context.fill();
+        context.shadowBlur = 0;
+
+        roundedRectPath(x, y, width, height, 8);
+        context.fillStyle = "#151b25";
+        context.fill();
+        context.strokeStyle = isSelected ? "rgba(142, 240, 208, 0.8)" : "rgba(208, 218, 236, 0.2)";
+        context.lineWidth = isSelected ? 1.5 : 1;
+        context.stroke();
+
+        const ledCount = 14;
+        const ledX = x + 5;
+        const ledWidth = width - 10;
+        const ledHeight = 4.2;
+        const gap = 1.65;
+        const startY = y + 6.7;
+        for (let index = 0; index < ledCount; index += 1) {
+          const ledY = startY + (ledCount - 1 - index) * (ledHeight + gap);
+          roundedRectPath(ledX, ledY, ledWidth, ledHeight, 1.8);
+          context.fillStyle = node.status === STATUS.RECEIVING
+            ? "rgba(90, 98, 114, 0.28)"
+            : animationColor(node.dna, index, ledCount, node.animationTime());
+          context.fill();
+        }
+
+        context.textAlign = "center";
+        context.font = "800 11px ui-monospace, SFMono-Regular, Menlo, monospace";
+        context.fillStyle = isSelected ? "#f4f7ff" : "rgba(226, 232, 244, 0.82)";
+        context.fillText(formatId(node.id), entity.x, y - 12);
+
+        context.font = "750 8px ui-sans-serif, system-ui, sans-serif";
+        context.fillStyle = node.status === STATUS.RECEIVING
+          ? "#667189"
+          : !node.isFollowing() ? "#8ef0d0" : "#94a0b8";
+        const statusLabel = node.status === STATUS.RECEIVING
+          ? "BOOT"
+          : !node.isFollowing() ? "LEADING" : `FOLLOW ↑${formatId(node.uplinkId)}`;
+        context.fillText(statusLabel, entity.x, y + height + 15);
+
+        const dotY = y + height + 25;
+        const dotColor = mixColor(palette.colors[0], palette.colors[1], 0.5);
+        context.fillStyle = `rgb(${dotColor.r},${dotColor.g},${dotColor.b})`;
+        context.beginPath();
+        context.arc(entity.x, dotY, 2.2, 0, Math.PI * 2);
+        context.fill();
+
+        if (node.isRelayActive()) {
+          context.fillStyle = "#f6d365";
+          context.beginPath();
+          context.arc(x + width + 5, y + 7, 7, 0, Math.PI * 2);
+          context.fill();
+          context.fillStyle = "#201807";
+          context.font = "900 8px ui-monospace, monospace";
+          context.textAlign = "center";
+          context.fillText("R", x + width + 5, y + 10);
+        }
+
+        if (topologyWarning) {
+          context.fillStyle = "#f6d365";
+          context.beginPath();
+          context.arc(x - 5, y + 7, 7, 0, Math.PI * 2);
+          context.fill();
+          context.fillStyle = "#201807";
+          context.font = "900 9px ui-monospace, monospace";
+          context.textAlign = "center";
+          context.fillText("!", x - 5, y + 10);
+        }
+        context.restore();
+      }
+
+      function draw() {
+        drawGrid();
+        drawRadioField();
+        drawTopology();
+        drawRadioWaves();
+        drawPulses();
+        const ordered = [...simulation.entities].sort((a, b) => (a === selected ? 1 : 0) - (b === selected ? 1 : 0));
+        for (const entity of ordered) drawDevice(entity);
+      }
+
+      function createSnapshot() {
+        const warnings = simulation.entities
+          .map(entity => simulation.localMaximumWarning(entity))
+          .filter(Boolean);
+        const leaders = simulation.entities.filter(entity => !entity.network.isFollowing()).length;
+        const clusters = new Set(simulation.entities.map(entity => dnaKey(entity.network.dna))).size;
+
+        return {
+          schema: "tubes-mesh-simulator/v1",
+          capturedAtSimulationMs: Math.round(simulation.time),
+          simulation: {
+            paused: simulation.paused,
+            speed: simulation.speed,
+            radioRange: simulation.range,
+            dropoff: simulation.dropoff,
+            leaderBpm: simulation.leaderBpm
+          },
+          summary: {
+            nodes: simulation.entities.length,
+            leaders,
+            followers: simulation.entities.length - leaders,
+            dnaSets: clusters,
+            relayTransmissions: simulation.stats.rebroadcasts,
+            deliveredPackets: simulation.stats.delivered,
+            droppedPackets: simulation.stats.dropped,
+            pendingDeliveries: simulation.deliveryQueue.length,
+            activeRadioWaves: simulation.waves.length,
+            topologyWarnings: warnings.length
+          },
+          nodes: simulation.entities.map((entity, index) => {
+            const node = entity.network;
+            const inRange = simulation.entities
+              .filter(candidate => candidate !== entity && simulation.distance(entity, candidate) < simulation.range)
+              .map(candidate => formatId(candidate.network.id));
+            return {
+              index,
+              deviceLocal: {
+                id: formatId(node.id),
+                role: node.role(),
+                transportStatus: node.status,
+                uplinkId: node.uplinkId ? formatId(node.uplinkId) : null,
+                relayDuty: {
+                  active: node.isRelayActive(),
+                  remainingMs: Math.max(0, Math.round(node.rebroadcastUntil - simulation.time))
+                },
+                current: cloneTubeState(node.current),
+                next: cloneTubeState(node.next),
+                currentPhrase: node.currentPhrase(),
+                counters: {
+                  received: node.receivedCount,
+                  executed: node.executedCount,
+                  ignored: node.ignoredCount
+                }
+              },
+              simulatorOnly: {
+                position: { x: Math.round(entity.x), y: Math.round(entity.y) },
+                idsInsideHardRange: inRange,
+                warning: simulation.localMaximumWarning(entity)
+              }
+            };
+          }),
+          topology: simulation.entities
+            .filter(entity => entity.network.uplinkId)
+            .map(entity => ({ from: formatId(entity.network.id), uplink: formatId(entity.network.uplinkId) })),
+          warnings,
+          activeRadioWaves: simulation.waves.map(wave => {
+            const progress = clamp((simulation.time - wave.start) / RADIO_WAVE_TIME, 0, 1);
+            return {
+              senderId: formatId(wave.sender.network.id),
+              traceId: wave.traceId,
+              rebroadcast: wave.rebroadcast,
+              hop: wave.hop,
+              radius: Math.round(progress * wave.range),
+              maximumRange: wave.range,
+              progress: +progress.toFixed(3),
+              strengthAtWavefront: +simulation.signalForNormalizedDistance(progress, wave.dropoff).toFixed(3),
+              dropoff: wave.dropoff
+            };
+          }),
+          pendingDeliveries: simulation.deliveryQueue.map(delivery => ({
+            dueAtMs: Math.round(delivery.at),
+            targetId: formatId(delivery.target.id),
+            immediateSenderId: formatId(delivery.message.header.id),
+            senderUplinkId: delivery.message.header.uplinkId ? formatId(delivery.message.header.uplinkId) : null,
+            recipients: simulation.recipientName(delivery.message.recipients),
+            command: delivery.message.command,
+            strength: +delivery.strength.toFixed(3),
+            traceId: delivery.traceId,
+            hop: delivery.hop
+          })),
+          recentEvents: simulation.logs.slice(0, 50).map(log => ({
+            atMs: Math.round(log.at),
+            nodeId: formatId(log.node.id),
+            type: log.type,
+            message: log.message
+          }))
+        };
+      }
+
+      function createCompactSnapshot(snapshot = createSnapshot()) {
+        return {
+          v: 1,
+          t: snapshot.capturedAtSimulationMs,
+          p: snapshot.simulation.paused ? 1 : 0,
+          r: [snapshot.simulation.radioRange, snapshot.simulation.dropoff],
+          s: [snapshot.summary.nodes, snapshot.summary.leaders, snapshot.summary.relayTransmissions, snapshot.summary.topologyWarnings],
+          n: snapshot.nodes.map(node => [
+            node.deviceLocal.id,
+            node.deviceLocal.uplinkId || "-",
+            node.deviceLocal.role === "Leading" ? "L" : "F",
+            node.deviceLocal.relayDuty.active ? 1 : 0,
+            node.deviceLocal.current.patternId,
+            node.deviceLocal.current.paletteId,
+            node.deviceLocal.currentPhrase,
+            node.deviceLocal.next.patternId,
+            node.deviceLocal.next.patternPhrase,
+            node.deviceLocal.next.paletteId,
+            node.deviceLocal.next.palettePhrase,
+            node.simulatorOnly.position.x,
+            node.simulatorOnly.position.y
+          ]),
+          w: snapshot.warnings.map(warning => [
+            formatId(warning.nodeId),
+            formatId(warning.relayId),
+            formatId(warning.advertisedUplinkId)
+          ])
+        };
+      }
+
+      function encodeCompactSnapshot(snapshot) {
+        return btoa(JSON.stringify(createCompactSnapshot(snapshot)))
+          .replace(/\+/g, "-")
+          .replace(/\//g, "_")
+          .replace(/=+$/, "");
+      }
+
+      function updateDiagnostics(wallTime = performance.now(), force = false) {
+        if (!force && wallTime - diagnosticsLastUpdated < 500) return;
+        diagnosticsLastUpdated = wallTime;
+        const snapshot = createSnapshot();
+        const selectedNode = selected
+          ? snapshot.nodes.find(node => node.deviceLocal.id === formatId(selected.network.id))
+          : null;
+        ui.debugSnapshot.textContent = JSON.stringify({
+          schema: snapshot.schema,
+          capturedAtSimulationMs: snapshot.capturedAtSimulationMs,
+          summary: snapshot.summary,
+          selectedNode,
+          warnings: snapshot.warnings,
+          recentEvents: snapshot.recentEvents.slice(0, 8)
+        }, null, 2);
+
+        if (ui.mirrorSnapshot.checked) {
+          history.replaceState(null, "", `${location.href.split("#")[0]}#tubes=${encodeCompactSnapshot(snapshot)}`);
+        }
+      }
+
+      function updateInspector(force = false) {
+        if (!selected) return;
+        if (!force && simulation.time - inspectorLastUpdated < 180) return;
+        inspectorLastUpdated = simulation.time;
+        const node = selected.network;
+        const palette = PALETTES[node.dna.palette];
+        const pattern = PATTERNS[node.dna.pattern];
+
+        ui.selectedId.textContent = formatId(node.id);
+        ui.selectedRole.textContent = node.role();
+        ui.dnaStrip.style.setProperty("--dna-gradient", `linear-gradient(90deg, ${palette.colors.join(", ")})`);
+        ui.dnaCode.textContent = `P${node.dna.pattern} · C${node.dna.palette}`;
+        ui.dnaName.textContent = `${pattern.name} · ${palette.name}`;
+        const topologyWarning = simulation.localMaximumWarning(selected);
+        ui.topologyWarning.hidden = !topologyWarning;
+        ui.topologyWarning.textContent = topologyWarning ? `Local maximum: ${topologyWarning.explanation}` : "";
+        ui.factId.textContent = formatId(node.id);
+        ui.factUplink.textContent = node.uplinkId ? formatId(node.uplinkId) : "none";
+        ui.factState.textContent = node.status === STATUS.RECEIVING ? "receiving / silent" : node.role().toLowerCase();
+        const relaySeconds = Math.max(0, (node.rebroadcastUntil - simulation.time) / 1000);
+        const relayFor = node.uplinkId ? `for ${formatId(node.uplinkId)}` : "downstream";
+        ui.factRelay.textContent = node.isRelayActive() ? `active ${relayFor} · ${relaySeconds.toFixed(1)}s` : "inactive";
+        ui.factLastHeard.textContent = node.lastUplinkSeenAt === null
+          ? "never"
+          : `${Math.max(0, (simulation.time - node.lastUplinkSeenAt) / 1000).toFixed(1)} s ago`;
+        const beat = node.current.beatFrame / BEAT_UNITS;
+        const phrase = node.currentPhrase();
+        ui.factClock.textContent = `${beat.toFixed(2)} / ${phrase}`;
+        const patternWait = Math.max(0, node.next.patternPhrase - phrase);
+        const paletteWait = Math.max(0, node.next.palettePhrase - phrase);
+        const secondsUntilPhrase = targetPhrase => Math.max(
+          0,
+          ((targetPhrase * PHRASE_BEATS) - beat) * 60 / node.current.bpm
+        );
+        ui.factNextPattern.textContent = `P${node.next.patternId} ${PATTERNS[node.next.patternId].name} · phrase ${node.next.patternPhrase} · ${patternWait}P / ${secondsUntilPhrase(node.next.patternPhrase).toFixed(1)}s`;
+        ui.factNextPalette.textContent = `C${node.next.paletteId} ${PALETTES[node.next.paletteId].name} · phrase ${node.next.palettePhrase} · ${paletteWait}P / ${secondsUntilPhrase(node.next.palettePhrase).toFixed(1)}s`;
+        ui.factBpm.textContent = `${Math.round(node.current.bpm)} BPM`;
+        const patternRatio = scheduleRemainingRatio(node.current.patternPhrase, node.next.patternPhrase, node.current.beatFrame);
+        const paletteRatio = scheduleRemainingRatio(node.current.palettePhrase, node.next.palettePhrase, node.current.beatFrame);
+        const patternPercent = Math.round(patternRatio * 100);
+        const palettePercent = Math.round(paletteRatio * 100);
+        ui.patternProgressLabel.textContent = `Pattern → P${node.next.patternId} ${PATTERNS[node.next.patternId].name}`;
+        ui.patternProgressValue.value = `${patternPercent}% · ${secondsUntilPhrase(node.next.patternPhrase).toFixed(1)}s`;
+        ui.patternProgressTrack.setAttribute("aria-valuenow", String(patternPercent));
+        ui.patternProgressFill.style.width = `${patternPercent}%`;
+        ui.paletteProgressLabel.textContent = `Palette → C${node.next.paletteId} ${PALETTES[node.next.paletteId].name}`;
+        ui.paletteProgressValue.value = `${palettePercent}% · ${secondsUntilPhrase(node.next.palettePhrase).toFixed(1)}s`;
+        ui.paletteProgressTrack.setAttribute("aria-valuenow", String(palettePercent));
+        ui.paletteProgressFill.style.width = `${palettePercent}%`;
+        ui.paletteProgressFill.style.setProperty("--progress-color", `linear-gradient(90deg, ${PALETTES[node.next.paletteId].colors.join(", ")})`);
+        ui.factPosition.textContent = `${Math.round(selected.x)}, ${Math.round(selected.y)}`;
+
+        const signals = simulation.entities
+          .filter(entity => entity !== selected)
+          .map(entity => simulation.signalAtDistance(simulation.distance(selected, entity)))
+          .filter(strength => strength > 0);
+        ui.factNeighbors.textContent = String(signals.length);
+        ui.factSignal.textContent = signals.length ? `${Math.round(Math.max(...signals) * 100)}%` : "none";
+
+        const relevant = simulation.logs.filter(log => log.node === node).slice(0, 7);
+        ui.trafficList.replaceChildren();
+        if (!relevant.length) {
+          const item = document.createElement("li");
+          item.className = "empty-state";
+          item.textContent = "No local protocol events yet.";
+          ui.trafficList.appendChild(item);
+        } else {
+          for (const entry of relevant) {
+            const item = document.createElement("li");
+            item.className = "traffic-item";
+            const time = document.createElement("span");
+            time.className = "traffic-time";
+            time.textContent = `${(entry.at / 1000).toFixed(1)}s`;
+            const message = document.createElement("span");
+            message.textContent = entry.message;
+            item.append(time, message);
+            ui.trafficList.appendChild(item);
+          }
+        }
+
+        const leaders = simulation.entities.filter(entity => !entity.network.isFollowing()).length;
+        const clusters = new Set(simulation.entities.map(entity => dnaKey(entity.network.dna))).size;
+        ui.deviceCount.textContent = String(simulation.entities.length);
+        ui.rootCount.textContent = String(leaders);
+        ui.relayCount.textContent = String(simulation.stats.rebroadcasts);
+        ui.clusterCount.textContent = String(clusters);
+        ui.deliveryRate.textContent = simulation.stats.eligible
+          ? `${Math.round((simulation.stats.delivered / simulation.stats.eligible) * 100)}%`
+          : "—";
+      }
+
+      function frame(now) {
+        const delta = now - lastFrame;
+        lastFrame = now;
+        simulation.update(delta);
+        draw();
+        updateInspector();
+        updateDiagnostics(now);
+        requestAnimationFrame(frame);
+      }
+
+      const resizeObserver = new ResizeObserver(resizeCanvas);
+      resizeObserver.observe(space);
+      resizeCanvas();
+      selected = simulation.reset();
+      updateInspector(true);
+      updateDiagnostics(performance.now(), true);
+      requestAnimationFrame(frame);
+
+      window.TubesMeshSimulator = {
+        simulation,
+        constants: { PROTOCOL_VERSION, RECIPIENTS, COMMAND },
+        addDevice: (x, y) => addDeviceAt(x, y),
+        getSnapshot: createSnapshot,
+        getCompactSnapshot: () => createCompactSnapshot(createSnapshot())
+      };
+    })();
+  </script>
+</body>
+</html>
