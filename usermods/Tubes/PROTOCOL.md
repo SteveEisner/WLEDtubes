@@ -211,6 +211,13 @@ Unknown command IDs must be ignored. They should not change visible output.
 `State` is the core visual protocol. It carries the sender's current visual state
 and a scheduled next visual state.
 
+The paired current/next state is a core design property of Tubes, not an
+implementation accident. Devices may hear the mesh intermittently; by continuously
+sharing both what is active now and what is scheduled next, each device can keep
+running through short reception gaps without visible interruptions or local drift.
+In normal operation, receivers often know the flock's visual plan for the next
+30 seconds or more.
+
 ```mermaid
 flowchart LR
   S["State payload: 48 bytes"] --> C["Current VisualState: 24 bytes"]
@@ -720,15 +727,174 @@ Recognized buttons:
 
 Future protocols should be parallel and negotiable.
 
+### Version 3 WIP
+
+Version 3 should be a set of topic protocols, not one larger replacement for
+`State`. Each topic has its own authority, role, cadence, and compatibility rules.
+The node that forwards a packet is only the transport sender; it is not necessarily
+the authority for every visual topic.
+
+This lets the flock split leadership naturally. For example, a tube near the
+speakers can lead beat tracking while another tube controls palettes from the WLED
+interface and another controls generated patterns.
+
+### Topics
+
+Topics are numeric enum values on the wire, with space reserved for future
+expansion. Names below are documentation labels only.
+
+| Value | Topic | Purpose | Expected cadence | Look-ahead behavior |
+|---:|---|---|---:|---|
+| `0x00` | `Presence` | Capabilities, protocol support, topic authority claims, future positional coordination. | Low | Current only. |
+| `0x01` | `Beat` | BPM, beat frame, source quality, latency/source metadata. | High | Live current value only; future music timing is unknown. |
+| `0x02` | `Pattern` | Generated background pattern selection and pattern parameters. | Low / on change | Current plus next, or phrase-keyed future values. |
+| `0x03` | `Palette` | Generated colors and palette timing. | Low / burst on change | Current plus next, or phrase-keyed future values. |
+| `0x04` | `Effect` | Generated particles, transforms, overlays, and effect parameters. | Event-driven | Immediate or scheduled by beat/phrase as needed. |
+| `0x05..0x7f` | reserved core topics | Future standard flock topics. | varies | varies |
+| `0x80..0xef` | experimental/vendor topics | Local experiments or vendor-specific extensions. | varies | varies |
+| `0xf0..0xff` | reserved control topics | Future protocol control / escape range. | varies | varies |
+
+### Topic Roles
+
+Roles are per-topic, not global:
+
+| Role | Meaning |
+|---|---|
+| `Leader` | This node is the current authority for the topic. |
+| `Follower` | This node follows another authority for the topic. |
+| topic-specific roles | Reserved for future roles such as beat sensor, palette director, spatial anchor, or bridge. |
+
+Each topic needs its own leader/follower IDs. A device may be leader for one topic
+and follower for another. Topic leadership should use hysteresis and explicit
+priority/quality fields where applicable, so leadership does not rapidly flap.
+
+### Common Topic Envelope
+
+The exact v3 binary layout is not defined yet, but every topic message should carry
+these concepts:
+
+| Field | Meaning |
+|---|---|
+| `protocolVersion` | v3 or later protocol family. |
+| `topicId` | Numeric topic enum value. |
+| `topicVersion` | Version of this topic payload. |
+| `role` | Sender's role for this topic. |
+| `transportSenderId` | Node that transmitted this packet. |
+| `topicLeaderId` | Node currently claiming authority for this topic. |
+| `topicFollowerId` | Node this sender follows for this topic, or zero. |
+| `sequence` | Monotonic per-topic sequence/generation value. |
+| `payloadLength` | Allows receivers to skip unknown future fields. |
+| `flags` | Optional behavior bits. Unknown bits must be ignored. |
+
+### Palette Topic
+
+The first v3 palette design should keep color definitions inside `Palette`, not in
+a separate `PaletteDef` topic. A fixed `CRGBPalette16` value is 48 bytes, so the
+topic may need separate phrase-tagged packets for current and next palettes rather
+than trying to carry both in one small packet.
+
+Palette payloads should be able to express:
+
+| Field | Meaning |
+|---|---|
+| `paletteRole` | Current, next, preview, or future topic-specific role. |
+| `palettePhrase` | Phrase when this palette is active, when scheduled. |
+| `legacyPaletteId` | Best v2-compatible palette ID fallback. |
+| `paletteFormat` | `Palette16` first; future formats may add gradient stops. |
+| `paletteData` | Inline color data, such as 16 RGB colors for `Palette16`. |
+
+Receivers that understand v3 use the inline palette. Receivers that only understand
+v2 continue to use `legacyPaletteId` from the v2 compatibility bridge.
+
+### Beat Topic
+
+`Beat` is intentionally different from other visual topics. It should not require a
+future value because the likely use case is live music. A beat leader should send
+the best current timing estimate and enough quality metadata for followers to pick
+the best source.
+
+Likely fields include BPM, beat frame, confidence/quality, source type, source
+latency, and the leader's topic sequence.
+
+### Scheduled Visual Topics
+
+Visual topics that can be planned ahead should preserve the v2 look-ahead property.
+`Pattern`, `Palette`, and scheduled `Effect` data should either carry both current
+and next values or carry phrase-keyed values that receivers can cache before they
+become active. A single "current only" design would make v3 more fragile than v2
+during intermittent mesh reception.
+
+This matters for palette extensions. A fixed `CRGBPalette16` value is 48 bytes, so
+naively sending both current and next palettes would require 96 bytes before any
+metadata. That does not fit inside one v2-style 64-byte command payload. A v3
+palette topic should therefore use one of these shapes:
+
+| Shape | Meaning | Tradeoff |
+|---|---|---|
+| Separate current/next palette packets | Send one inline palette per packet, tagged by phrase or role. | Simple fixed payloads; requires receiver cache. |
+| Phrase-keyed palette cache inside Palette | Cache inline palette values by sequence/phrase, then reference them from later Palette messages. | Efficient once cached; needs cache invalidation/versioning. |
+| Larger future packet | A new negotiated transport can carry both palettes together. | Clean model; not compatible with v2 packet limits. |
+
+### Backward Compatibility
+
+Some form of backward compatibility is mandatory. The minimum acceptable behavior
+is an explicit option to downshift to v2 when a trigger is seen. Possible triggers:
+
+| Trigger | Expected behavior |
+|---|---|
+| A v2-only node is heard | Continue or resume v2 `State` broadcasting. |
+| A configured compatibility mode is enabled | Stay in mixed v2/v3 mode. |
+| v3 topic negotiation fails | Fall back to v2 for core flock behavior. |
+| A bridge node is present | Bridge v3 topic state into v2 `State` for legacy nodes. |
+
+Mixed flocks must keep the v2 core alive: beat, pattern, palette, and effect intent
+should continue to be translated into v2 `State`/`Beats`/`Action` behavior until a
+future deployment can safely stop doing so.
+
+### Forward Compatibility
+
+V3 should make future protocol changes easier than v2 did:
+
+| Mechanism | Requirement |
+|---|---|
+| Per-topic versions | A receiver can support `Beat` v3 while ignoring `Palette` v4. |
+| Tagged fields | Evolving topic payloads use numeric field IDs, not positional struct layouts. |
+| Length-delimited payloads | Unknown fields can be skipped without knowing their meaning. |
+| Reserved flags | Unknown flags are ignored unless a required-capability bit is defined. |
+| Capability advertisement | `Presence` advertises supported topics, topic versions, and limits. |
+| Unknown topic handling | Unknown numeric topic IDs must be ignored and must not affect visible output. |
+| Stable fallbacks | New richer values should include a v2-compatible fallback when possible. |
+
+The intent is to borrow protobuf's compatibility attributes, not necessarily to use
+protobuf itself. Topic payloads that are expected to evolve should be encoded as a
+small tagged field stream inside the topic envelope:
+
+| Attribute | Rule |
+|---|---|
+| Stable field numbers | Once assigned, a field number keeps the same meaning forever. |
+| Typed/skippable fields | Each field carries enough type or length information for an older receiver to skip it. |
+| Optional by default | Receivers must tolerate absent fields and use documented defaults. |
+| Additive changes | New behavior is added with new field numbers, not by changing old fields. |
+| No required new fields | A newer sender must not require old receivers to understand a new field for core flock behavior. |
+| Retired fields reserved | Removed fields are marked reserved and their numbers are never reused. |
+| Enum growth | Unknown enum values are ignored or treated as documented defaults. |
+| Order independent | Fields may appear in any order unless a topic explicitly says otherwise. |
+| Repetition allowed where defined | Repeated values use repeated fields or length-delimited arrays with explicit counts. |
+| Required capability bits | If a field changes interpretation rather than merely adding detail, advertise that through `Presence` before relying on it. |
+
+Fixed positional layouts are still acceptable for immutable headers and tiny
+compatibility shims, but topic payloads that may grow should follow these tagged
+field rules.
+
 Recommended channel split:
 
 ```mermaid
 flowchart LR
   Presence["Presence / capabilities"] --> Bridge["Compatibility bridge"]
-  Clock["Clock / BPM"] --> Bridge
+  Beat["Beat / BPM"] --> Bridge
   Palette["Palette intent"] --> Bridge
   Pattern["Pattern intent"] --> Bridge
-  Effects["Effects / overlays"] --> Bridge
+  Effect["Effect / overlays"] --> Bridge
   Bridge --> V2["v2 State packet for legacy flock"]
   Bridge --> Future["Future packets for capable peers"]
 ```

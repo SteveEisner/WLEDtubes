@@ -19,60 +19,22 @@
 
 WLEDPATH=../../build_output/firmware
 ESPPATH=~/.platformio/packages/framework-arduinoespressif32/tools
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SAFE_OTA="$SCRIPT_DIR/safe_ota.py"
 
 upload_firmware() {
-  echo "Uploading firmware"
-  sftp control@brcac.com <<EOF
-cd brcac.com
-put ../../build_output/firmware/tubes.bin firmware.bin
-quit
-EOF
+  echo "Refusing remote firmware upload."
+  echo "The brcac.com autoupdate path cannot preflight or migrate /cfg.json,"
+  echo "so it is not safe for the mixed Tubes fleet."
+  return 2
 }
 
 update_config() {
-  # No longer update configs
-  return;
-
-  echo "Updating configuration via OTA"
-  curl -s http://$1/upload -F "data=@default_config.json;filename=/cfg.json" -H "Connection: close" --no-keepalive
-  echo "Configured; wait..."
-  curl -s http://$1/reset -H "Connection: close" >/dev/null
+  "$SAFE_OTA" preflight "$1"
 }
 
 update_firmware() {
-  echo "Getting info"
-  json=$( curl -s http://$1/json/si )
-
-  arch=$(echo "$json" | jq -r '.["info"].arch')
-  name=$(echo "$json" | jq -r '.["info"].name')
-  echo "arch: $arch  name: $name"
-
-  firmware=
-
-  if [ ! -z "$name" ]; then
-    if [ "dig2go" == "$name" ]; then
-      firmware="esp32_quinled_dig2go_tubes.bin"
-    fi
-  fi
-
-  if [ -z "$firmware" ] && [ ! -z "$arch" ]; then
-    if [ "ESP32-C3" == "$arch" ]; then
-      firmware="esp32-c3-athom_tubes.bin"
-    elif [ "esp32" == "$arch" ]; then
-      firmware="esp32_quinled_dig2go_tubes.bin"
-    fi
-  fi
-
-  if [ -z "$firmware" ]; then
-    echo "firmware not set - not updating OTA"
-    curl -s http://$1/reset -H "Connection: close" >/dev/null
-  else
-    echo "Updating $firmware firmware via OTA"
-    curl -s -F "update=@../../build_output/firmware/$firmware" -H "Connection: close" --no-keepalive $1/update >/dev/null
-    echo "Updated; wait..."
-    sleep 5
-    update_config $1
-  fi
+  "$SAFE_OTA" update "$1"
 }
 
 connect() {
@@ -112,9 +74,10 @@ update_batch() {
 }
 
 process() {
-  if [ "$1" == "upload" ]; then
+  if [ "${1:-}" == "upload" ]; then
     upload_firmware
-  elif [ "$1" == "batch" ]; then
+    exit $?
+  elif [ "${1:-}" == "batch" ]; then
     update_batch
   else
     while :

@@ -17,12 +17,125 @@
 
 extern "C" void usePWMFixedNMI();
 
+#ifndef WLED_RESCUE_WINDOW_MS
+  #ifdef USERMOD_TUBES
+    #define WLED_RESCUE_WINDOW_MS 2000
+  #else
+    #define WLED_RESCUE_WINDOW_MS 0
+  #endif
+#endif
+
+#ifndef WLED_RESCUE_SERIAL_TOKEN
+  #define WLED_RESCUE_SERIAL_TOKEN "rescue"
+#endif
+
 /*
  * Main WLED class implementation. Mostly initialization and connection logic
  */
 
 WLED::WLED()
 {
+}
+
+static bool checkRescuePin()
+{
+#if WLED_RESCUE_WINDOW_MS > 0
+  constexpr int8_t rescuePins[] = {BTNPIN};
+  constexpr size_t rescuePinCount = sizeof(rescuePins) / sizeof(rescuePins[0]);
+  if (rescuePinCount == 0 || rescuePins[0] < 0) return false;
+
+  pinMode(rescuePins[0], INPUT_PULLUP);
+  delay(2);
+  return digitalRead(rescuePins[0]) == LOW;
+#else
+  return false;
+#endif
+}
+
+static bool checkRescueSerial()
+{
+#if WLED_RESCUE_WINDOW_MS > 0
+  static const char token[] = WLED_RESCUE_SERIAL_TOKEN;
+  size_t matched = 0;
+  unsigned long start = millis();
+
+  while (millis() - start < WLED_RESCUE_WINDOW_MS) {
+    while (Serial.available() > 0) {
+      char c = Serial.read();
+      if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+
+      if (c == token[matched]) {
+        matched++;
+        if (matched == sizeof(token) - 1) return true;
+      } else {
+        matched = (c == token[0]) ? 1 : 0;
+      }
+    }
+    delay(1);
+  }
+#endif
+  return false;
+}
+
+static void detectRescueMode()
+{
+#if WLED_RESCUE_WINDOW_MS > 0
+  if (checkRescuePin()) {
+    wledRescueMode = true;
+    Serial.println(F("WLED rescue mode: startup button held"));
+    return;
+  }
+
+  Serial.print(F("WLED rescue window: send '"));
+  Serial.print(F(WLED_RESCUE_SERIAL_TOKEN));
+  Serial.println(F("' to skip config, usermods, WiFi, and ESP-NOW"));
+  if (checkRescueSerial()) {
+    wledRescueMode = true;
+    Serial.println(F("WLED rescue mode: serial command received"));
+  }
+#endif
+}
+
+static void handleRescueMode()
+{
+  static bool announced = false;
+  static char command[16] = {0};
+  static uint8_t commandLen = 0;
+
+  if (!announced) {
+    Serial.println(F("WLED rescue mode active. Flash over serial, or send 'format'/'reboot'."));
+    announced = true;
+  }
+
+  while (Serial.available() > 0) {
+    char c = Serial.read();
+    if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+
+    if (c == '\r' || c == '\n') {
+      command[commandLen] = '\0';
+      if (strcmp(command, "format") == 0) {
+        Serial.println(F("Formatting filesystem"));
+        WLED_FS.format();
+        doReboot = true;
+      } else if (strcmp(command, "reboot") == 0) {
+        doReboot = true;
+      }
+      commandLen = 0;
+      continue;
+    }
+
+    if (commandLen < sizeof(command) - 1) {
+      command[commandLen++] = c;
+    } else {
+      commandLen = 0;
+    }
+  }
+
+  if (doReboot) {
+    delay(100);
+    ESP.restart();
+  }
+  delay(10);
 }
 
 // turns all LEDs off and restarts ESP
@@ -59,6 +172,11 @@ void WLED::loop()
   static size_t        avgStripMillis = 0;
   unsigned long        stripMillis;
 #endif
+
+  if (wledRescueMode) {
+    handleRescueMode();
+    return;
+  }
 
   handleTime();
   #ifndef WLED_DISABLE_INFRARED
@@ -390,6 +508,7 @@ void WLED::setup()
   #if !defined(WLED_DEBUG) && defined(ARDUINO_ARCH_ESP32) && !defined(WLED_DEBUG_HOST) && ARDUINO_USB_CDC_ON_BOOT
   Serial.setDebugOutput(false); // switch off kernel messages when using USBCDC
   #endif
+  detectRescueMode();
   DEBUG_PRINTLN();
   DEBUG_PRINTF_P(PSTR("---WLED %s %u INIT---\n"), versionString, VERSION);
   DEBUG_PRINTLN();
@@ -478,13 +597,24 @@ void WLED::setup()
   WLED_SET_AP_SSID(); // otherwise it is empty on first boot until config is saved
   multiWiFi.push_back(WiFiConfig(CLIENT_SSID,CLIENT_PASS)); // initialise vector with default WiFi
 
-  if(!verifyConfig()) {
-    if(!restoreConfig()) {
-      resetConfig();
+  bool needsCfgSave = false;
+  if (!wledRescueMode) {
+    if(!verifyConfig()) {
+      if(!restoreConfig()) {
+        resetConfig();
+      }
     }
+    DEBUG_PRINTLN(F("Reading config"));
+    needsCfgSave = deserializeConfigFromFS();
+  } else {
+    Serial.println(F("WLED rescue mode: skipping config file"));
+    bootPreset = 0;
+    turnOnAtBoot = false;
+    bri = 0;
+    briS = 0;
+    briLast = 0;
+    transitionDelay = 0;
   }
-  DEBUG_PRINTLN(F("Reading config"));
-  bool needsCfgSave = deserializeConfigFromFS();
   DEBUG_PRINTF_P(PSTR("heap %u\n"), getFreeHeapSize());
 
 #if defined(STATUSLED) && STATUSLED>=0
@@ -495,33 +625,47 @@ void WLED::setup()
   }
 #endif
 
-  DEBUG_PRINTLN(F("Initializing strip"));
-  beginStrip();
-  DEBUG_PRINTF_P(PSTR("heap %u\n"), getFreeHeapSize());
+  if (!wledRescueMode) {
+    DEBUG_PRINTLN(F("Initializing strip"));
+    beginStrip();
+    DEBUG_PRINTF_P(PSTR("heap %u\n"), getFreeHeapSize());
+  } else {
+    Serial.println(F("WLED rescue mode: LED output skipped"));
+    offMode = true;
+  }
 
-  DEBUG_PRINTLN(F("Usermods setup"));
-  userSetup();
-  UsermodManager::setup();
-  DEBUG_PRINTF_P(PSTR("heap %u\n"), getFreeHeapSize());
+  if (!wledRescueMode) {
+    DEBUG_PRINTLN(F("Usermods setup"));
+    userSetup();
+    UsermodManager::setup();
+    DEBUG_PRINTF_P(PSTR("heap %u\n"), getFreeHeapSize());
+  } else {
+    Serial.println(F("WLED rescue mode: usermods skipped"));
+  }
 
   if (needsCfgSave) serializeConfigToFS(); // usermods required new parameters; need to wait for strip to be initialised #4752
 
-  if (strcmp(multiWiFi[0].clientSSID, DEFAULT_CLIENT_SSID) == 0 && !configBackupExists())
-    showWelcomePage = true;
+  if (!wledRescueMode) {
+    if (strcmp(multiWiFi[0].clientSSID, DEFAULT_CLIENT_SSID) == 0 && !configBackupExists())
+      showWelcomePage = true;
 
-  #ifndef ESP8266
-  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
-  WiFi.persistent(true); // storing credentials in NVM fixes boot-up pause as connection is much faster, is disabled after first connection
-  // ESP32 DNS name must be set before the first connection to the DHCP server; otherwise, the default ESP name (such as "esp32s3-267D0C") will be used.
-  char hostname[64] = {'\0'};
-  getWLEDhostname(hostname, sizeof(hostname), true);   // create DNS name based on mDNS name if set, or fall back to standard WLED server name
-  WiFi.setHostname(hostname);
-  #else
-  WiFi.persistent(false); // on ESP8266 using NVM for wifi config has no benefit of faster connection
-  #endif
-  WiFi.onEvent(WiFiEvent);
-  WiFi.mode(WIFI_STA); // enable scanning
-  findWiFi(true);      // start scanning for available WiFi-s
+    #ifndef ESP8266
+    WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+    WiFi.persistent(true); // storing credentials in NVM fixes boot-up pause as connection is much faster, is disabled after first connection
+    // ESP32 DNS name must be set before the first connection to the DHCP server; otherwise, the default ESP name (such as "esp32s3-267D0C") will be used.
+    char hostname[64] = {'\0'};
+    getWLEDhostname(hostname, sizeof(hostname), true);   // create DNS name based on mDNS name if set, or fall back to standard WLED server name
+    WiFi.setHostname(hostname);
+    #else
+    WiFi.persistent(false); // on ESP8266 using NVM for wifi config has no benefit of faster connection
+    #endif
+    WiFi.onEvent(WiFiEvent);
+    WiFi.mode(WIFI_STA); // enable scanning
+    findWiFi(true);      // start scanning for available WiFi-s
+  } else {
+    Serial.println(F("WLED rescue mode: WiFi scan skipped"));
+    WiFi.mode(WIFI_OFF);
+  }
 
   // all GPIOs are allocated at this point
   serialCanRX = !PinManager::isPinAllocated(hardwareRX); // Serial RX pin (GPIO 3 on ESP32 and ESP8266)
@@ -535,63 +679,67 @@ void WLED::setup()
   }
   #endif
 
-  // fill in unique mdns default
-  if (strcmp(cmDNS, DEFAULT_MDNS_NAME) == 0) sprintf_P(cmDNS, PSTR("wled-%*s"), 6, escapedMac.c_str() + 6);
+  if (!wledRescueMode) {
+    // fill in unique mdns default
+    if (strcmp(cmDNS, DEFAULT_MDNS_NAME) == 0) sprintf_P(cmDNS, PSTR("wled-%*s"), 6, escapedMac.c_str() + 6);
 #ifndef WLED_DISABLE_MQTT
-  if (mqttDeviceTopic[0] == 0) sprintf_P(mqttDeviceTopic, PSTR("wled/%*s"), 6, escapedMac.c_str() + 6);
-  if (mqttClientID[0] == 0)    sprintf_P(mqttClientID, PSTR("WLED-%*s"), 6, escapedMac.c_str() + 6);
+    if (mqttDeviceTopic[0] == 0) sprintf_P(mqttDeviceTopic, PSTR("wled/%*s"), 6, escapedMac.c_str() + 6);
+    if (mqttClientID[0] == 0)    sprintf_P(mqttClientID, PSTR("WLED-%*s"), 6, escapedMac.c_str() + 6);
 #endif
 
 #ifdef WLED_ENABLE_AOTA
-  if (aOtaEnabled) {
-    ArduinoOTA.onStart([]() {
-      #ifdef ESP8266
-      wifi_set_sleep_type(NONE_SLEEP_T);
-      #endif
-      #if WLED_WATCHDOG_TIMEOUT > 0
-      WLED::instance().disableWatchdog();
-      #endif
-      DEBUG_PRINTLN(F("Start ArduinoOTA"));
-    });
-    ArduinoOTA.onError([](ota_error_t error) {
-      #if WLED_WATCHDOG_TIMEOUT > 0
-      // reenable watchdog on failed update
-      WLED::instance().enableWatchdog();
-      #endif
-    });
-    if (strlen(cmDNS) > 0)
-      ArduinoOTA.setHostname(cmDNS);
-  }
+    if (aOtaEnabled) {
+      ArduinoOTA.onStart([]() {
+        #ifdef ESP8266
+        wifi_set_sleep_type(NONE_SLEEP_T);
+        #endif
+        #if WLED_WATCHDOG_TIMEOUT > 0
+        WLED::instance().disableWatchdog();
+        #endif
+        DEBUG_PRINTLN(F("Start ArduinoOTA"));
+      });
+      ArduinoOTA.onError([](ota_error_t error) {
+        #if WLED_WATCHDOG_TIMEOUT > 0
+        // reenable watchdog on failed update
+        WLED::instance().enableWatchdog();
+        #endif
+      });
+      if (strlen(cmDNS) > 0)
+        ArduinoOTA.setHostname(cmDNS);
+    }
 #endif
 #ifdef WLED_ENABLE_DMX
-  initDMXOutput();
+    initDMXOutput();
 #endif
 #ifdef WLED_ENABLE_DMX_INPUT
-  dmxInput.init(dmxInputReceivePin, dmxInputTransmitPin, dmxInputEnablePin, dmxInputPort);
+    dmxInput.init(dmxInputReceivePin, dmxInputTransmitPin, dmxInputEnablePin, dmxInputPort);
 #endif
 
 #ifdef WLED_ENABLE_ADALIGHT
-  if (serialCanRX && Serial.available() > 0 && Serial.peek() == 'I') handleImprovPacket();
+    if (serialCanRX && Serial.available() > 0 && Serial.peek() == 'I') handleImprovPacket();
 #endif
 
-  // HTTP server page init
-  DEBUG_PRINTLN(F("initServer"));
-  initServer();
-  DEBUG_PRINTF_P(PSTR("heap %u\n"), getFreeHeapSize());
+    // HTTP server page init
+    DEBUG_PRINTLN(F("initServer"));
+    initServer();
+    DEBUG_PRINTF_P(PSTR("heap %u\n"), getFreeHeapSize());
 #ifndef WLED_DISABLE_ESPNOW_NEW
-  espnowBroadcast.setup();
+    espnowBroadcast.setup();
 #endif
 
 #ifndef WLED_DISABLE_INFRARED
-  // init IR
-  DEBUG_PRINTLN(F("initIR"));
-  initIR();
-  DEBUG_PRINTF_P(PSTR("heap %u\n"), getFreeHeapSize());
+    // init IR
+    DEBUG_PRINTLN(F("initIR"));
+    initIR();
+    DEBUG_PRINTF_P(PSTR("heap %u\n"), getFreeHeapSize());
 #endif
 
 #if defined(ARDUINO_ARCH_ESP32) && defined(LWIP_IPV6)
-  installIPv6RABlocker();  // Work around unsolicited RA overwriting IPv4 DNS servers
+    installIPv6RABlocker();  // Work around unsolicited RA overwriting IPv4 DNS servers
 #endif
+  } else {
+    Serial.println(F("WLED rescue mode: network interfaces skipped"));
+  }
 
   #if WLED_WATCHDOG_TIMEOUT > 0
   enableWatchdog();

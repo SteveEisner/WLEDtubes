@@ -243,7 +243,7 @@ class LightNode {
         // Re-broadcast the message if appropriate
         if (isLeading() && message->recipients != RECIPIENTS_INFO) {
             static NodeMessage msg;
-            memcpy(&msg, &message, len);
+            memcpy(&msg, message, len);
             msg.header = header;
             if (!isFollowing()) {
                 msg.recipients = RECIPIENTS_ALL;

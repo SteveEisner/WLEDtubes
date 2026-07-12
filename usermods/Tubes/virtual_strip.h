@@ -54,6 +54,7 @@ class VirtualStrip {
 
     // Pattern parameters
     Background background;
+    CRGBPalette16 palette;
     uint32_t frame;
     uint8_t beat;
     uint16_t beat16;  // 8 bits of beat and 8 bits of fractional
@@ -70,10 +71,73 @@ class VirtualStrip {
   void load(Background &b, uint8_t fs=DEFAULT_FADE_SPEED)
   {
     background = b;
+    // Snapshot palette colors so fading layers keep their original color intent.
+    loadPalette(background.palette_id);
     fade = FadeIn;
     fader = 0;
     fade_speed = fs;
     brightness = DEF_BRIGHT;
+  }
+
+  void loadPalette(uint8_t palette_id)
+  {
+    if (palette_id >= FIXED_PALETTE_COUNT) {
+      palette_id = 0;
+    }
+
+    Segment& segment = strip.getMainSegment();
+    switch (palette_id) {
+      case 0:
+        palette = PartyColors_gc22;
+        break;
+
+      case 1:
+        palette = generateRandomPalette();
+        break;
+
+      case 2: {
+        CRGB prim = segment.colors[0];
+        palette = CRGBPalette16(prim);
+        break;
+      }
+
+      case 3: {
+        CRGB prim = segment.colors[0];
+        CRGB sec = segment.colors[1];
+        palette = CRGBPalette16(prim, prim, sec, sec);
+        break;
+      }
+
+      case 4: {
+        CRGB prim = segment.colors[0];
+        CRGB sec = segment.colors[1];
+        CRGB ter = segment.colors[2];
+        palette = CRGBPalette16(ter, sec, prim);
+        break;
+      }
+
+      case 5: {
+        CRGB prim = segment.colors[0];
+        CRGB sec = segment.colors[1];
+        if (segment.colors[2]) {
+          CRGB ter = segment.colors[2];
+          palette = CRGBPalette16(prim, prim, prim, prim, prim, sec, sec, sec, sec, sec, ter, ter, ter, ter, ter, prim);
+        } else {
+          palette = CRGBPalette16(prim, prim, prim, prim, prim, prim, prim, prim, sec, sec, sec, sec, sec, sec, sec, sec);
+        }
+        break;
+      }
+
+      default:
+        if (palette_id < DYNAMIC_PALETTE_COUNT + FASTLED_PALETTE_COUNT) {
+          palette = *fastledPalettes[palette_id - DYNAMIC_PALETTE_COUNT];
+        } else {
+          byte tcp[72];
+          memcpy_P(tcp, (byte*)pgm_read_dword(&(gGradientPalettes[palette_id - (DYNAMIC_PALETTE_COUNT + FASTLED_PALETTE_COUNT)])), sizeof(tcp));
+          palette.loadDynamicGradientPalette(tcp);
+        }
+        break;
+    }
   }
 
   bool isWled() const {
@@ -170,8 +234,17 @@ class VirtualStrip {
   }
 
   CRGB palette_color(uint8_t c, uint8_t offset=0, uint8_t brightness=255) const {
-    Segment& segment = strip.getMainSegment();
-    uint32_t color = segment.color_from_palette(c + offset, false, true, 255, brightness);
+    TBlendType blend = NOBLEND;
+    switch (paletteBlend) {
+      case 0:
+      case 1:
+        blend = LINEARBLEND;
+        break;
+      case 2:
+        blend = LINEARBLEND_NOWRAP;
+        break;
+    }
+    uint32_t color = ColorFromPalette(palette, c + offset, brightness, blend);
     return CRGB(color);
   }
 

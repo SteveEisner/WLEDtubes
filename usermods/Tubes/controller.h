@@ -22,6 +22,8 @@ const static uint8_t DEFAULT_TANK_BRIGHTNESS = 240;
 #define DEFAULT_WLED_FX FX_MODE_RAINBOW_CYCLE
 
 #define STATUS_UPDATE_PERIOD 2000
+#define OPTIONS_BROADCAST_PERIOD 500
+#define OPTIONS_BROADCAST_RETRIES 8
 
 static_assert(GRADIENT_PALETTE_COUNT <= UINT8_MAX, "Tubes palette IDs must fit in one byte");
 static constexpr uint8_t gGradientPaletteCount = GRADIENT_PALETTE_COUNT;
@@ -49,7 +51,7 @@ typedef struct {
 
 typedef enum ControllerRole : uint8_t {
   UnknownRole = 0,
-  DefaultRole = 10,         // Turn on in power saving mode
+  DefaultRole = 10,         // Standard non-master role
   CampRole = 50,            // Turn on in non-power-saving mode
   InstallationRole = 100,   // Disable power-saving mode completely
   SmallArtRole = 120,       // < 1/2 the pixels, scale the art
@@ -112,6 +114,7 @@ class PatternController : public MessageReceiver {
     VirtualStrip *vstrips[NUM_VSTRIPS];
     uint8_t next_vstrip = 0;
     bool canOverride = false;
+    uint8_t optionsBroadcastsPending = 0;
     uint8_t paletteOverride = 0;
     uint8_t patternOverride = 0;
     uint16_t wled_fader = 0;
@@ -124,6 +127,7 @@ class PatternController : public MessageReceiver {
 
     TubesTimer graphicsTimer;
     TubesTimer updateTimer;
+    TubesTimer optionsBroadcastTimer;
     TubesTimer paletteOverrideTimer;
     TubesTimer patternOverrideTimer;
     TubesTimer flashTimer;
@@ -190,7 +194,7 @@ class PatternController : public MessageReceiver {
         power_save = 1;
         break;
       default:
-        power_save = (role < CampRole);
+        power_save = false;
         break;
     }
 
@@ -413,6 +417,13 @@ class PatternController : public MessageReceiver {
       }
     }
 
+    if (optionsBroadcastsPending) {
+      if (optionsBroadcastTimer.every(OPTIONS_BROADCAST_PERIOD)) {
+        broadcast_options();
+        optionsBroadcastsPending--;
+      }
+    }
+
     updater.update();
 
 #ifdef USELCD
@@ -596,9 +607,18 @@ class PatternController : public MessageReceiver {
   }
 
   void load_options(ControllerOptions &options, bool init=false) {
+    if (init && !turnOnAtBoot && bri == 0) {
+      return;
+    }
+
     // Power-saving devices retain their WLED brightness
+    if (!init && power_save) {
+      return;
+    }
+
     if (init || !power_save) {
       bri = options.brightness;
+      briOld = options.brightness;
       briLast = options.brightness;
       briT = options.brightness;
       strip.setBrightness(options.brightness);
@@ -836,9 +856,8 @@ class PatternController : public MessageReceiver {
     options.brightness = brightness;
     load_options(options);
 
-    // The master controls all followers
-    if (!node.isFollowing())
-      broadcast_options();
+    // Followers route this to the root; roots fan it out to the mesh.
+    queue_options_broadcast();
   }
 
   void setDebugging(bool debugging) {
@@ -847,9 +866,8 @@ class PatternController : public MessageReceiver {
     options.debugging = debugging;
     load_options(options);
 
-    // The master controls all followers
-    if (!node.isFollowing())
-      broadcast_options();
+    // Followers route this to the root; roots fan it out to the mesh.
+    queue_options_broadcast();
   }
 
   void togglePowerSave() {
@@ -1231,6 +1249,12 @@ class PatternController : public MessageReceiver {
 
   void broadcast_options() {
     node.sendCommand(COMMAND_OPTIONS, &options, sizeof(options));
+  }
+
+  void queue_options_broadcast() {
+    broadcast_options();
+    optionsBroadcastsPending = OPTIONS_BROADCAST_RETRIES;
+    optionsBroadcastTimer.start(OPTIONS_BROADCAST_PERIOD);
   }
 
   void broadcast_autoupdate() {

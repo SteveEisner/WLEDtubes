@@ -889,6 +889,7 @@ WLED_GLOBAL byte optionType;
 
 WLED_GLOBAL bool configNeedsWrite  _INIT(false);        // flag to initiate saving of config
 WLED_GLOBAL bool doReboot          _INIT(false);        // flag to initiate reboot from async handlers
+WLED_GLOBAL bool wledRescueMode    _INIT(false);        // minimal boot mode for serial recovery
 
 // status led
 #if defined(STATUSLED)
