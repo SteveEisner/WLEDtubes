@@ -9,3 +9,7 @@ in the development cycle.
 
 More information about PIO Unit Testing:
 - https://docs.platformio.org/page/plus/unit-testing.html
+
+The Tubes mesh routing tests are host-side C++ tests. Run them with:
+
+    ./test/tubes_mesh/run.sh

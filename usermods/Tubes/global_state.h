@@ -3,6 +3,7 @@
 #include "wled.h"
 #include "beats.h"
 #include "effects.h"
+#include "mesh_protocol.h"
 
 
 class TubeState {
@@ -42,8 +43,6 @@ class TubeState {
   }
 
 };
-
-typedef uint8_t CommandId;
 
 const static CommandId COMMAND_OPTIONS = 0x10;
 const static CommandId COMMAND_STATE = 0x20;

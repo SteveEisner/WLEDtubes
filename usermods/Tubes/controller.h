@@ -765,9 +765,13 @@ class PatternController : public MessageReceiver {
 
   void set_tapped_bpm(accum88 bpm, uint8_t pos=15) {
     // By default, restarts at 15th beat - because this is the end of a tap
+    apply_bpm(bpm, pos);
+    send_update();
+  }
+
+  void apply_bpm(accum88 bpm, uint8_t pos=0) {
     beats.sync(bpm, (beats.frac & -0xFFF) + (pos<<8));
     update_beat();
-    send_update();
   }
 
   void request_new_bpm(accum88 new_bpm = 0) {
@@ -1625,11 +1629,8 @@ class PatternController : public MessageReceiver {
         return true;
 
       case COMMAND_BEATS:
-        // the master control ignores this request, it has its own
-        // beat measuring.
-        if (isMasterRole())
-          return false;
-        set_tapped_bpm(*(accum88*)data, 0);
+        // The root applies the request once; its relay becomes the declaration followers apply.
+        apply_bpm(*(accum88*)data);
         return true;
     }
 

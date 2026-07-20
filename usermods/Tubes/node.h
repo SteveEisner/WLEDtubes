@@ -8,37 +8,6 @@
 // #define RELAY_DEBUGGING
 #define TESTING_NODE_ID 0
 
-#define CURRENT_NODE_VERSION 2
-
-#pragma pack(push,4) // set packing for consist transport across network
-// ideally this would have been pack 1, so we're actually wasting a
-// number of bytes across the network, but we've already shipped...
-
-typedef enum{
-    RECIPIENTS_ALL=0,  // Send to all neighbors; non-followers will ignore
-    RECIPIENTS_ROOT=1, // Send to root for rebroadcasting downward, all will see
-    RECIPIENTS_INFO=2, // Send to all neighbors "FYI"; none will ignore
-} MessageRecipients;
-
-typedef uint16_t MeshId;
-
-typedef struct {
-    MeshId id = 0;
-    MeshId uplinkId = 0;
-    uint8_t version = CURRENT_NODE_VERSION;
-} MeshNodeHeader;
-
-#define MESSAGE_DATA_SIZE 64
-typedef struct {
-    MeshNodeHeader header;
-    MessageRecipients recipients;
-    uint32_t timebase;
-    CommandId command;
-    byte data[MESSAGE_DATA_SIZE] = {0};
-} NodeMessage;
-
-#pragma pack(pop)
-
 typedef struct {
     uint8_t status;
     char message[40];
@@ -171,7 +140,7 @@ class LightNode {
         // If a message indicates that another node is following this one, or
         // should be (it's not following anything, but this node's ID is higher)
         // enter or continue re-broadcasting mode.
-        if (node.uplinkId == header.id || (node.uplinkId == 0 && node.id < header.id)) {
+        if (shouldRenewRelayDuty(header, node)) {
             if (!isLeading()) {
                 Serial.printf("     LEADING because %03X/%03X is following me\n", node.id, node.uplinkId);
             }
@@ -195,29 +164,8 @@ class LightNode {
         // Track that another node exists, updating this node's understanding of the mesh.
         onPeerPing(message->header);
 
-        bool ignore = false;
-        switch (message->recipients) {
-            case RECIPIENTS_ALL:
-                // Ignore this message if not from the uplink
-                ignore = (message->header.id != header.uplinkId);
-                break;
-
-            case RECIPIENTS_ROOT:
-                // Ignore this message if not from one of this node's downlinks
-                ignore = (message->header.uplinkId != header.id);
-                break;
-
-            case RECIPIENTS_INFO:
-                ignore = false;
-                break;
-
-            default:
-                // ignore this!
-                ignore = true;
-                break;
-        }
-
-        if (ignore) {
+        MeshRoutePlan route = planMeshRoute(header, isFollowing(), isLeading(), *message);
+        if (!route.accepted) {
 #ifdef NODE_DEBUGGING
             Serial.print("  -- ignored ");
             printMessage(message, rssi);
@@ -226,18 +174,19 @@ class LightNode {
             return;
         }
 
-        // Execute the received command
-        if (message->recipients != RECIPIENTS_ROOT || !isFollowing()) {
+        // Apply only at the root on the upward trip, then at every follower on the declaration trip.
+        if (route.applyLocally) {
             Serial.print("  >> ");
             printMessage(message, rssi);
             Serial.print(" ");
 
-            // Adjust the timebase to match uplink
-            // But only if it's drifting, else animations get jittery
-            uint32_t new_timebase = message->timebase - millis() + 3; // Factor for network delay
-            int32_t diff = new_timebase - strip.timebase;
-            if (diff < -10 || diff > 10)
-                strip.timebase = new_timebase;
+            // Only the chosen uplink's downward declaration is authoritative for clock time.
+            if (route.synchronizeClock) {
+                uint32_t new_timebase = message->timebase - millis() + 3; // Factor for network delay
+                int32_t diff = new_timebase - strip.timebase;
+                if (diff < -10 || diff > 10)
+                    strip.timebase = new_timebase;
+            }
 
             // Execute the command
             auto valid = receiver->onCommand(
@@ -250,14 +199,9 @@ class LightNode {
                 return;
         }
 
-        // Re-broadcast the message if appropriate
-        if (isLeading() && message->recipients != RECIPIENTS_INFO) {
-            static NodeMessage msg;
-            memcpy(&msg, message, len);
-            msg.header = header;
-            if (!isFollowing()) {
-                msg.recipients = RECIPIENTS_ALL;
-            }
+        // Preserve the accepted packet while advancing it one hop through the tree.
+        if (route.relay) {
+            NodeMessage msg = makeRelayedMessage(header, isFollowing(), *message);
 #ifdef NODE_DEBUGGING
             Serial.println("rebroadcast");
 #endif
