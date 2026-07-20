@@ -6,15 +6,20 @@ repo_dir="$(cd "$test_dir/../.." && pwd)"
 build_dir="$(mktemp -d "${TMPDIR:-/tmp}/wled-tubes-mesh-tests.XXXXXX")"
 trap 'rm -rf "$build_dir"' EXIT
 
-"${CXX:-c++}" \
-  -std=c++17 \
-  -Wall \
-  -Wextra \
-  -Werror \
-  -pedantic \
-  -I"$repo_dir/usermods/Tubes" \
-  -I"$test_dir" \
-  "$test_dir/mesh_routing_test.cpp" \
-  -o "$build_dir/mesh_routing_test"
+compile_and_run() {
+  local test_name="$1"
+  "${CXX:-c++}" \
+    -std=c++17 \
+    -Wall \
+    -Wextra \
+    -Werror \
+    -pedantic \
+    -I"$repo_dir/usermods/Tubes" \
+    -I"$test_dir" \
+    "$test_dir/$test_name.cpp" \
+    -o "$build_dir/$test_name"
+  "$build_dir/$test_name"
+}
 
-"$build_dir/mesh_routing_test"
+compile_and_run mesh_routing_test
+compile_and_run deferred_bpm_broadcast_test

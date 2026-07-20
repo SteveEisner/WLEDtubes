@@ -13,6 +13,7 @@
 #include "led_strip.h"
 #include "global_state.h"
 #include "node.h"
+#include "deferred_bpm_broadcast.h"
 
 #define EEPSIZE 2560
 
@@ -258,6 +259,7 @@ class PatternController : public MessageReceiver {
     WledDisplayState wledDisplayBeforeTubes;
     char key_buffer[20] = {0};
     int8_t pendingTubesMode = -1;
+    DeferredBpmBroadcast deferredBpmBroadcast;
 
     Energy energy=Chill;
     TubeState current_state;
@@ -595,6 +597,9 @@ class PatternController : public MessageReceiver {
     // Update patterns to the beat
     update_beat();
 
+    // A locally selected BPM becomes public only when that local clock starts a phrase.
+    send_deferred_bpm();
+
     Segment& segment = strip.getMainSegment();
 
     // You can only go into manual control after enabling the wifi
@@ -779,12 +784,16 @@ class PatternController : public MessageReceiver {
     if (new_bpm == 0)
       new_bpm = current_state.bpm>>8 >= 123 ? 120<<8 : 125<<8;
 
-    if (node.isFollowing()) {
-      // Send a request up to ROOT
-      broadcast_bpm(new_bpm);
-    } else {
-      set_tapped_bpm(new_bpm, 0);
-    }
+    // The controlling device responds now, while the mesh stays on its current clock
+    // until this device reaches the phrase boundary used for the legacy declaration.
+    apply_bpm(new_bpm);
+    deferredBpmBroadcast.schedule(new_bpm, current_state.beat_frame);
+  }
+
+  void send_deferred_bpm() {
+    accum88 bpm;
+    if (deferredBpmBroadcast.takeAtPhraseBoundary(current_state.beat_frame, bpm))
+      broadcast_bpm(bpm);
   }
 
   void update_beat() {
@@ -1562,6 +1571,9 @@ class PatternController : public MessageReceiver {
   }
 
   void broadcast_state() {
+    // Publishing this device's state would reveal the new BPM before its phrase boundary.
+    if (deferredBpmBroadcast.active())
+      return;
     node.sendCommand(COMMAND_STATE, &current_state, sizeof(TubeStates));
   }
 
@@ -1614,7 +1626,10 @@ class PatternController : public MessageReceiver {
         load_pattern(state);
         load_palette(state);
         load_effect(state);
-        beats.sync(state.bpm, state.beat_frame);
+        // Visual state still follows the root, but its old clock must not undo a local
+        // BPM change that is waiting for this device's phrase boundary.
+        if (!deferredBpmBroadcast.active())
+          beats.sync(state.bpm, state.beat_frame);
         return true;
       }
 
@@ -1629,7 +1644,8 @@ class PatternController : public MessageReceiver {
         return true;
 
       case COMMAND_BEATS:
-        // The root applies the request once; its relay becomes the declaration followers apply.
+        // A declared BPM supersedes any local change that has not reached its boundary.
+        deferredBpmBroadcast.cancel();
         apply_bpm(*(accum88*)data);
         return true;
     }
