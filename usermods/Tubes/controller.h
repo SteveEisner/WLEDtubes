@@ -55,6 +55,7 @@ typedef enum ControllerRole : uint8_t {
   CampRole = 50,            // Turn on in non-power-saving mode
   InstallationRole = 100,   // Disable power-saving mode completely
   SmallArtRole = 120,       // < 1/2 the pixels, scale the art
+  HomeLightRole = 150,      // Join the mesh while WLED retains permanent control of the LEDs
   LegacyRole = 190,         // LEGACY: 1/2 the pixels, no "power saving" necessary, no scaling
   MasterRole = 200          // Controls all the others
 } ControllerRole;
@@ -71,6 +72,107 @@ typedef struct {
   char key;
   uint8_t arg;
 } Action;
+
+enum TubeScope : uint8_t {
+  LocalScope = 0,
+  MeshScope = 1,
+  SelectedScope = 2,
+};
+
+enum TubeOperationCode : uint8_t {
+  DebugOperation,
+  RebootOperation,
+  PowerSaveOperation,
+  BrightnessOperation,
+  AccessPointOperation,
+  DisconnectWifiOperation,
+  ForgetWifiOperation,
+  BpmOperation,
+  StartPhraseOperation,
+  NextOperation,
+  PatternOperation,
+  SyncModeOperation,
+  PaletteOperation,
+  EffectOperation,
+  EffectChanceOperation,
+  NodeIdOperation,
+  UpdateOperation,
+  UpdateOfferOperation,
+  SelectOperation,
+  GlitterOperation,
+  FlashOperation,
+  RoleOperation,
+  CancelOverrideOperation,
+  SoundOverlayOperation,
+  TubesModeOperation,
+  HelpOperation,
+};
+
+// The tag leaves six bits for commands and keeps the destination in its high bits.
+struct TubeOperation {
+  uint16_t argument;
+  uint8_t tag;
+};
+
+static TubeOperationCode tubeOperationCode(const TubeOperation& operation) {
+  return TubeOperationCode(operation.tag & 0x3F);
+}
+
+static TubeScope tubeOperationScope(const TubeOperation& operation) {
+  return TubeScope(operation.tag >> 6);
+}
+
+struct TubeCommandDefinition {
+  char command;
+  uint8_t tag;
+};
+
+#define TUBE_COMMAND(command, operation, scope) \
+  {command, uint8_t(uint8_t(operation) | (uint8_t(scope) << 6))}
+
+static const TubeCommandDefinition tubeCommandDefinitions[] PROGMEM = {
+  TUBE_COMMAND('d', DebugOperation, MeshScope),
+  TUBE_COMMAND('~', RebootOperation, LocalScope),
+  TUBE_COMMAND('_', PowerSaveOperation, LocalScope),
+  TUBE_COMMAND('-', BrightnessOperation, MeshScope),
+  TUBE_COMMAND('+', BrightnessOperation, MeshScope),
+  TUBE_COMMAND('l', BrightnessOperation, MeshScope),
+  TUBE_COMMAND('a', AccessPointOperation, LocalScope),
+  TUBE_COMMAND('q', DisconnectWifiOperation, LocalScope),
+  TUBE_COMMAND('b', BpmOperation, MeshScope),
+  TUBE_COMMAND('s', StartPhraseOperation, MeshScope),
+  TUBE_COMMAND('n', NextOperation, MeshScope),
+  TUBE_COMMAND('p', PatternOperation, MeshScope),
+  TUBE_COMMAND('m', SyncModeOperation, MeshScope),
+  TUBE_COMMAND('c', PaletteOperation, MeshScope),
+  TUBE_COMMAND('e', EffectOperation, MeshScope),
+  TUBE_COMMAND('%', EffectChanceOperation, MeshScope),
+  TUBE_COMMAND('i', NodeIdOperation, LocalScope),
+  TUBE_COMMAND('u', UpdateOperation, LocalScope),
+  TUBE_COMMAND('U', UpdateOperation, SelectedScope),
+  TUBE_COMMAND('V', UpdateOfferOperation, MeshScope),
+  TUBE_COMMAND('*', SelectOperation, MeshScope),
+  TUBE_COMMAND('(', SelectOperation, MeshScope),
+  TUBE_COMMAND(')', SelectOperation, MeshScope),
+  TUBE_COMMAND('@', PowerSaveOperation, MeshScope),
+  TUBE_COMMAND('P', PowerSaveOperation, MeshScope),
+  TUBE_COMMAND('G', GlitterOperation, MeshScope),
+  TUBE_COMMAND('A', AccessPointOperation, MeshScope),
+  TUBE_COMMAND('W', ForgetWifiOperation, MeshScope),
+  TUBE_COMMAND('X', RebootOperation, SelectedScope),
+  TUBE_COMMAND('F', FlashOperation, MeshScope),
+  TUBE_COMMAND('r', RoleOperation, LocalScope),
+  TUBE_COMMAND('R', RoleOperation, SelectedScope),
+  TUBE_COMMAND('M', CancelOverrideOperation, MeshScope),
+  TUBE_COMMAND('O', SoundOverlayOperation, MeshScope),
+  TUBE_COMMAND('t', TubesModeOperation, LocalScope),
+  TUBE_COMMAND('?', HelpOperation, LocalScope),
+};
+
+#undef TUBE_COMMAND
+
+static_assert(HelpOperation < 64, "Tube operations must fit below the scope bits");
+static_assert(sizeof(TubeOperation) <= 4, "Tube operations must remain compact");
 
 #define NUM_VSTRIPS 3
 
@@ -108,6 +210,16 @@ class TubesButton {
 
 class PatternController : public MessageReceiver {
   public:
+    struct WledDisplayState {
+      bool valid = false;
+      uint8_t brightness = 0;
+      uint8_t mode = 0;
+      uint8_t palette = 0;
+      uint8_t speed = 0;
+      uint8_t intensity = 0;
+      uint8_t preset = 0;
+    };
+
     const static int FRAMES_PER_SECOND = 60;  // how often we animate, in frames per second
     const static int REFRESH_PERIOD = 1000 / FRAMES_PER_SECOND;  // how often we animate, in milliseconds
 
@@ -132,6 +244,7 @@ class PatternController : public MessageReceiver {
     TubesTimer patternOverrideTimer;
     TubesTimer flashTimer;
     TubesTimer selectTimer;
+    TubesTimer tubesModeTimer;
 
 #ifdef USELCD
     Lcd *lcd;
@@ -142,7 +255,9 @@ class PatternController : public MessageReceiver {
     LightNode node;
 
     ControllerOptions options;
+    WledDisplayState wledDisplayBeforeTubes;
     char key_buffer[20] = {0};
+    int8_t pendingTubesMode = -1;
 
     Energy energy=Chill;
     TubeState current_state;
@@ -169,10 +284,94 @@ class PatternController : public MessageReceiver {
     return role >= MasterRole;
   }
 
+  bool isHomeLightRole() const {
+    return role == HomeLightRole;
+  }
+
+  bool shouldRenderTubes() const {
+#ifdef HOMELIGHT
+    if (isHomeLightRole())
+      return espnowBroadcast.isEnabled();
+#endif
+    return !isHomeLightRole();
+  }
+
+  void captureWledDisplay() {
+    Segment& segment = strip.getMainSegment();
+    wledDisplayBeforeTubes.valid = true;
+    wledDisplayBeforeTubes.brightness = bri;
+    wledDisplayBeforeTubes.mode = segment.mode;
+    wledDisplayBeforeTubes.palette = segment.palette;
+    wledDisplayBeforeTubes.speed = segment.speed;
+    wledDisplayBeforeTubes.intensity = segment.intensity;
+    wledDisplayBeforeTubes.preset = currentPreset;
+  }
+
+  void restoreWledDisplay() {
+    if (!wledDisplayBeforeTubes.valid)
+      return;
+
+    Segment& segment = strip.getMainSegment();
+    bri = wledDisplayBeforeTubes.brightness;
+    segment.speed = wledDisplayBeforeTubes.speed;
+    segment.intensity = wledDisplayBeforeTubes.intensity;
+    segment.setMode(wledDisplayBeforeTubes.mode);
+    segment.setPalette(wledDisplayBeforeTubes.palette);
+    stateChanged = true;
+    stateUpdated(CALL_MODE_DIRECT_CHANGE);
+    currentPreset = wledDisplayBeforeTubes.preset;
+    wledDisplayBeforeTubes.valid = false;
+  }
+
+  void setTubesMode(bool enabled) {
+#ifndef HOMELIGHT
+    (void)enabled;
+    Serial.println(F("nope"));
+    return;
+#else
+    if (!isHomeLightRole()) {
+      Serial.println(F("nope"));
+      return;
+    }
+
+    if (enabled) {
+      if (espnowBroadcast.isEnabled())
+        return;
+
+      Serial.println(F("Tubes mode on."));
+      captureWledDisplay();
+      WiFi.softAPdisconnect(true);
+      apActive = false;
+      if (!espnowBroadcast.setEnabled(true)) {
+        Serial.println(F("Unable to start Tubes mode."));
+        restoreWledDisplay();
+        return;
+      }
+
+      load_options(options, true);
+      update_background();
+      return;
+    }
+
+    if (!espnowBroadcast.isEnabled())
+      return;
+
+    Serial.println(F("Tubes mode off; reconnecting WiFi."));
+    espnowBroadcast.setEnabled(false);
+    restoreWledDisplay();
+    forceReconnect = true;
+#endif
+  }
+
   void setup()
   {
     EEPROM.begin(EEPSIZE);
-    role = (ControllerRole)EEPROM.read(ROLE_EEPROM_LOCATION);
+#ifdef HOMELIGHT
+    // A HOMELIGHT build owns its role, regardless of the device's previous use.
+    role = HomeLightRole;
+#else
+    uint8_t storedRole = EEPROM.read(ROLE_EEPROM_LOCATION);
+    role = (ControllerRole)storedRole;
     if (role == 255) {
       role = UnknownRole;
     }
@@ -198,15 +397,18 @@ class PatternController : public MessageReceiver {
         break;
     }
 
-    if (role <= CampRole)
-      BusManager::setMilliampsMax(min(ABL_MILLIAMPS_DEFAULT,700));  // Really limit for batteries
-    else if (role <= InstallationRole)
-      BusManager::setMilliampsMax(1000);
-    else
-      BusManager::setMilliampsMax(1400);
+    if (!isHomeLightRole()) {
+      if (role <= CampRole)
+        BusManager::setMilliampsMax(min(ABL_MILLIAMPS_DEFAULT,700));  // Really limit for batteries
+      else if (role <= InstallationRole)
+        BusManager::setMilliampsMax(1000);
+      else
+        BusManager::setMilliampsMax(1400);
+    }
 
 
     beats.setup();
+    node.setWledNetworkOwnership(isHomeLightRole());
     node.setup();
 
     if (role >= MasterRole) {
@@ -240,6 +442,7 @@ class PatternController : public MessageReceiver {
     sound.setup();
 
     updateTimer.start(STATUS_UPDATE_PERIOD); // Ready to send an update as soon as we're able to
+    server.rewrite("/tube", "/json");
     Serial.println("Controller: ok");
   }
 
@@ -294,6 +497,9 @@ class PatternController : public MessageReceiver {
   }
 
   void cancelOverrides() {
+    if (isHomeLightRole())
+      return;
+
     // Release the WLED overrides and take over control of the strip again.
     paletteOverrideTimer.stop();
     patternOverrideTimer.stop();
@@ -312,6 +518,9 @@ class PatternController : public MessageReceiver {
   }
 
   void select(bool selected = true) {
+    if (isHomeLightRole())
+      return;
+
     if (selected)
       updater.ready();
     else {
@@ -325,7 +534,7 @@ class PatternController : public MessageReceiver {
   }
 
   void set_palette_override(uint8_t value) {
-    if (!canOverride)
+    if (isHomeLightRole() || !canOverride)
       return;
     if (value == paletteOverride)
       return;
@@ -342,7 +551,7 @@ class PatternController : public MessageReceiver {
   }
 
   void set_pattern_override(uint8_t value, uint8_t auto_mode) {
-    if (!canOverride)
+    if (isHomeLightRole() || !canOverride)
       return;
     if (value == DEFAULT_WLED_FX && !patternOverride)
       return;
@@ -367,6 +576,13 @@ class PatternController : public MessageReceiver {
   void update()
   {
     read_keys();
+
+    // Network mode changes wait until an HTTP response has left the async handler.
+    if (pendingTubesMode >= 0 && tubesModeTimer.ended()) {
+      bool enabled = pendingTubesMode;
+      pendingTubesMode = -1;
+      setTubesMode(enabled);
+    }
 
     beats.update();
 
@@ -607,6 +823,9 @@ class PatternController : public MessageReceiver {
   }
 
   void load_options(ControllerOptions &options, bool init=false) {
+    if (!shouldRenderTubes())
+      return;
+
     if (init && !turnOnAtBoot && bri == 0) {
       return;
     }
@@ -821,10 +1040,13 @@ class PatternController : public MessageReceiver {
   }
 
   bool isUnderWledControl() const {
-    return paletteOverride || patternOverride;
+    return !shouldRenderTubes() || paletteOverride || patternOverride;
   }
 
   void set_wled_palette(uint8_t palette_id) {
+    if (!shouldRenderTubes())
+      return;
+
     if (paletteOverride)
       palette_id = paletteOverride;
 
@@ -836,6 +1058,9 @@ class PatternController : public MessageReceiver {
   }
 
   void set_wled_pattern(uint8_t pattern_id, uint8_t speed, uint8_t intensity) {
+    if (!shouldRenderTubes())
+      return;
+
     if (patternOverride)
       pattern_id = patternOverride;
     else if (pattern_id == 0)
@@ -850,24 +1075,24 @@ class PatternController : public MessageReceiver {
     stateUpdated(CALL_MODE_DIRECT_CHANGE);
   }
 
-  void setBrightness(uint8_t brightness) {
+  void setBrightness(uint8_t brightness, bool share = true) {
     Serial.printf("brightness: %d\n", brightness);
 
     options.brightness = brightness;
     load_options(options);
 
-    // Followers route this to the root; roots fan it out to the mesh.
-    queue_options_broadcast();
+    if (share)
+      queue_options_broadcast();
   }
 
-  void setDebugging(bool debugging) {
+  void setDebugging(bool debugging, bool share = true) {
     Serial.printf("debugging: %d\n", debugging);
 
     options.debugging = debugging;
     load_options(options);
 
-    // Followers route this to the root; roots fan it out to the mesh.
-    queue_options_broadcast();
+    if (share)
+      queue_options_broadcast();
   }
 
   void togglePowerSave() {
@@ -990,6 +1215,249 @@ class PatternController : public MessageReceiver {
     addFlash(CRGB::Green);
   }
 
+  bool decodeOperation(char command, uint16_t argument, TubeOperation& operation) const {
+    for (const TubeCommandDefinition& definition : tubeCommandDefinitions) {
+      if (definition.command != command)
+        continue;
+
+      if (command == '*' || command == '(')
+        argument = 1;
+      else if (command == ')')
+        argument = 0;
+      operation = {argument, definition.tag};
+      return true;
+    }
+    return false;
+  }
+
+  void broadcastAction(char key, uint16_t argument) {
+    Action action = {.key = key, .arg = uint8_t(argument)};
+    broadcast_action(action);
+  }
+
+  void printHelp() const {
+    Serial.println(F("b###.# - set bpm\ns - start phrase\n\np### - patterns\nm### - sync mode\nc### - colors\ne### - effects\nn - force next\n\ni### - set ID\nd - toggle debugging\nl### - brightness"));
+    Serial.println(F("@ - set power saving mode\nU - begin auto-update\nP - toggle all power saves\nO - toggle all sound overlays\n==== wifi ====\na - turn on access point\nq - turn off access point\nt0/1 - Tubes mode off/on"));
+    Serial.println(F("==== global actions ====\n* - enter select mode (double-click to Ready)\nA - turn on access point (Ready to update)\nW - forget WiFi client\nX - restart\nV### - auto-upgrade to version\nM - cancel manual pattern override"));
+  }
+
+  bool executeOperation(const TubeOperation& operation) {
+    uint16_t argument = operation.argument;
+    TubeScope scope = tubeOperationScope(operation);
+    bool share = scope != LocalScope;
+
+    switch (tubeOperationCode(operation)) {
+      case DebugOperation:
+        setDebugging(argument, share);
+        return true;
+      case RebootOperation:
+        if (!share)
+          doReboot = true;
+        else
+          broadcastAction('X', 0);
+        return true;
+      case PowerSaveOperation:
+        if (!share)
+          setPowerSave(argument);
+        else
+          broadcastAction('@', argument);
+        return true;
+      case BrightnessOperation:
+        if (argument < 5 || argument > 255)
+          break;
+        setBrightness(argument, share);
+        return true;
+      case AccessPointOperation:
+        if (!share) {
+          if (!isHomeLightRole()) {
+            Serial.println(F("Turning on WiFi access point."));
+            WLED::instance().initAP(true);
+          }
+        } else {
+          broadcastAction('A', 0);
+        }
+        return true;
+      case DisconnectWifiOperation:
+        if (!isHomeLightRole()) {
+          Serial.println(F("Turning off WiFi access point."));
+          WiFi.disconnect(true);
+        }
+        return true;
+      case ForgetWifiOperation:
+        if (!share) {
+          if (!isHomeLightRole()) {
+            Serial.println(F("Clearing WiFi connection."));
+            strcpy(multiWiFi[0].clientSSID, "");
+            strcpy(multiWiFi[0].clientPass, "");
+            WiFi.disconnect(false, true);
+          }
+        } else {
+          broadcastAction('W', 0);
+        }
+        return true;
+      case BpmOperation:
+        if (argument < 60 * 256)
+          break;
+        if (share)
+          request_new_bpm(argument);
+        else
+          set_tapped_bpm(argument, 0);
+        return true;
+      case StartPhraseOperation:
+        beats.start_phrase();
+        update_beat();
+        if (share)
+          send_update();
+        return true;
+      case NextOperation:
+        force_next(share);
+        return true;
+      case PatternOperation:
+        next_state.pattern_phrase = 0;
+        next_state.pattern_id = argument;
+        next_state.pattern_sync_id = All;
+        if (share) broadcast_state();
+        return true;
+      case SyncModeOperation:
+        next_state.pattern_phrase = 0;
+        next_state.pattern_id = current_state.pattern_id;
+        next_state.pattern_sync_id = argument;
+        if (share) broadcast_state();
+        return true;
+      case PaletteOperation:
+        next_state.palette_phrase = 0;
+        next_state.palette_id = argument;
+        if (share) broadcast_state();
+        return true;
+      case EffectOperation:
+        next_state.effect_phrase = 0;
+        next_state.effect_params = gEffects[argument % gEffectCount].params;
+        if (share) broadcast_state();
+        return true;
+      case EffectChanceOperation:
+        next_state.effect_phrase = 0;
+        next_state.effect_params = current_state.effect_params;
+        next_state.effect_params.chance = argument;
+        if (share) broadcast_state();
+        return true;
+      case NodeIdOperation:
+        Serial.printf("Reset! ID -> %03X\n", argument);
+        node.reset(argument);
+        return true;
+      case UpdateOperation:
+        if (!share) {
+          if (!isHomeLightRole()) updater.start();
+        } else {
+          broadcastAction('U', 0);
+        }
+        return true;
+      case UpdateOfferOperation:
+        if (!share) {
+          if (updater.current_version.version < argument)
+            select();
+        } else {
+          broadcastAction('V', argument);
+        }
+        return true;
+      case SelectOperation:
+        if (!share) {
+          if (argument) {
+            Serial.println(F("enter select mode"));
+            enterSelectMode();
+          } else {
+            Serial.println(F("exit select mode"));
+            deselect();
+          }
+        } else {
+          broadcastAction(argument ? '*' : ')', 0);
+        }
+        return true;
+      case GlitterOperation:
+        if (!share) {
+          Serial.println(F("glitter!"));
+          for (uint8_t i = 0; i < 10; i++) addGlitter();
+        } else {
+          broadcastAction('G', 0);
+        }
+        return true;
+      case FlashOperation:
+        if (!share) {
+          Serial.println(F("flash!"));
+          flashTimer.start(20000);
+          flashColor = argument;
+        } else {
+          broadcastAction('F', argument);
+        }
+        return true;
+      case RoleOperation:
+        if (!share)
+          setRole(ControllerRole(argument));
+        else
+          broadcastAction('R', argument);
+        return true;
+      case CancelOverrideOperation:
+        if (!share) {
+          Serial.println(F("cancel manual mode"));
+          cancelOverrides();
+        } else {
+          broadcastAction('M', 0);
+        }
+        return true;
+      case SoundOverlayOperation:
+        if (!share)
+          sound.overlay = argument;
+        else
+          broadcastAction('O', argument);
+        return true;
+      case TubesModeOperation:
+        if (scope != LocalScope || argument > 1)
+          break;
+        pendingTubesMode = argument;
+        tubesModeTimer.start(250);
+        return true;
+      case HelpOperation:
+        printHelp();
+        return true;
+    }
+
+    Serial.println(F("nope"));
+    return false;
+  }
+
+  void readJsonOperations(JsonObject& root) {
+    JsonObject json = root[F("tube")];
+    if (json.isNull())
+      return;
+
+    if (root.containsKey(F("pin")))
+      checkSettingsPIN(root[F("pin")].as<const char*>());
+    if ((!correctPIN && strlen(settingsPIN)) || (json[F("v")] | 1) != 1)
+      return;
+
+    int scopeOverride = json[F("to")] | -1;
+    if (scopeOverride < -1 || scopeOverride > SelectedScope)
+      return;
+
+    // Each sparse serial-style key becomes an operation and is consumed immediately.
+    for (JsonPair item : json) {
+      const char* key = item.key().c_str();
+      if (!strcmp_P(key, PSTR("to")) || !strcmp_P(key, PSTR("v")))
+        continue;
+      if (!key[0] || key[1] || (!item.value().is<long>() && !item.value().is<bool>()))
+        continue;
+      long value = item.value().as<long>();
+      if (value < 0 || value > UINT16_MAX)
+        continue;
+
+      TubeOperation operation;
+      if (!decodeOperation(key[0], value, operation))
+        continue;
+      if (scopeOverride >= 0)
+        operation.tag = (operation.tag & 0x3F) | (uint8_t(scopeOverride) << 6);
+      executeOperation(operation);
+    }
+  }
+
   void read_keys() {
     if (!Serial.available())
       return;
@@ -997,10 +1465,9 @@ class PatternController : public MessageReceiver {
     char c = Serial.read();
     char *k = key_buffer;
     uint8_t max = sizeof(key_buffer);
-    for (uint8_t i=0; *k && (i < max-1); i++) {
+    for (uint8_t i = 0; *k && i < max - 1; i++)
       k++;
-    }
-    if (c == 10) {
+    if (c == '\n') {
       keyboard_command(key_buffer);
       key_buffer[0] = 0;
     } else {
@@ -1009,227 +1476,74 @@ class PatternController : public MessageReceiver {
     }
   }
 
-  accum88 parse_number(char *s) const {
-    uint16_t n=0, d=0;
+  accum88 parse_number(const char *s) const {
+    uint16_t whole = 0;
+    uint16_t fraction = 0;
 
-    while (*s == ' ')
-      s++;
-    while (*s) {
-      if (*s < '0' || *s > '9')
-        break;
-      n = n*10 + (*s++ - '0');
-    }
-    n = n << 8;
+    while (*s == ' ') s++;
+    while (*s >= '0' && *s <= '9')
+      whole = whole * 10 + (*s++ - '0');
+    whole <<= 8;
 
     if (*s == '.') {
-      uint16_t div = 1;
-      s++;
-      while (*s) {
-        if (*s < '0' || *s > '9')
-          break;
-        d = d*10 + (*s++ - '0');
-        div *= 10;
+      uint16_t divisor = 1;
+      while (*++s >= '0' && *s <= '9') {
+        fraction = fraction * 10 + (*s - '0');
+        divisor *= 10;
       }
-      d = (d << 8) / div;
+      fraction = (fraction << 8) / divisor;
     }
-    return n+d;
+    return whole + fraction;
   }
 
   void keyboard_command(char *command) {
-    // If not the lead, send it to the lead.
-    uint8_t b;
-    accum88 arg = parse_number(command+1);
-    Serial.printf("[command=%c arg=%04x]\n", command[0], arg);
+    char key = command[0];
+    if (!key)
+      return;
 
-    switch (command[0]) {
-      case 'd':
-        setDebugging(!options.debugging);
-        break;
-      case '~':
-        doReboot = true;
-        break;
-      case '_':
-        togglePowerSave();
-        break;
+    accum88 parsed = parse_number(command + 1);
+    uint16_t argument = parsed >> 8;
+    Serial.printf("[command=%c arg=%04x]\n", key, parsed);
 
-      case '-':
-        b = options.brightness;
-        while (*command++ == '-')
-          b -= 5;
-        setBrightness(b - 5);
-        break;
-      case '+':
-        b = options.brightness;
-        while (*command++ == '+')
-          b += 5;
-        setBrightness(b + 5);
-        return;
-      case 'l':
-        if (arg < 5*256) {
-          Serial.println(F("nope"));
-          return;
-        }
-        setBrightness(arg >> 8);
-        return;
-      case 'a':
-        Serial.println("Turning on WiFi access point.");
-        WLED::instance().initAP(true);
-        return;
-      case 'q':
-        Serial.println("Turning off WiFi access point.");
-        WiFi.disconnect(true);
-        return;
-      case 'b':
-        if (arg < 60*256) {
-          Serial.println(F("nope"));
-          return;
-        }
-        request_new_bpm(arg);
-        return;
-
-      case 's':
-        beats.start_phrase();
-        update_beat();
-        send_update();
-        return;
-
-      case 'n':
-        force_next();
-        return;
-
-      case 'p':
-        next_state.pattern_phrase = 0;
-        next_state.pattern_id = arg >> 8;
-        next_state.pattern_sync_id = All;
-        broadcast_state();
-        return;
-
-      case 'm':
-        next_state.pattern_phrase = 0;
-        next_state.pattern_id = current_state.pattern_id;
-        next_state.pattern_sync_id = arg >> 8;
-        broadcast_state();
-        return;
-
-      case 'c':
-        next_state.palette_phrase = 0;
-        next_state.palette_id = arg >> 8;
-        broadcast_state();
-        return;
-
-      case 'e':
-        next_state.effect_phrase = 0;
-        next_state.effect_params = gEffects[(arg >> 8) % gEffectCount].params;
-        broadcast_state();
-        return;
-
-      case '%':
-        next_state.effect_phrase = 0;
-        next_state.effect_params = current_state.effect_params;
-        next_state.effect_params.chance = arg;
-        broadcast_state();
-        return;
-
-      case 'i':
-        Serial.printf("Reset! ID -> %03X\n", arg >> 4);
-        node.reset(arg >> 4);
-        return;
-
-      case 'U':
-      case 'V':
-      case '*':
-      case '(':
-      case ')':
-      case '@':
-      case 'G':
-      case 'A':
-      case 'W':
-      case 'X':
-      case 'F':
-      case 'R':
-      case 'M': {
-        Action action = {
-          .key = command[0],
-          .arg = (uint8_t)(arg >> 8)
-        };
-        broadcast_action(action);
-        return;
-      }
-
-      case 'P': {
-        // Toggle power save
-        Action action = {
-          .key = command[0],
-          .arg = !power_save,
-        };
-        broadcast_action(action);
-        break;
-      }
-
-      case 'O': {
-        // Toggle sound overlay
-        Action action = {
-          .key = command[0],
-          .arg = !sound.overlay
-        };
-        broadcast_action(action);
-        break;
-      }
-
-      case 'r':
-        setRole((ControllerRole)(arg >> 8));
-        return;
-
-      case '?':
-        Serial.println(F("b###.# - set bpm"));
-        Serial.println(F("s - start phrase"));
-        Serial.println();
-        Serial.println(F("p### - patterns"));
-        Serial.println(F("m### - sync mode"));
-        Serial.println(F("c### - colors"));
-        Serial.println(F("e### - effects"));
-        Serial.println(F("n - force next"));
-        Serial.println();
-        Serial.println(F("i### - set ID"));
-        Serial.println(F("d - toggle debugging"));
-        Serial.println(F("l### - brightness"));
-        Serial.println("@ - toggle power saving mode");
-        Serial.println("U - begin auto-update");
-        Serial.println("P - toggle all power saves");
-        Serial.println("O - toggle all sound overlays");
-        Serial.println("==== wifi ====");
-        Serial.println("a - turn on access point");
-        Serial.println("q - turn off access point");
-        Serial.println("==== global actions ====");
-        Serial.println("* - enter select mode (double-click to Ready)");
-        Serial.println("A - turn on access point (Ready to update)");
-        Serial.println("W - forget WiFi client");
-        Serial.println("X - restart");
-        Serial.println("V### - auto-upgrade to version");
-        Serial.println("M - cancel manual pattern override");
-        return;
-
-      case 'u':
-        updater.start();
-        return;
-
-      case 0:
-        // Empty command
-        return;
-
-      default:
-        Serial.println("dunno?");
-        return;
+    if (key == 'b')
+      argument = parsed;
+    else if (key == 'i')
+      argument = parsed >> 4;
+    else if (key == 'd')
+      argument = !options.debugging;
+    else if (key == '_')
+      argument = !power_save;
+    else if (key == 'P')
+      argument = !power_save;
+    else if (key == 'O')
+      argument = !sound.overlay;
+    else if (key == '-' || key == '+') {
+      uint8_t brightness = options.brightness;
+      char *position = command;
+      while (*position++ == key)
+        brightness += key == '+' ? 5 : -5;
+      argument = brightness + (key == '+' ? 5 : -5);
+    } else if (key == 't' && parsed != 0 && parsed != 256) {
+      Serial.println(F("nope"));
+      return;
     }
+
+    TubeOperation operation;
+    if (!decodeOperation(key, argument, operation)) {
+      Serial.println(F("dunno?"));
+      return;
+    }
+    executeOperation(operation);
   }
 
-  void force_next() {
+  void force_next(bool share = true) {
     uint16_t phrase = current_state.beat_frame >> 12;
     uint16_t next_phrase = min(next_state.pattern_phrase, min(next_state.palette_phrase, next_state.effect_phrase)) - phrase;
     next_state.pattern_phrase -= next_phrase;
     next_state.palette_phrase -= next_phrase;
     next_state.effect_phrase -= next_phrase;
-    broadcast_state();
+    if (share)
+      broadcast_state();
   }
 
   void broadcast_action(Action& action) {
@@ -1301,7 +1615,9 @@ class PatternController : public MessageReceiver {
       }
 
       case COMMAND_UPGRADE:
-        updater.start((AutoUpdateOffer*)data);
+        // HOMELIGHT must relay upgrade offers without installing Tubes firmware.
+        if (!isHomeLightRole())
+          updater.start((AutoUpdateOffer*)data);
         return true;
 
       case COMMAND_ACTION:
@@ -1322,83 +1638,14 @@ class PatternController : public MessageReceiver {
   }
 
   void onAction(Action* action) {
-    switch (action->key) {
-      case 'A':
-        Serial.println("Turning on WiFi access point.");
-        WLED::instance().initAP(true);
-        return;
+    TubeOperation operation;
+    if (!decodeOperation(action->key, action->arg, operation))
+      return;
+    if (tubeOperationScope(operation) == SelectedScope && !isSelected())
+      return;
 
-      case 'O':
-        sound.overlay = (action->arg != 0);
-        return;
-
-      case 'X':
-        if (!isSelected())
-          return;
-        doReboot = true;
-        return;
-
-      case 'R':
-        if (!isSelected())
-          return;
-        setRole((ControllerRole)(action->arg));
-        return;
-
-      case '@':
-        Serial.print("Setting power save to %d\n");
-        setPowerSave(action->arg);
-        return;
-
-      case 'W':
-        Serial.println("Clearing WiFi connection.");
-        strcpy(multiWiFi[0].clientSSID, "");
-        strcpy(multiWiFi[0].clientPass, "");
-        WiFi.disconnect(false, true);
-        return;
-
-      case 'G':
-        Serial.println("glitter!");
-        for (int i=0; i< 10; i++)
-          addGlitter();
-        return;
-
-      case 'F':
-        Serial.println("flash!");
-        flashTimer.start(20000);
-        flashColor = action->arg;
-        return;
-
-      case 'M':
-        Serial.println("cancel manual mode");
-        cancelOverrides();
-        break;
-
-      case '*':
-      case '(':
-        Serial.println("enter select mode");
-        enterSelectMode();
-        break;
-
-      case ')':
-        Serial.println("exit select mode");
-        deselect();
-        break;
-
-      case 'V':
-        // Version check: prepare for update
-        if (updater.current_version.version >= action->arg)
-          break;
-
-        select();
-        break;
-
-      case 'U':
-        if (!isSelected())
-          return;
-        updater.start();
-        break;
-
-    }
+    operation.tag &= 0x3F;
+    executeOperation(operation);
   }
 
 #define WIZMOTE_BUTTON_ON          1
@@ -1428,19 +1675,22 @@ class PatternController : public MessageReceiver {
 
     switch (button_id) {
       case WIZMOTE_BUTTON_ON:
-        WLED::instance().initAP(true);
+        if (!isHomeLightRole())
+          WLED::instance().initAP(true);
         setDebugging(true);
         acknowledge();
         return true;
 
       case WIZMOTE_BUTTON_OFF:
-        WiFi.softAPdisconnect(true);
-        apActive = false;
-        WiFi.disconnect(false, true);
+        if (!isHomeLightRole()) {
+          WiFi.softAPdisconnect(true);
+          apActive = false;
+          WiFi.disconnect(false, true);
 #if WLED_WATCHDOG_TIMEOUT > 0
-        WLED::instance().enableWatchdog();
+          WLED::instance().enableWatchdog();
 #endif
-        apBehavior = AP_BEHAVIOR_BUTTON_ONLY;
+          apBehavior = AP_BEHAVIOR_BUTTON_ONLY;
+        }
         setDebugging(false);
         acknowledge();
         return true;

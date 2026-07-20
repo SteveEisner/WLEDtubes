@@ -38,7 +38,6 @@ ESP_EVENT_DEFINE_BASE(SYSTEM_EVENT);
 //#define ESPNOW_DEBUG_COUNTERS
 
 #define BROADCAST_ADDR_ARRAY_INITIALIZER {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
-#define WLED_ESPNOW_WIFI_CHANNEL 1
 
 #ifndef WLED_WIFI_POWER_SETTING
 #define WLED_WIFI_POWER_SETTING WIFI_POWER_18_5dBm
@@ -59,6 +58,9 @@ class ESPNOWBroadcastImpl : public ESPNOWBroadcast {
     friend ESPNOWBroadcast;
 
     std::atomic<STATE> _state {STOPPED};
+#ifdef HOMELIGHT
+    std::atomic<bool> _enabled {false};
+#endif
     STATE getState() const {
         return _state.load();
     }
@@ -66,6 +68,14 @@ class ESPNOWBroadcastImpl : public ESPNOWBroadcast {
     bool setupWiFi();
 
     void start();
+
+#ifdef HOMELIGHT
+    bool isEnabled() const {
+        return _enabled.load();
+    }
+
+    void stop();
+#endif
 
     static esp_err_t onSystemEvent(void *ctx, system_event_t *event);
 
@@ -122,6 +132,37 @@ ESPNOWBroadcast::STATE ESPNOWBroadcast::getState() const {
 #endif
 }
 
+#ifdef HOMELIGHT
+bool ESPNOWBroadcast::isEnabled() const {
+#ifdef ESP32
+    return espnowBroadcastImpl.isEnabled();
+#else
+    return false;
+#endif
+}
+
+bool ESPNOWBroadcast::setEnabled(bool enabled) {
+#ifdef ESP32
+    if (enabled == espnowBroadcastImpl.isEnabled())
+        return true;
+
+    if (enabled) {
+        espnowBroadcastImpl._enabled.store(true);
+        if (espnowBroadcastImpl.setupWiFi())
+            return true;
+
+        espnowBroadcastImpl._enabled.store(false);
+        return false;
+    }
+
+    espnowBroadcastImpl.stop();
+    return true;
+#else
+    return false;
+#endif
+}
+#endif
+
 bool ESPNOWBroadcast::setup() {
 
     static bool setup = false;
@@ -170,7 +211,12 @@ bool ESPNOWBroadcast::setup() {
   #endif  // ESPNOW_EVENT_DEBUGGING
 #endif // ESP_IDF_VERSION
 
+#ifdef HOMELIGHT
+    // Home lights boot as ordinary WLED devices and enter the mesh only on command.
+    setup = true;
+#else
     setup = espnowBroadcastImpl.setupWiFi();
+#endif
 #endif //ESP32
     return setup;
 }
@@ -186,16 +232,40 @@ bool ESPNOWBroadcastImpl::setupWiFi() {
         Serial.println("WiFi.mode() failed");
         return false;
     }
+#ifdef HOMELIGHT
+    if (!_enabled.load())
+        return true;
+
+    // Leave the infrastructure network without erasing WLED's saved credentials.
+    if (WiFi.status() == WL_CONNECTED && !WiFi.disconnect(false, false)) {
+        Serial.println("WiFi.disconnect() failed");
+        return false;
+    }
+
+    _state.exchange(STARTING);
+#else
     // and not have the WiFi connect
     // Calling discount with tigger an async Wifi Event
     if ( !WiFi.disconnect(false, true) ) {
         Serial.println("WiFi.disconnect() failed");
         return false;
     }
+#endif
 
     yield();
     return true;
 }
+
+#ifdef HOMELIGHT
+void ESPNOWBroadcastImpl::stop() {
+    _enabled.store(false);
+    STATE previousState = _state.exchange(STOPPED);
+    if (previousState == STARTED) {
+        esp_now_unregister_recv_cb();
+        esp_now_deinit();
+    }
+}
+#endif
 #endif //ESP32
 
 
@@ -302,10 +372,35 @@ void ESPNOWBroadcastImpl::start() {
 
     Serial.println("starting ESPNow");
 
+#ifdef HOMELIGHT
+    if (!_enabled.load()) {
+        _state.exchange(STOPPED);
+        return;
+    }
+#endif
+
     if ( WiFi.mode(WIFI_STA) ) {
         auto status = WiFi.status();
-        if ( status >= WL_DISCONNECTED ) {
+#ifdef HOMELIGHT
+        bool canStart = status == WL_DISCONNECTED;
+        if (status == WL_CONNECTED) {
+            Serial.printf("Disconnecting WiFi on channel %d; switching to mesh channel %d\n",
+                WiFi.channel(), WLED_ESPNOW_WIFI_CHANNEL);
+            WiFi.disconnect(false, false);
+            canStart = false;
+        }
+#else
+        bool canStart = status >= WL_DISCONNECTED;
+#endif
+        if (canStart) {
             if (esp_wifi_start() == ESP_OK) {
+#ifdef HOMELIGHT
+                if (status == WL_DISCONNECTED && esp_wifi_set_channel(WLED_ESPNOW_WIFI_CHANNEL, WIFI_SECOND_CHAN_NONE) != ESP_OK) {
+                    Serial.printf("Unable to lock WiFi to ESP-NOW channel %d\n", WLED_ESPNOW_WIFI_CHANNEL);
+                    setupWiFi();
+                    return;
+                }
+#endif
                 yield();
                 if (!WiFi.setTxPower(WLED_WIFI_POWER_SETTING)) {
                     auto power = WiFi.getTxPower();
@@ -389,6 +484,10 @@ void ESPNOWBroadcastImpl::onWiFiEvent(void* arg, esp_event_base_t event_base, in
 #endif
         switch (event_id) {
             case WIFI_EVENT_STA_START: {
+#ifdef HOMELIGHT
+                if (!espnowBroadcastImpl._enabled.load())
+                    break;
+#endif
                 ESPNOWBroadcast::STATE stopped {ESPNOWBroadcast::STOPPED};
                 espnowBroadcastImpl._state.compare_exchange_strong(stopped, ESPNOWBroadcast::STARTING);
                 break;
@@ -396,6 +495,12 @@ void ESPNOWBroadcastImpl::onWiFiEvent(void* arg, esp_event_base_t event_base, in
 
             case WIFI_EVENT_STA_STOP:
                 lastReconnectAttempt = 0;
+#ifdef HOMELIGHT
+                if (espnowBroadcastImpl._enabled.load()) {
+                    espnowBroadcastImpl._state.exchange(ESPNOWBroadcast::STARTING);
+                    break;
+                }
+#endif
                 // fall thru
             case WIFI_EVENT_AP_START: {
                 ESPNOWBroadcast::STATE started {ESPNOWBroadcast::STARTED};

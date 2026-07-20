@@ -1042,6 +1042,13 @@ void WLED::handleConnection()
   #endif
   const bool wifiConfigured = WLED_WIFI_CONFIGURED;
 
+#if defined(HOMELIGHT) && !defined(WLED_DISABLE_ESPNOW_NEW)
+  if (espnowBroadcast.isEnabled()) {
+    espnowBroadcast.loop();
+    return;
+  }
+#endif
+
   // ignore connection handling if WiFi is configured and scan still running
   // or within first 2s if WiFi is not configured or AP is always active
   if ((wifiConfigured && multiWiFi.size() > 1 && WiFi.scanComplete() < 0) || (now < 2000 && (!wifiConfigured || apBehavior == AP_BEHAVIOR_ALWAYS)))

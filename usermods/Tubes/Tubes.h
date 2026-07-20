@@ -105,29 +105,31 @@ class TubesUsermod : public Usermod {
 
   public:
     void setup() {
-
-      if (PinManager::isPinOk(MASTER_PIN)) {
-        pinMode(MASTER_PIN, INPUT_PULLUP);
-        if(PinManager::isPinOk(LEGACY_PIN)) {
-          pinMode(LEGACY_PIN, INPUT_PULLUP);
-        }
-        if (digitalRead(MASTER_PIN) == LOW) {
-        }
-        isLegacy = (digitalRead(MASTER_PIN) == LOW);
-      }
       randomize();
 
-      // Override some behaviors on all Tubes
-      bootPreset = 0;  // Try to prevent initial playlists from starting
-      transitionDelay = 8000;   // Fade them for a long time
-      strip.setTransition(transitionDelay);
-      strip.setTargetFps(60);
-      strip.setCCT(100);
       recoverLedBussesIfNeeded();
-
       // Start timing
       globalTimer.setup();
       controller.setup();
+
+      if (!controller.isHomeLightRole()) {
+        if (PinManager::isPinOk(MASTER_PIN)) {
+          pinMode(MASTER_PIN, INPUT_PULLUP);
+          if(PinManager::isPinOk(LEGACY_PIN)) {
+            pinMode(LEGACY_PIN, INPUT_PULLUP);
+          }
+          isLegacy = (digitalRead(MASTER_PIN) == LOW);
+        }
+
+        // Override some behaviors on Tubes that render the mesh patterns.
+        bootPreset = 0;  // Try to prevent initial playlists from starting
+        fadeTransition = true;  // Fade palette transitions
+        transitionDelay = 8000;   // Fade them for a long time
+        strip.setTransition(transitionDelay);
+        strip.setTargetFps(60);
+        strip.setCCT(100);
+      }
+
       if (controller.isMasterRole()) {
         master.setup();
       }
@@ -153,7 +155,15 @@ class TubesUsermod : public Usermod {
       controller.led_strip.update();
     }
 
+    void readFromJsonState(JsonObject& root) override {
+      controller.readJsonOperations(root);
+    }
+
     void handleOverlayDraw() {
+      // WiFi mode leaves the WLED frame untouched; Tubes mode renders the mesh.
+      if (!controller.shouldRenderTubes())
+        return;
+
       // Draw effects layers over whatever WLED is doing.
       controller.handleOverlayDraw();
       debug.handleOverlayDraw();
@@ -173,6 +183,9 @@ class TubesUsermod : public Usermod {
     }
 
     bool handleButton(uint8_t b) {
+      if (controller.isHomeLightRole())
+        return false;
+
       // Special code for handling the "power save" button
       if (b == 100) { // Press button 0 for WLED_LONG_POWER_SAVE ms
         controller.togglePowerSave();

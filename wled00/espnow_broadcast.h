@@ -13,6 +13,10 @@
 #define WLED_ESPNOW_MAX_MESSAGE_LENGTH 250
 #endif
 
+#ifndef WLED_ESPNOW_WIFI_CHANNEL
+#define WLED_ESPNOW_WIFI_CHANNEL 1
+#endif
+
 #ifndef WLED_ESPNOW_MAX_REGISTERED_CALLBACKS
   #ifndef WLED_MAX_USERMODS
   #define WLED_MAX_USERMODS 1
@@ -25,6 +29,11 @@ class ESPNOWBroadcast {
   public:
 
     bool setup();
+
+#ifdef HOMELIGHT
+    bool setEnabled(bool enabled);
+    bool isEnabled() const;
+#endif
 
     void loop(size_t maxMessagesToProcess = WLED_ESPNOW_MAX_QUEUED_MESSAGES);
 

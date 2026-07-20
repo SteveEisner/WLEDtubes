@@ -102,7 +102,13 @@ class LightNode {
         instance = this;
     }
 
+    void setWledNetworkOwnership(bool enabled) {
+        wledOwnsNetwork = enabled;
+    }
+
   protected:
+
+    bool wledOwnsNetwork = false;
 
     const uint32_t STATUS_TIMEOUT_BASE =  3000;    // Base time to wait to send broadcasts
     const uint32_t UPLINK_TIMEOUT      = 20000;    // Time at which uplink is presumed lost
@@ -123,6 +129,10 @@ class LightNode {
     }
 
     void configureAP() {
+        // Home lights need the mesh, but their normal WLED network remains authoritative.
+        if (wledOwnsNetwork)
+            return;
+
 #ifdef DEFAULT_WIFI
         strcpy(multiWiFi[0].clientSSID, DEFAULT_WIFI);
         strcpy(multiWiFi[0].clientPass, DEFAULT_WIFI_PASSWORD);
