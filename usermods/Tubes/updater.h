@@ -6,7 +6,7 @@
 #include <Update.h>
 #include "timer.h"
 
-#define RELEASE_VERSION 13
+#define RELEASE_VERSION 14
 
 // Utility to extract header value from headers
 String getHeaderValue(String header, String headerName) {
@@ -111,6 +111,12 @@ class AutoUpdater {
     }
 
     void ready() {
+        if (this->status == Ready)
+            return;
+        _storedSSID = String(multiWiFi[0].clientSSID);
+        _storedPass = String(multiWiFi[0].clientPass);
+        _storedAPSSID = String(apSSID);
+        _storedAPPass = String(apPass);
         log("ready for update - turning on updater AP");
         strcpy(apSSID, "WLED-UPDATE");
         strcpy(apPass, "update1234");

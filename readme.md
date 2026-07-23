@@ -64,7 +64,8 @@ The Tubes usermod uses several sub-libraries and helper functions:
 * beats.h: an 8-bit bpm library that helps the Tubes run patterns at a specific bpm
 * node.h: the ESP-Now based mesh network
 * particle.h: a particle effects overlay library
-* firmware.sh: successful firmware+config mass-autoupdater
+* upgrade_fast.sh and firmware.sh: fail-closed fleet and one-device remote updaters; see
+  [the selection and recovery procedure](usermods/Tubes/REMOTE_UPGRADE.md)
 * master.h: a remote that overrides & controls all ESP-Now nodes (run from a separate device)
 * timer.h: a tiny library to help with timed events
 

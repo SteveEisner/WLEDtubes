@@ -20,6 +20,13 @@ def _create_dirs(dirs=["map", "release", "firmware"]):
         os.makedirs(os.path.join(OUTPUT_DIR, d), exist_ok=True)
 
 def create_release(source):
+    # Operational tools use the stable environment filename, while releases use
+    # the embedded hardware-family name. Both must point at the same fresh image.
+    variant = env["PIOENV"]
+    bin_file = "{}firmware{}{}.bin".format(OUTPUT_DIR, os.path.sep, variant)
+    print(f"Copying {source} to {bin_file}")
+    shutil.copy(source, bin_file)
+
     release_name_def = _get_cpp_define_value(env, "WLED_RELEASE_NAME")
     if release_name_def:
         release_name = release_name_def.replace("\\\"", "")
@@ -30,22 +37,18 @@ def create_release(source):
         print(f"Copying {source} to {release_file}")
         shutil.copy(source, release_file)
         bin_gzip(release_file, release_gz_file)
-    else:
-        variant = env["PIOENV"]
-        bin_file = "{}firmware{}{}.bin".format(OUTPUT_DIR, os.path.sep, variant)
-        print(f"Copying {source} to {bin_file}")
-        shutil.copy(source, bin_file)
 
-def bin_rename_copy(source, target, env):
+def copy_build_outputs(source, target, env):
     _create_dirs()
     variant = env["PIOENV"]
     builddir = os.path.join(env["PROJECT_BUILD_DIR"],  variant)
+    firmware_file = os.path.join(builddir, env["PROGNAME"] + ".bin")
     source_map = os.path.join(builddir, env["PROGNAME"] + ".map")
 
     # create string with location and file names based on variant
     map_file = "{}map{}{}.map".format(OUTPUT_DIR, os.path.sep, variant)
 
-    create_release(str(target[0]))
+    create_release(firmware_file)
 
     # copy firmware.map to map/<variant>.map
     if os.path.isfile("firmware.map"):
@@ -65,4 +68,13 @@ def bin_gzip(source, target):
         with gzip.open(target, "wb", compresslevel = 9) as f:
             shutil.copyfileobj(fp, f)
 
-env.AddPostAction("$BUILD_DIR/${PROGNAME}.bin", bin_rename_copy)
+# PlatformIO may restore firmware.bin directly from its build cache, which skips
+# file-level post actions. Use an always-run alias so every normal build refreshes
+# the operational and release artifacts after firmware.bin is available.
+package_outputs = env.Alias(
+    "package_outputs",
+    "$BUILD_DIR/${PROGNAME}.bin",
+    copy_build_outputs,
+)
+env.AlwaysBuild(package_outputs)
+env.Default(package_outputs)

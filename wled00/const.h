@@ -700,7 +700,11 @@ static_assert(WLED_MAX_BUSSES <= 32, "WLED_MAX_BUSSES exceeds hard limit");
   #endif
 #endif
 #define DEFAULT_LED_TYPE TYPE_WS2812_RGB
-#define DEFAULT_LED_COUNT 30
+// A board environment may provide its safe first-boot length. Generic builds
+// retain 30 LEDs when no hardware-specific default was selected.
+#ifndef DEFAULT_LED_COUNT
+  #define DEFAULT_LED_COUNT 30
+#endif
 
 #define INTERFACE_UPDATE_COOLDOWN 1000 // time in ms to wait between websockets, alexa, and MQTT updates
 

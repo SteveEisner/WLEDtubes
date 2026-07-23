@@ -1,0 +1,15 @@
+{
+  "ap": {
+    "ssid": "WLED-AP"
+  },
+  "hw": {
+    "led": {
+      "ins": [],
+      "maxpwr": 1250,
+      "total": 300
+    }
+  },
+  "id": {
+    "name": "dig2go"
+  }
+}

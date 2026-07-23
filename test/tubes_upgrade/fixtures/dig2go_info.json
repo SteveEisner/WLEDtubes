@@ -1,0 +1,15 @@
+{
+  "info": {
+    "arch": "esp32",
+    "leds": {
+      "count": 300
+    },
+    "mac": "a0b765ca2e28",
+    "name": "dig2go",
+    "release": "DIG2GO_TUBES",
+    "ver": "0.15.3",
+    "wifi": {
+      "ap": true
+    }
+  }
+}

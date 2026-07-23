@@ -1,0 +1,12 @@
+{
+  "info": {
+    "arch": "esp32",
+    "leds": {"count": 112},
+    "mac": "5443b2b542f4",
+    "name": "Light Tube",
+    "ip": "",
+    "release": null,
+    "ver": "0.14.0-b4",
+    "wifi": {"bssid": "", "channel": 1, "rssi": 0}
+  }
+}

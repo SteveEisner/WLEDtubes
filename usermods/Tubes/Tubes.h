@@ -123,7 +123,6 @@ class TubesUsermod : public Usermod {
 
         // Override some behaviors on Tubes that render the mesh patterns.
         bootPreset = 0;  // Try to prevent initial playlists from starting
-        fadeTransition = true;  // Fade palette transitions
         transitionDelay = 8000;   // Fade them for a long time
         strip.setTransition(transitionDelay);
         strip.setTargetFps(60);

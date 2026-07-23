@@ -13,3 +13,9 @@ More information about PIO Unit Testing:
 The Tubes mesh routing tests are host-side C++ tests. Run them with:
 
     ./test/tubes_mesh/run.sh
+
+The Tubes remote-upgrade tests cover hardware identification, legacy LED config
+migration, firmware metadata validation, nonce-bound mesh reports, and the
+one-selection fleet workflow. Run them with:
+
+    ./test/tubes_upgrade/run.sh

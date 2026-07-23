@@ -1,0 +1,26 @@
+{
+  "hw": {
+    "led": {
+      "ins": [
+        {
+          "freq": 0,
+          "ledma": 55,
+          "len": 300,
+          "maxpwr": 1250,
+          "order": 0,
+          "pin": [
+            16
+          ],
+          "ref": false,
+          "rev": false,
+          "rgbwm": 0,
+          "skip": 0,
+          "start": 0,
+          "type": 22
+        }
+      ],
+      "maxpwr": 1250,
+      "total": 999
+    }
+  }
+}

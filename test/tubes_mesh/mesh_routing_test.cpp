@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "mesh_test_harness.h"
+#include "device_report_protocol.h"
 
 namespace {
 
@@ -124,13 +125,40 @@ void declaration_from_non_uplink_is_ignored() {
     expect(mesh.network.transmissions.size() == 1, "ignored declaration was relayed");
 }
 
+// A newly flashed leaf carries its report in the compatible tail of COMMAND_ACTION,
+// so older relays can authorize and preserve the payload without understanding it.
+void device_report_round_trips_through_unaware_relays() {
+    ThreeDeviceMesh mesh;
+    DeviceReportMessage report;
+    report.kind = DeviceReportReply;
+    report.nonce = 0x1234ABCD;
+    report.mac[0] = 0x54;
+    report.mac[5] = 0xF4;
+    report.hardwareFamily = TubeHardwareDig2Go;
+    report.ledCount = 112;
+
+    mesh.leaf.sendRootRequest(0x30, reinterpret_cast<uint8_t*>(&report), sizeof(report));
+    mesh.network.deliverAll();
+
+    expect(mesh.root.appliedMessages.size() == 1, "root did not authorize the compatible action");
+    expect(mesh.relay.appliedMessages.size() == 1, "relay did not receive the declared report");
+    expect(mesh.leaf.appliedMessages.size() == 1, "reporting leaf did not receive the declaration");
+
+    const auto& received = *reinterpret_cast<const DeviceReportMessage*>(mesh.relay.appliedMessages.front().data);
+    expect(isDeviceReportMessage(received), "relayed report lost its protocol identity");
+    expect(received.nonce == report.nonce, "relayed report changed its transaction nonce");
+    expect(received.mac[0] == 0x54 && received.mac[5] == 0xF4, "relayed report changed its MAC");
+    expect(received.ledCount == 112, "relayed report changed its LED count");
+}
+
 } // namespace
 
 int main() {
-    const std::array<std::pair<const char*, void (*)()>, 3> tests = {{
+    const std::array<std::pair<const char*, void (*)()>, 4> tests = {{
         {"leaf request round trips through root", leaf_request_round_trips_through_root},
         {"rejected root request is not declared", rejected_root_request_is_not_declared},
         {"declaration from non-uplink is ignored", declaration_from_non_uplink_is_ignored},
+        {"device report round trips through unaware relays", device_report_round_trips_through_unaware_relays},
     }};
 
     for (const auto& test : tests) {

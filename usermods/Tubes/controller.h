@@ -14,6 +14,7 @@
 #include "global_state.h"
 #include "node.h"
 #include "deferred_bpm_broadcast.h"
+#include "device_report_protocol.h"
 
 #define EEPSIZE 2560
 
@@ -379,6 +380,7 @@ class PatternController : public MessageReceiver {
     }
 #if defined(MASTER)
     role = MasterRole;
+#endif
 #endif
     Serial.printf("Role = %d\n", role);
 
@@ -1251,7 +1253,7 @@ class PatternController : public MessageReceiver {
   void printHelp() const {
     Serial.println(F("b###.# - set bpm\ns - start phrase\n\np### - patterns\nm### - sync mode\nc### - colors\ne### - effects\nn - force next\n\ni### - set ID\nd - toggle debugging\nl### - brightness"));
     Serial.println(F("@ - set power saving mode\nU - begin auto-update\nP - toggle all power saves\nO - toggle all sound overlays\n==== wifi ====\na - turn on access point\nq - turn off access point\nt0/1 - Tubes mode off/on"));
-    Serial.println(F("==== global actions ====\n* - enter select mode (double-click to Ready)\nA - turn on access point (Ready to update)\nW - forget WiFi client\nX - restart\nV### - auto-upgrade to version\nM - cancel manual pattern override"));
+    Serial.println(F("==== global actions ====\n* - enter select mode (double-click to Ready)\nA - turn on access point (Ready to update)\nW - forget WiFi client\nX - restart\nV### - auto-upgrade to version\nz############ - probe a device by MAC\nM - cancel manual pattern override"));
   }
 
   bool executeOperation(const TubeOperation& operation) {
@@ -1514,6 +1516,11 @@ class PatternController : public MessageReceiver {
     if (!key)
       return;
 
+    if (key == DEVICE_REPORT_ACTION_KEY) {
+      requestDeviceReport(command + 1);
+      return;
+    }
+
     accum88 parsed = parse_number(command + 1);
     uint16_t argument = parsed >> 8;
     Serial.printf("[command=%c arg=%04x]\n", key, parsed);
@@ -1596,6 +1603,92 @@ class PatternController : public MessageReceiver {
     node.sendCommand(COMMAND_BEATS, &bpm, sizeof(bpm));
   }
 
+  void requestDeviceReport(const char* macText) {
+    DeviceReportMessage request;
+    if (!parseDeviceReportMac(macText, request.mac)) {
+      Serial.println(F("TUBE_PROBE_ERROR invalid_mac"));
+      return;
+    }
+
+    request.nonce = esp_random();
+    Serial.printf(
+      "TUBE_PROBE nonce=%08lX mac=%02x%02x%02x%02x%02x%02x\n",
+      (unsigned long)request.nonce,
+      request.mac[0], request.mac[1], request.mac[2],
+      request.mac[3], request.mac[4], request.mac[5]
+    );
+    node.sendCommand(COMMAND_ACTION, &request, sizeof(request));
+  }
+
+  void broadcastDeviceReport(uint32_t nonce, const uint8_t mac[6]) {
+    DeviceReportMessage report;
+    report.kind = DeviceReportReply;
+    report.hardwareFamily = TUBES_HARDWARE_FAMILY;
+    report.tubesVersion = RELEASE_VERSION;
+    report.nonce = nonce;
+    memcpy(report.mac, mac, sizeof(report.mac));
+    report.ledCount = strip.getLengthTotal();
+    report.busCount = min((int)BusManager::getNumBusses(), 255);
+    report.firmwareVariant = TUBES_FIRMWARE_VARIANT;
+    report.controllerRole = role;
+    if (node.status == LightNode::NODE_STATUS_STARTED)
+      report.meshFlags |= DeviceReportMeshStarted;
+    if (node.isFollowing())
+      report.meshFlags |= DeviceReportMeshFollowing;
+    if (isMasterRole())
+      report.meshFlags |= DeviceReportMasterBehavior;
+    report.nodeId = node.header.id;
+    report.uplinkId = node.header.uplinkId;
+    report.releaseHash = WLED_BUILD_DESCRIPTION.hash;
+    report.uptimeSeconds = millis() / 1000;
+
+    Bus* firstBus = BusManager::getBus(0);
+    if (firstBus) {
+      uint8_t pins[5] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+      if (firstBus->getPins(pins) > 0)
+        report.ledPin = pins[0];
+      report.ledType = firstBus->getType() & 0x7F;
+    }
+    node.sendCommand(COMMAND_ACTION, &report, sizeof(report));
+  }
+
+  void printDeviceReport(const DeviceReportMessage& report) const {
+    Serial.printf(
+      "TUBE_REPORT nonce=%08lX mac=%02x%02x%02x%02x%02x%02x family=%u variant=%u tubes=%u release=%08lX leds=%u buses=%u pin=%u type=%u role=%u mesh=%u node=%u uplink=%u uptime=%lu\n",
+      (unsigned long)report.nonce,
+      report.mac[0], report.mac[1], report.mac[2],
+      report.mac[3], report.mac[4], report.mac[5],
+      report.hardwareFamily,
+      report.firmwareVariant,
+      report.tubesVersion,
+      (unsigned long)report.releaseHash,
+      report.ledCount,
+      report.busCount,
+      report.ledPin,
+      report.ledType,
+      report.controllerRole,
+      report.meshFlags,
+      report.nodeId,
+      report.uplinkId,
+      (unsigned long)report.uptimeSeconds
+    );
+  }
+
+  void onDeviceReportMessage(const DeviceReportMessage& message) {
+    if (!isDeviceReportMessage(message))
+      return;
+
+    if (message.kind == DeviceReportReply) {
+      printDeviceReport(message);
+      return;
+    }
+
+    uint8_t deviceMac[6];
+    Network.localMAC(deviceMac);
+    if (deviceReportTargetsMac(message, deviceMac))
+      broadcastDeviceReport(message.nonce, deviceMac);
+  }
+
   virtual bool onCommand(CommandId command, void *data) override {
     switch (command) {
       case COMMAND_INFO:
@@ -1640,7 +1733,10 @@ class PatternController : public MessageReceiver {
         return true;
 
       case COMMAND_ACTION:
-        onAction((Action*)data);
+        if (((Action*)data)->key == DEVICE_REPORT_ACTION_KEY)
+          onDeviceReportMessage(*(DeviceReportMessage*)data);
+        else
+          onAction((Action*)data);
         return true;
 
       case COMMAND_BEATS:
