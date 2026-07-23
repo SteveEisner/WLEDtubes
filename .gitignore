@@ -6,6 +6,7 @@
 .pio
 .pioenvs
 .piolibdeps
+.playwright-mcp
 .vscode
 compile_commands.json
 __pycache__/

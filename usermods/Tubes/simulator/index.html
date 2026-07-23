@@ -80,14 +80,6 @@
       letter-spacing: -0.035em;
     }
 
-    .lede {
-      max-width: 630px;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.45;
-      text-align: right;
-    }
-
     .toolbar {
       display: grid;
       grid-template-columns: repeat(12, minmax(0, 1fr));
@@ -109,12 +101,14 @@
       background: rgba(8, 12, 21, 0.48);
     }
 
-    .tool-group.devices { grid-column: span 3; }
+    .tool-group.devices { grid-column: span 4; }
     .tool-group.radio-model { grid-column: span 3; }
-    .tool-group.radio-uncertainty { grid-column: span 6; }
-    .tool-group.timing { grid-column: span 4; }
-    .tool-group.view-options { grid-column: span 3; }
-    .tool-group.metrics { grid-column: span 5; }
+    .tool-group.radio-uncertainty { grid-column: span 3; }
+    .tool-group.timing { grid-column: span 2; }
+    .tool-group.resources { grid-column: span 3; }
+    .tool-group.wire-format { grid-column: span 4; }
+    .tool-group.view-options { grid-column: span 1; }
+    .tool-group.metrics { grid-column: span 4; }
 
     .tool-group-title {
       color: var(--faint);
@@ -133,6 +127,34 @@
     }
 
     .tool-group-content.wrap { flex-wrap: wrap; }
+    .devices .tool-group-content {
+      display: grid;
+      align-items: stretch;
+      gap: 6px;
+    }
+
+    .device-actions,
+    .scenario-actions {
+      min-width: 0;
+      display: grid;
+      gap: 6px;
+    }
+
+    .device-actions {
+      grid-template-columns: 1.25fr 1.25fr 0.85fr 38px 0.8fr 0.8fr;
+    }
+
+    .scenario-actions {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    }
+
+    .device-actions button,
+    .scenario-actions button,
+    .scenario-actions select {
+      min-width: 0;
+      width: 100%;
+      padding-inline: 8px;
+    }
     .tool-group-content.control-grid {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -269,9 +291,16 @@
 
     .metrics .tool-group-content {
       display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: 7px;
+      grid-template-columns: repeat(11, minmax(0, 1fr));
+      gap: 5px;
     }
+
+    .wire-format .tool-group-content.control-grid {
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+
+    .wire-format select,
+    .devices select { min-width: 0; }
 
     .metric {
       min-width: 0;
@@ -312,7 +341,7 @@
       width: 100%;
       height: 100%;
       touch-action: none;
-      cursor: default;
+      cursor: grab;
     }
 
     #spaceCanvas.dragging { cursor: grabbing; }
@@ -323,6 +352,7 @@
       bottom: 14px;
       pointer-events: none;
       display: flex;
+      flex-wrap: wrap;
       gap: 15px;
       padding: 7px 10px;
       border: 1px solid var(--line);
@@ -476,6 +506,12 @@
       line-height: 1.5;
     }
 
+    .outlier-item {
+      color: var(--danger);
+      font-size: 10px;
+      line-height: 1.45;
+    }
+
     .note {
       margin-top: 10px;
       padding: 9px 10px;
@@ -523,6 +559,25 @@
       word-break: break-word;
       scrollbar-width: thin;
     }
+
+    .quality-chart {
+      display: block;
+      width: 100%;
+      height: 112px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(4, 7, 12, 0.72);
+    }
+
+    .evaluation-controls {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .evaluation-facts,
+    .evaluation-outliers { margin-top: 10px; }
 
     .schedule-progress {
       display: grid;
@@ -596,13 +651,15 @@
       html, body { overflow: auto; }
       .app { height: auto; min-height: 100%; grid-template-rows: auto auto auto; }
       .masthead { align-items: flex-start; }
-      .lede { display: none; }
       .tool-group.devices,
       .tool-group.radio-model,
       .tool-group.view-options,
       .tool-group.metrics { grid-column: span 6; }
       .tool-group.radio-uncertainty,
-      .tool-group.timing { grid-column: span 12; }
+      .tool-group.timing,
+      .tool-group.resources,
+      .tool-group.wire-format,
+      .tool-group.metrics { grid-column: span 12; }
       .workbench { grid-template-columns: 1fr; grid-template-rows: 65vh auto; }
       .inspector { border-left: 0; border-top: 1px solid var(--line); }
       .space-hint { display: none; }
@@ -614,7 +671,9 @@
       .tool-group.view-options { grid-column: span 4; }
       .tool-group.radio-uncertainty,
       .tool-group.timing { grid-column: span 6; }
-      .tool-group.metrics { grid-column: span 12; }
+      .tool-group.metrics,
+      .tool-group.resources,
+      .tool-group.wire-format { grid-column: span 12; }
     }
 
     @media (max-width: 600px) {
@@ -623,8 +682,11 @@
       .tool-group.radio-uncertainty,
       .tool-group.timing,
       .tool-group.view-options,
-      .tool-group.metrics { grid-column: span 12; }
+      .tool-group.metrics,
+      .tool-group.resources,
+      .tool-group.wire-format { grid-column: span 12; }
       .tool-group-content.control-grid { grid-template-columns: 1fr; }
+      .wire-format .tool-group-content.control-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -635,38 +697,67 @@
         <div class="eyebrow">ESP-NOW behavior model</div>
         <h1>Tubes Mesh Laboratory</h1>
       </div>
-      <div class="lede">
-        Move physical devices through space and watch higher-ID leaders propagate both the current lighting DNA and its phrase-timed future schedule.
-      </div>
     </header>
 
     <nav class="toolbar" aria-label="Simulation controls">
       <div class="tool-group devices">
-        <div class="tool-group-title">Devices</div>
-        <div class="tool-group-content wrap">
-          <button class="primary" id="addDevice">+ Add tube</button>
-          <button id="addAnchor">+ Add anchor</button>
-          <button id="addEight">+ Add 8</button>
-          <button class="icon-button" id="pauseToggle" aria-label="Pause simulation" title="Pause simulation">Ⅱ</button>
-          <button id="resetSimulation">Reset</button>
+        <div class="tool-group-title">Devices &amp; scenario</div>
+        <div class="tool-group-content">
+          <div class="device-actions">
+            <button class="primary" id="addDevice" title="Add one tube near the center without restarting the current run.">+ Add tube</button>
+            <button id="addAnchor" title="Add one fixed, no-light anchor near the center without restarting the current run.">+ Add anchor</button>
+            <button id="addEight" title="Add eight tubes around the center without restarting the current run.">+ Add 8</button>
+            <button class="icon-button" id="pauseToggle" aria-label="Pause simulation" title="Pause simulation">Ⅱ</button>
+            <button id="resetSimulation" title="Reset the current tube and anchor scenario to its deterministic starting layout.">Reset</button>
+            <button id="clearSimulation" title="Remove every tube and anchor and clear the current run history, leaving an empty field.">Clear</button>
+          </div>
+          <div class="scenario-actions">
+            <select id="scenarioDeviceCount" aria-label="Number of tubes in field" title="Choose how many light-bearing tubes the next scenario run will create.">
+              <option value="1">1 tube</option>
+              <option value="2" selected>2 tubes</option>
+              <option value="3">3 tubes</option>
+              <option value="4">4 tubes</option>
+              <option value="8">8 tubes</option>
+              <option value="16">16 tubes</option>
+              <option value="32">32 tubes</option>
+              <option value="64">64 tubes</option>
+            </select>
+            <select id="scenarioAnchorCount" aria-label="Number of fixed anchors in field" title="Choose how many fixed-position anchors the next run will add. Zero provides the unanchored baseline.">
+              <option value="0" selected>0 anchors</option>
+              <option value="1">1 anchor</option>
+              <option value="2">2 anchors</option>
+              <option value="3">3 anchors</option>
+              <option value="4">4 anchors</option>
+              <option value="5">5 anchors</option>
+            </select>
+            <button class="primary" id="runScenario" title="Clear the current run and start the selected deterministic tube and anchor configuration.">Run scenario</button>
+          </div>
         </div>
       </div>
 
       <div class="tool-group radio-model">
         <div class="tool-group-title">Radio model</div>
         <div class="tool-group-content">
-          <div class="control">
+          <div class="control" title="Maximum physical distance at which a packet can be received. Signal strength falls toward zero before this edge.">
             <label class="tool-label" for="rangeControl">Range</label>
             <output id="rangeOutput">600 px</output>
-            <input id="rangeControl" type="range" min="80" max="2000" step="20" value="600">
+            <input id="rangeControl" type="range" min="80" max="2000" step="20" value="600" title="Set the radio's hard maximum range in simulation pixels.">
           </div>
-          <div class="control">
+          <div class="control" title="Formula used to reduce signal power as physical distance increases.">
             <label class="tool-label" for="dropoffControl">Dropoff</label>
-            <select id="dropoffControl">
-              <option value="linear">Linear</option>
-              <option value="quadratic">Squared</option>
-              <option value="smooth">Smoothstep</option>
-              <option value="inverseSquare">Inverse square</option>
+            <select id="dropoffControl" title="Choose how quickly radio power decays with distance.">
+              <option value="linear" title="Signal decreases at a constant rate from 1.0 at the transmitter to zero at the range boundary.">Linear</option>
+              <option value="quadratic" title="Signal falls faster than linear as distance increases.">Squared</option>
+              <option value="smooth" title="An S-shaped falloff with gentle slopes near the transmitter and boundary.">Smoothstep</option>
+              <option value="inverseSquare" title="A normalized inverse-square-like power curve that still reaches zero at the configured boundary.">Inverse square</option>
+            </select>
+          </div>
+          <div class="control" title="Maps received signal strength to the chance that a complete packet arrives. This is separate from the RSSI used for range estimation.">
+            <label class="tool-label" for="deliveryModelControl">Packet delivery</label>
+            <select id="deliveryModelControl" title="Hard range makes the configured boundary binary. Receiver threshold adds a narrow lossy edge. Proportional preserves the older signal-equals-probability model.">
+              <option value="hard" selected title="Every packet inside range arrives; every packet outside range does not.">Hard range</option>
+              <option value="threshold" title="Packets are reliable through most of the range and become lossy only near the weak-signal edge.">Lossy edge</option>
+              <option value="proportional" title="Legacy model: normalized signal strength is used directly as packet delivery probability.">Proportional loss</option>
             </select>
           </div>
         </div>
@@ -675,7 +766,7 @@
       <div class="tool-group radio-uncertainty" aria-label="Radio uncertainty">
         <div class="tool-group-title">Radio uncertainty</div>
         <div class="tool-group-content control-grid">
-          <div class="control">
+          <div class="control" title="Random packet-to-packet RSSI measurement noise. Higher values make successive range estimates fluctuate.">
             <label class="tool-label" for="rssiJitterControl">RSSI noise σ</label>
             <output id="rssiJitterOutput">0 dB</output>
             <div class="range-with-preset" style="--preset-position:25%">
@@ -683,7 +774,7 @@
               <button class="range-preset" id="rssiJitterPreset" type="button" data-value="2" aria-label="Set normal indoor RSSI noise to 2 dB sigma" title="Set normal indoor RSSI noise: 2 dB σ">normal 2</button>
             </div>
           </div>
-          <div class="control">
+          <div class="control" title="Stable transmit-power difference assigned to each device. Balanced and full payloads can advertise calibration to compensate for it.">
             <label class="tool-label" for="txSpreadControl">TX bias σ</label>
             <output id="txSpreadOutput">0 dB</output>
             <div class="range-with-preset" style="--preset-position:25%">
@@ -691,7 +782,7 @@
               <button class="range-preset" id="txSpreadPreset" type="button" data-value="0.75" aria-label="Set normal ESP32 TX bias to 0.75 dB sigma" title="Set normal ESP32 TX bias: 0.75 dB σ">normal 0.75</button>
             </div>
           </div>
-          <div class="control">
+          <div class="control" title="Stable obstacle and antenna-orientation bias assigned separately to each radio link.">
             <label class="tool-label" for="linkBiasControl">Link shadow σ</label>
             <output id="linkBiasOutput">0 dB</output>
             <div class="range-with-preset" style="--preset-position:35%">
@@ -705,39 +796,113 @@
       <div class="tool-group timing">
         <div class="tool-group-title">Timing</div>
         <div class="tool-group-content">
-          <div class="control">
+          <div class="control" title="Multiplier applied to simulated time. It changes how quickly the experiment runs, not protocol constants.">
             <label class="tool-label" for="speedControl">Simulation</label>
-            <output id="speedOutput">2.0×</output>
-            <input id="speedControl" type="range" min="0.1" max="4" step="0.1" value="2">
+            <output id="speedOutput">0.5×</output>
+            <input id="speedControl" type="range" min="0.1" max="4" step="0.1" value="0.5" title="Set simulated-time speed from 0.1× to 4×.">
           </div>
-          <div class="control">
+          <div class="control" title="Lighting beat tempo originated by leading tubes. Position broadcasts use their own independent interval.">
             <label class="tool-label" for="bpmControl">Leader tempo</label>
             <output id="bpmOutput">120 BPM</output>
-            <input id="bpmControl" type="range" min="60" max="180" step="1" value="120">
+            <input id="bpmControl" type="range" min="60" max="180" step="1" value="120" title="Set the lighting tempo sent by leading tubes.">
           </div>
           <button id="forceNext" title="Move each leading tube's nearest scheduled change to the current phrase">Force next</button>
         </div>
       </div>
 
       <div class="tool-group view-options">
-        <div class="tool-group-title">View</div>
+        <div class="tool-group-title">View &amp; model</div>
         <div class="tool-group-content wrap">
-          <label class="check"><input id="showTopology" type="checkbox" checked> Uplinks</label>
-          <label class="check"><input id="showRadio" type="checkbox" checked> Radio field</label>
-          <label class="check"><input id="showEstimates" type="checkbox" checked> Estimates</label>
+          <label class="check" title="Show arrows from each following device to the immediate device it selected as uplink."><input id="showTopology" type="checkbox" checked title="Toggle uplink arrows."> Uplinks</label>
+          <label class="check" title="Show the selected device's maximum range and link strengths."><input id="showRadio" type="checkbox" checked title="Toggle radio range and link visualization."> Radio field</label>
+          <label class="check" title="Show an illustrative circle expanding from every transmission. Packet delivery remains immediate."><input id="showSignalWaves" type="checkbox" checked title="Toggle expanding transmission circles."> Signal waves</label>
+          <label class="check" title="Show device-estimated positions, ambiguity circles, mirror candidates, and estimator labels."><input id="showEstimates" type="checkbox" checked title="Toggle estimated-position visualization."> Estimates</label>
+          <label class="check" title="Relayed lighting preserves the logical leader. Each device advertises Leader via: the physical source of its latest accepted leader state. That observation renews only the relays still carrying traffic downstream. Unchecked follows the current firmware's header-replacement behavior."><input id="fixedRelay" type="checkbox" title="Toggle logical-leader propagation with locally renewed relay leases."> Fixed RELAY</label>
         </div>
       </div>
 
       <div class="tool-group metrics" aria-label="Simulation statistics">
-        <div class="tool-group-title">Network</div>
+        <div class="tool-group-title">Network &amp; location evaluator</div>
         <div class="tool-group-content">
           <div class="metric"><strong id="deviceCount">1</strong><span>devices</span></div>
           <div class="metric"><strong id="rootCount">1</strong><span>leaders</span></div>
           <div class="metric"><strong id="relayCount">0</strong><span>relay tx</span></div>
           <div class="metric"><strong id="clusterCount">1</strong><span>DNA sets</span></div>
           <div class="metric"><strong id="deliveryRate">—</strong><span>delivery</span></div>
+          <div class="metric"><strong id="qualityScore">—</strong><span>quality /100</span></div>
+          <div class="metric"><strong id="medianError">—</strong><span>median error</span></div>
+          <div class="metric"><strong id="p95Error">—</strong><span>p95 error</span></div>
+          <div class="metric"><strong id="persistentOutliers">0</strong><span>long outliers</span></div>
+          <div class="metric"><strong id="locationWireCost">—</strong><span>position traffic</span></div>
+          <div class="metric"><strong id="locationRamCost">—</strong><span>table RAM/device</span></div>
         </div>
       </div>
+
+      <div class="tool-group resources">
+        <div class="tool-group-title">Bounded device resources</div>
+        <div class="tool-group-content control-grid">
+          <div class="control" title="Hard maximum number of immediate neighbors whose position and RSSI state one device may retain. This bounds per-device RAM usage.">
+            <label class="tool-label" for="peerCapacityControl">Peer slots</label>
+            <output id="peerCapacityOutput">4</output>
+            <input id="peerCapacityControl" type="range" min="3" max="24" step="1" value="4" title="Set the fixed peer-table capacity per device. Four means each device retains at most four immediate-neighbor position records; extra neighbors are rejected or replace a less useful entry.">
+          </div>
+          <div class="control" title="Maximum number of the best retained peers used in one multilateration update. A device can remember more peers than it solves with.">
+            <label class="tool-label" for="solveCapacityControl">Solve with</label>
+            <output id="solveCapacityOutput">4</output>
+            <input id="solveCapacityControl" type="range" min="3" max="12" step="1" value="4" title="Limit the fresh peer constraints used by each solver pass. This cannot exceed Peer slots; four lets every retained peer participate.">
+          </div>
+          <div class="control" title="Number of fresh anchor entries protected from eviction when the bounded peer table is full. It reserves slots, not anchors in the whole field.">
+            <label class="tool-label" for="anchorReserveControl">Anchor reserve</label>
+            <output id="anchorReserveOutput">2</output>
+            <input id="anchorReserveControl" type="range" min="0" max="4" step="1" value="2" title="Protect this many direct anchors in each device's local peer table.">
+          </div>
+        </div>
+      </div>
+
+      <div class="tool-group wire-format">
+        <div class="tool-group-title">Position wire experiment</div>
+        <div class="tool-group-content control-grid">
+          <div class="control" title="Select which optional quality, residual, calibration, and lifecycle fields are carried in the positioning payload.">
+            <label class="tool-label" for="payloadProfileControl">Fields</label>
+            <select id="payloadProfileControl" title="Tiny minimizes bytes; Balanced adds useful quality and TX calibration; Full models the complete proposed payload.">
+              <option value="tiny" title="Coordinates and essential frame metadata only; smallest packet and peer record.">Tiny</option>
+              <option value="balanced" selected title="Adds useful confidence and transmitter-calibration fields while keeping payload size moderate.">Balanced</option>
+              <option value="full" title="Carries the complete proposed quality, calibration, residual, and lifecycle metadata.">Full</option>
+            </select>
+          </div>
+          <div class="control" title="Bit width used to encode the advertised X and Y coordinates. Smaller encodings reduce bytes but reduce representable range.">
+            <label class="tool-label" for="coordinateEncodingControl">Coordinates</label>
+            <select id="coordinateEncodingControl" title="Choose packed coordinate width for both X and Y.">
+              <option value="int8" title="One signed byte per axis; smallest range before coordinate saturation.">2 × int8</option>
+              <option value="int12" selected title="Twelve signed bits per axis; a middle ground between range and wire size.">2 × int12</option>
+              <option value="int16" title="Two signed bytes per axis; largest coordinate range and payload.">2 × int16</option>
+            </select>
+          </div>
+          <div class="control" title="Coordinate quantization step. Larger values send less precise positions and increase quantization error.">
+            <label class="tool-label" for="coordinateQuantumControl">Resolution</label>
+            <select id="coordinateQuantumControl" title="Round every advertised coordinate to this many simulation pixels.">
+              <option value="1" title="Round coordinates to single pixels: highest precision and smallest representable physical range for a given bit width.">1 px</option>
+              <option value="5" selected title="Round coordinates to five-pixel increments: moderate precision with five times the coordinate range.">5 px</option>
+              <option value="10" title="Round coordinates to ten-pixel increments, trading visible precision for greater range.">10 px</option>
+              <option value="25" title="Coarse twenty-five-pixel coordinates for experiments prioritizing representable area.">25 px</option>
+              <option value="50" title="Very coarse fifty-pixel coordinates with the largest representable area.">50 px</option>
+            </select>
+          </div>
+          <div class="control" title="Current fixed uses the existing 84-byte NodeMessage. Compact models a dedicated variable-length position packet.">
+            <label class="tool-label" for="wireEnvelopeControl">Envelope</label>
+            <select id="wireEnvelopeControl" title="Choose fixed existing transport size or experimental compact position envelope.">
+              <option value="fixed" title="Use the existing fixed-size NodeMessage transport cost, including unused payload capacity.">Current fixed</option>
+              <option value="compact" selected title="Model a dedicated variable-size positioning envelope with only the selected fields.">Compact</option>
+            </select>
+          </div>
+          <div class="control" title="Nominal interval between each device's positioning broadcasts, with a small randomized phase jitter.">
+            <label class="tool-label" for="positionPeriodControl">Position ping</label>
+            <output id="positionPeriodOutput">1.0 s</output>
+            <input id="positionPeriodControl" type="range" min="0.25" max="5" step="0.25" value="1" title="Set positioning broadcast interval from 0.25 to 5 simulated seconds.">
+          </div>
+        </div>
+      </div>
+
     </nav>
 
     <main class="workbench">
@@ -745,7 +910,10 @@
         <canvas id="spaceCanvas" tabindex="0" aria-describedby="canvasHelp"></canvas>
         <div class="space-hint" id="canvasHelp">
           <span><b>Drag</b> a device to move it</span>
+          <span><b>Drag empty space</b> to pan</span>
+          <span><b>Wheel</b> to zoom</span>
           <span><b>Click</b> a device to inspect it</span>
+          <span><b>Delete / Backspace</b> removes the selected device</span>
           <span><b>Double-click</b> empty space to add a tube</span>
         </div>
       </section>
@@ -772,17 +940,19 @@
           <h3 class="section-title">Device-local knowledge <em>protocol-visible only</em></h3>
           <div class="facts">
             <div class="fact"><span>Own identifier</span><strong id="factId">---</strong></div>
-            <div class="fact"><span>Chosen uplink</span><strong id="factUplink">none</strong></div>
+            <div class="fact"><span id="leaderFactLabel">Chosen uplink</span><strong id="factUplink">none</strong></div>
+            <div class="fact"><span>Leader path</span><strong id="factLeaderPath">self</strong></div>
             <div class="fact"><span>Network state</span><strong id="factState">receiving</strong></div>
             <div class="fact"><span>Relay duty</span><strong id="factRelay">inactive</strong></div>
-            <div class="fact"><span>Uplink last heard</span><strong id="factLastHeard">never</strong></div>
+            <div class="fact"><span>Leader state last heard</span><strong id="factLastHeard">never</strong></div>
             <div class="fact"><span>Estimated position</span><strong id="factEstimate">0, 0</strong></div>
             <div class="fact"><span>Position frame</span><strong id="factEstimateFrame">self</strong></div>
             <div class="fact"><span>Position solver</span><strong id="factPositionMode">waiting for peer</strong></div>
+            <div class="fact"><span>Position peer table</span><strong id="factPeerTable">0 / 12</strong></div>
             <div class="fact"><span>Beat / phrase</span><strong id="factClock">0.00 / 0</strong></div>
             <div class="fact"><span>Protocol version</span><strong>2</strong></div>
           </div>
-          <div class="note">With relay duty active, this device rebroadcasts an accepted uplink packet’s command and current/next payload, but replaces the packet header with its own ID and uplink ID.</div>
+          <div class="note" id="relayExplanation">With relay duty active, current-code mode rebroadcasts an accepted uplink packet after replacing its header with the relay’s own ID and uplink ID.</div>
         </section>
 
         <section class="section" id="lightingScheduleSection">
@@ -826,10 +996,38 @@
         </section>
 
         <section class="section">
+          <h3 class="section-title">Evaluation history <em>simulator truth comparison</em></h3>
+          <div class="evaluation-controls">
+            <div class="control" title="Error distance a uniquely positioned tube must exceed before it can become a persistent outlier.">
+              <label class="tool-label" for="outlierErrorControl">Outlier error</label>
+              <output id="outlierErrorOutput">120 px</output>
+              <input id="outlierErrorControl" type="range" min="25" max="400" step="5" value="120" title="Set persistent-outlier error threshold in pixels.">
+            </div>
+            <div class="control" title="How long a tube must remain beyond the error threshold before the evaluator records an outlier event.">
+              <label class="tool-label" for="outlierTimeControl">Outlier time</label>
+              <output id="outlierTimeOutput">8 s</output>
+              <input id="outlierTimeControl" type="range" min="1" max="30" step="1" value="8" title="Set persistent-outlier duration in simulated seconds.">
+            </div>
+          </div>
+          <canvas class="quality-chart" id="qualityChart" aria-label="Location quality score over simulation time"></canvas>
+          <div class="facts evaluation-facts">
+            <div class="fact"><span>Uniquely positioned</span><strong id="factEvaluationCoverage">0 / 0</strong></div>
+            <div class="fact"><span>Worst current error</span><strong id="factWorstError">—</strong></div>
+            <div class="fact"><span>Peer-table evictions</span><strong id="factPeerEvictions">0</strong></div>
+            <div class="fact"><span>Admission drops</span><strong id="factPeerDrops">0</strong></div>
+            <div class="fact"><span>Location block / packet</span><strong id="factWireBytes">—</strong></div>
+            <div class="fact"><span>Coordinate range</span><strong id="factCoordinateRange">—</strong></div>
+            <div class="fact"><span>Modeled table allocation</span><strong id="factTableBytes">—</strong></div>
+          </div>
+          <ul class="traffic-list evaluation-outliers" id="outlierList"></ul>
+          <div class="note" id="evaluationNote">Quality registers floating frames to physical truth for scoring only, choosing rotation and optional reflection by best fit. A tube never receives that registration or any true position. An outlier is reported after remaining more than 120 px wrong for 8 simulated seconds.</div>
+        </section>
+
+        <section class="section">
           <h3 class="section-title">Agent diagnostics <em>serializable live state</em></h3>
           <div class="diagnostic-actions">
-            <button id="copySnapshot">Copy full JSON</button>
-            <label class="check"><input id="mirrorSnapshot" type="checkbox"> Mirror compact state in URL</label>
+            <button id="copySnapshot" title="Copy the current simulator snapshot, excluding the potentially large complete message audit.">Copy full JSON</button>
+            <label class="check" title="Continuously encode a compact diagnostic snapshot in the page URL fragment for external observation."><input id="mirrorSnapshot" type="checkbox" title="Toggle compact live-state mirroring in the URL."> Mirror compact state in URL</label>
             <span class="copy-status" id="copyStatus"></span>
           </div>
           <pre class="snapshot" id="debugSnapshot" data-testid="agent-snapshot"></pre>
@@ -839,6 +1037,25 @@
         <section class="section">
           <h3 class="section-title">Recent traffic</h3>
           <ul class="traffic-list" id="trafficList"></ul>
+        </section>
+
+        <section class="section">
+          <h3 class="section-title">Message audit <em>complete current run</em></h3>
+          <div class="diagnostic-actions">
+            <button id="copySelectedAudit" title="Copy every audit event associated with the selected device, including packet payloads and before/after state.">Copy selected device</button>
+            <button id="copyRunAudit" title="Copy the complete current-run audit for all devices. Large or dense runs may produce substantial JSON.">Copy entire run</button>
+            <span class="copy-status" id="auditCopyStatus"></span>
+          </div>
+          <div class="facts">
+            <div class="fact"><span>Events for device</span><strong id="factAuditEvents">0</strong></div>
+            <div class="fact"><span>Sent / received</span><strong id="factAuditTraffic">0 / 0</strong></div>
+            <div class="fact"><span>Accepted / ignored</span><strong id="factAuditDecisions">0 / 0</strong></div>
+            <div class="fact"><span>Radio non-deliveries</span><strong id="factAuditDrops">0</strong></div>
+            <div class="fact"><span>Lighting states applied</span><strong id="factAuditApplied">0</strong></div>
+            <div class="fact"><span>Relays / local changes</span><strong id="factAuditRelays">0 / 0</strong></div>
+          </div>
+          <ul class="traffic-list evaluation-outliers" id="messageAuditList"></ul>
+          <div class="note">Every outgoing broadcast is recorded once. Every other device receives either a delivered-packet decision or an explicit non-delivery reason, including hard-range exclusion. Receive records retain the packet payload plus the device’s routing, DNA, schedule, and position state before and after handling it.</div>
         </section>
 
         <section class="section">
@@ -855,7 +1072,7 @@
             <div class="legend-item"><span style="color:#ff8fb8;font:800 14px/1 ui-monospace,monospace">◯</span>possible-position circle</div>
             <div class="legend-item"><span style="color:#f6d365;font:800 14px/1 ui-monospace,monospace">◆</span>mirror candidates</div>
           </div>
-          <div class="note">A wavefront travels from antenna to maximum range in one simulated time unit (1 second). Ring opacity is the selected power-decay function evaluated at that radius.</div>
+          <div class="note">Packets are processed in the simulation instant they are sent. The illustrative wavefront continues outward for one simulated second, with opacity following the selected power-decay function.</div>
         </section>
       </aside>
     </main>
@@ -870,7 +1087,7 @@
       const COMMAND = Object.freeze({ STATE: 0x20, ACTION: 0x30, INFO: 0x40, POSITION: 0x50 });
       const STATUS = Object.freeze({ RECEIVING: "receiving", STARTED: "started" });
       const STATUS_TIMEOUT_BASE = 3000;
-      const UPLINK_TIMEOUT = 20000;
+      const UPLINK_TIMEOUT = 10000;
       const REBROADCAST_TIME = 30000;
       const STATUS_UPDATE_PERIOD = 2000;
       const POSITION_PROTOCOL_VERSION = 2;
@@ -879,7 +1096,10 @@
       const POSITION_CONVERGENCE_RATE = 0.28;
       const POSITION_CONFIDENCE_RATE = 0.22;
       const POSITION_SETTLED_EPSILON = 0.5;
-      const POSITION_PEER_MAX_AGE = POSITION_UPDATE_PERIOD * 6;
+      const MIRROR_RESIDUAL_MARGIN = 3;
+      const MIRROR_CONFIRMATIONS_REQUIRED = 3;
+      const RECENT_LIGHTING_MESSAGE_LIMIT = 16;
+      const DISPLAY_REFLECTION_HYSTERESIS = 5;
       const POSITION_GEOMETRY_MIN_SCORE = 0.002;
       const POSITION_RANGE_FILTER_RATE = 0.18;
       const POSITION_RANGE_VARIANCE_RATE = 0.12;
@@ -906,6 +1126,47 @@
       const MIN_COLOR_CHANGE_PHRASES = 4;
       const MAX_COLOR_CHANGE_PHRASES = 10;
       const MIN_VISUAL_BRIGHTNESS = 0.32;
+      const CURRENT_NODE_MESSAGE_BYTES = 84;
+      const COMPACT_POSITION_ENVELOPE_BYTES = 8;
+      const LEADER_VIA_ID_BYTES = 2;
+      const QUALITY_SAMPLE_PERIOD = 500;
+      const QUALITY_HISTORY_LIMIT = 240;
+      const QUALITY_ERROR_SCALE = 75;
+      const PERSISTENT_OUTLIER_ERROR = 120;
+      const PERSISTENT_OUTLIER_TIME = 8000;
+
+      const POSITION_PAYLOAD_PROFILES = Object.freeze({
+        tiny: Object.freeze({
+          label: "Tiny",
+          fixedPayloadBytes: 16,
+          fixedPeerBytes: 28,
+          includeQuality: false,
+          includeTxCalibration: false
+        }),
+        balanced: Object.freeze({
+          label: "Balanced",
+          fixedPayloadBytes: 22,
+          fixedPeerBytes: 36,
+          includeQuality: true,
+          includeTxCalibration: true
+        }),
+        full: Object.freeze({
+          label: "Full",
+          fixedPayloadBytes: 30,
+          fixedPeerBytes: 44,
+          includeQuality: true,
+          includeTxCalibration: true
+        })
+      });
+
+      const COORDINATE_ENCODINGS = Object.freeze({
+        int8: Object.freeze({ label: "2 × int8", bits: 8, bytes: 2 }),
+        int12: Object.freeze({ label: "2 × int12", bits: 12, bytes: 3 }),
+        int16: Object.freeze({ label: "2 × int16", bits: 16, bytes: 4 })
+      });
+
+      const DEVICE_COUNT_PRESETS = Object.freeze([1, 2, 3, 4, 8, 16, 32, 64]);
+      const ANCHOR_COUNT_PRESETS = Object.freeze([0, 1, 2, 3, 4, 5]);
 
       const PATTERNS = [
         { name: "Wave", duration: [15, 25] },
@@ -1044,6 +1305,7 @@
       class TubeNode {
         constructor(simulation, bornAt, options = {}) {
           this.simulation = simulation;
+          this.auditDeviceKey = ++simulation.auditDeviceSequence;
           this.id = simulation.randomMeshId();
           this.isAnchor = options.isAnchor === true;
           this.positionEstimate = {
@@ -1065,15 +1327,19 @@
             mirrorCandidates: []
           };
           this.knownPeers = new Map();
+          this.resetMirrorDecision();
+          this.recentLightingMessages = [];
           this.lastPositionLogAt = -Infinity;
           this.uplinkId = 0;
+          this.leaderId = this.id;
+          this.leaderViaId = this.id;
           this.version = PROTOCOL_VERSION;
           this.bornAt = bornAt;
           this.clockRate = 1 + ((simulation.random() - 0.5) * 70) / 1000000;
           this.timebase = (simulation.random() - 0.5) * 80;
           this.activeAt = bornAt + Math.max(700, STATUS_TIMEOUT_BASE - this.id / 2);
           this.nextBroadcastAt = this.activeAt + simulation.random() * STATUS_UPDATE_PERIOD;
-          this.nextPositionBroadcastAt = this.activeAt + simulation.random() * POSITION_UPDATE_PERIOD;
+          this.nextPositionBroadcastAt = this.activeAt + simulation.random() * simulation.positionBroadcastPeriod;
           this.uplinkDeadline = 0;
           this.lastUplinkSeenAt = null;
           this.rebroadcastUntil = -1;
@@ -1120,8 +1386,9 @@
           return this.timebase + this.localMillis(atTime);
         }
 
-        animationTime() {
-          return (this.current.beatFrame / BEAT_UNITS) * 500;
+        patternTime() {
+          const elapsedBeats = this.current.beatFrame / BEAT_UNITS;
+          return elapsedBeats * 60000 / Math.max(1, this.current.bpm);
         }
 
         currentPhrase() {
@@ -1133,19 +1400,31 @@
         }
 
         announcePosition() {
-          return {
+          const simulation = this.simulation;
+          const profile = simulation.payloadProfile();
+          const entity = simulation.entityForNode(this);
+          const announcement = {
             version: POSITION_PROTOCOL_VERSION,
             isAnchor: this.isAnchor,
             frameId: this.positionEstimate.frameId,
             axisId: this.positionEstimate.axisId,
             orientationId: this.positionEstimate.orientationId,
             solution: this.positionEstimate.solution,
-            x: this.positionEstimate.x,
-            y: this.positionEstimate.y,
+            x: simulation.quantizeCoordinate(this.positionEstimate.x),
+            y: simulation.quantizeCoordinate(this.positionEstimate.y),
             confidence: this.positionEstimate.confidence,
             settled: this.positionEstimate.settled,
-            sequence: this.positionEstimate.sequence
+            sequence: this.positionEstimate.sequence,
+            leaderViaId: this.isFollowing() ? this.leaderViaId : this.id
           };
+          if (profile.includeQuality) {
+            announcement.constraintCount = this.positionEstimate.constraintCount;
+            announcement.residualError = this.positionEstimate.residualError;
+          }
+          if (profile.includeTxCalibration && entity) {
+            announcement.txCalibrationDb = entity.radioPowerStandardScore * simulation.txPowerSigmaDb;
+          }
+          return announcement;
         }
 
         resetPositionEstimate() {
@@ -1169,12 +1448,110 @@
             mirrorCandidates: []
           };
           this.knownPeers = new Map();
+          this.resetMirrorDecision();
           this.lastPositionLogAt = -Infinity;
         }
 
+        resetMirrorDecision() {
+          this.mirrorDecision = {
+            baselineKey: null,
+            selectedIndex: null,
+            pendingIndex: null,
+            confirmations: 0,
+            scores: [null, null],
+            discriminatingPeers: 0
+          };
+        }
+
+        peerUtility(peer) {
+          const age = Math.max(0, this.simulation.time - peer.lastHeardAt);
+          const freshness = clamp(1 - age / this.simulation.positionPeerMaxAge(), 0, 1);
+          const anchorValue = peer.isAnchor ? 3 : 0;
+          const frameReferenceValue = [
+            POSITION_SOLUTION.ORIGIN,
+            POSITION_SOLUTION.AXIS,
+            POSITION_SOLUTION.ORIENTATION
+          ].includes(peer.solution) ? 1.2 : 0;
+          const maturity = clamp(peer.rangeSamples / 5, 0, 1);
+          return anchorValue + frameReferenceValue + freshness + peer.confidence + maturity + peer.strength;
+        }
+
+        incomingPeerUtility(remote, strength) {
+          const anchorValue = remote.isAnchor === true ? 3 : 0;
+          const frameReferenceValue = [
+            POSITION_SOLUTION.ORIGIN,
+            POSITION_SOLUTION.AXIS,
+            POSITION_SOLUTION.ORIENTATION
+          ].includes(remote.solution) ? 1.2 : 0;
+          return anchorValue
+            + frameReferenceValue
+            + 1
+            + clamp(remote.confidence, 0, 1)
+            + clamp(strength, 0, 1);
+        }
+
+        protectedPeerIds() {
+          const protectedIds = new Set(
+            [...this.knownPeers.values()]
+              .filter(peer => peer.isAnchor && this.isFreshPositionPeer(peer))
+              .sort((a, b) => this.peerUtility(b) - this.peerUtility(a))
+              .slice(0, this.simulation.anchorReserve)
+              .map(peer => peer.id)
+          );
+          const frameReferences = [
+            this.positionEstimate.frameId,
+            this.positionEstimate.axisId,
+            this.positionEstimate.orientationId
+          ];
+          for (const referenceId of frameReferences) {
+            const peer = referenceId ? this.knownPeers.get(referenceId) : null;
+            if (peer && this.isFreshPositionPeer(peer)) protectedIds.add(referenceId);
+          }
+          return protectedIds;
+        }
+
+        admitPeer(senderId, remote, strength) {
+          if (this.knownPeers.has(senderId)) return true;
+          if (this.knownPeers.size < this.simulation.peerCapacity) return true;
+
+          const protectedPeers = this.protectedPeerIds();
+          let candidates = [...this.knownPeers.values()].filter(peer => !protectedPeers.has(peer.id));
+          if (!candidates.length && remote.isAnchor === true) candidates = [...this.knownPeers.values()];
+          if (!candidates.length) {
+            this.simulation.stats.peerAdmissionDrops += 1;
+            return false;
+          }
+
+          candidates.sort((a, b) => this.peerUtility(a) - this.peerUtility(b));
+          const victim = candidates[0];
+          if (this.incomingPeerUtility(remote, strength) <= this.peerUtility(victim)) {
+            this.simulation.stats.peerAdmissionDrops += 1;
+            return false;
+          }
+          this.knownPeers.delete(victim.id);
+          this.simulation.stats.peerEvictions += 1;
+          return true;
+        }
+
+        enforcePeerCapacity() {
+          while (this.knownPeers.size > this.simulation.peerCapacity) {
+            const protectedPeers = this.protectedPeerIds();
+            const allPeers = [...this.knownPeers.values()];
+            const candidates = allPeers.filter(peer => !protectedPeers.has(peer.id));
+            const evictable = candidates.length ? candidates : allPeers;
+            evictable.sort((a, b) => this.peerUtility(a) - this.peerUtility(b));
+            this.knownPeers.delete(evictable[0].id);
+            this.simulation.stats.peerEvictions += 1;
+          }
+        }
+
         rememberPeerPosition(remote, strength, senderId) {
+          if (!this.admitPeer(senderId, remote, strength)) return null;
           const previous = this.knownPeers.get(senderId) || null;
-          const rawDistance = this.simulation.distanceFromSignalStrength(strength);
+          const calibratedStrength = Number.isFinite(remote.txCalibrationDb)
+            ? clamp(strength / dbToPowerRatio(remote.txCalibrationDb), 0, 1)
+            : strength;
+          const rawDistance = this.simulation.distanceFromSignalStrength(calibratedStrength);
           const rangeSamples = previous ? previous.rangeSamples + 1 : 1;
           const previousDistance = previous ? previous.directDistance : rawDistance;
           const previousVariance = previous ? previous.rangeVariance : 0;
@@ -1191,8 +1568,8 @@
               + innovation * innovation * POSITION_RANGE_VARIANCE_RATE
             : 0;
           const filteredStrength = previous
-            ? previous.strength + (strength - previous.strength) * filterRate
-            : strength;
+            ? previous.strength + (calibratedStrength - previous.strength) * filterRate
+            : calibratedStrength;
 
           // Each peer keeps fixed-size filter state; no historical RSSI samples or physical coordinates are retained.
           const peer = {
@@ -1209,6 +1586,9 @@
             confidence: clamp(remote.confidence, 0, 1),
             settled: remote.settled === true,
             sequence: Number.isFinite(remote.sequence) ? remote.sequence : 0,
+            advertisedConstraintCount: Number.isFinite(remote.constraintCount) ? remote.constraintCount : null,
+            advertisedResidual: Number.isFinite(remote.residualError) ? remote.residualError : null,
+            txCalibrationDb: Number.isFinite(remote.txCalibrationDb) ? remote.txCalibrationDb : null,
             rawDistance,
             directDistance,
             rangeVariance,
@@ -1243,6 +1623,7 @@
           local.residualError = null;
           local.radialConstraint = null;
           local.mirrorCandidates = [];
+          this.resetMirrorDecision();
           local.sequence += 1;
           local.updatedAt = this.simulation.time;
           this.simulation.log(
@@ -1351,7 +1732,7 @@
           local.updatedAt = this.simulation.time;
 
           const movement = Math.hypot(local.x - previousX, local.y - previousY);
-          if (movement > 0.2 && this.simulation.time - this.lastPositionLogAt >= POSITION_UPDATE_PERIOD) {
+          if (movement > 0.2 && this.simulation.time - this.lastPositionLogAt >= this.simulation.positionBroadcastPeriod) {
             this.lastPositionLogAt = this.simulation.time;
             this.simulation.log(this, "position", `${solution} → (${target.x.toFixed(1)}, ${target.y.toFixed(1)})`);
           }
@@ -1426,8 +1807,84 @@
           return Math.sqrt(squaredError / Math.max(peers.length, 1));
         }
 
+        mirrorCandidateScores(candidates, peers) {
+          const evidenceSolutions = new Set([
+            POSITION_SOLUTION.ANCHOR,
+            POSITION_SOLUTION.ORIGIN,
+            POSITION_SOLUTION.AXIS,
+            POSITION_SOLUTION.ORIENTATION,
+            POSITION_SOLUTION.POSITIONED,
+            POSITION_SOLUTION.ADJUSTING
+          ]);
+          const evidencePeers = peers.filter(peer => evidenceSolutions.has(peer.solution));
+          let discriminatingPeers = 0;
+          const weightedSquaredErrors = [0, 0];
+          let totalWeight = 0;
+
+          for (const peer of evidencePeers) {
+            const residuals = candidates.map(candidate => Math.abs(
+              Math.hypot(candidate.x - peer.x, candidate.y - peer.y) - peer.directDistance
+            ));
+            if (Math.abs(residuals[0] - residuals[1]) >= MIRROR_RESIDUAL_MARGIN) {
+              discriminatingPeers += 1;
+            }
+            const weight = this.positionPeerWeight(peer);
+            weightedSquaredErrors[0] += weight * residuals[0] ** 2;
+            weightedSquaredErrors[1] += weight * residuals[1] ** 2;
+            totalWeight += weight;
+          }
+
+          return {
+            scores: weightedSquaredErrors.map(error => (
+              totalWeight > 0 ? Math.sqrt(error / totalWeight) : null
+            )),
+            discriminatingPeers
+          };
+        }
+
+        updateMirrorDecision(candidates, peers, baselineIds = []) {
+          const baselineKey = baselineIds.slice().sort((a, b) => a - b).join(":");
+          if (this.mirrorDecision.baselineKey !== baselineKey) {
+            this.resetMirrorDecision();
+            this.mirrorDecision.baselineKey = baselineKey;
+          }
+          const evidence = this.mirrorCandidateScores(candidates, peers);
+          const decision = this.mirrorDecision;
+          decision.scores = evidence.scores;
+          decision.discriminatingPeers = evidence.discriminatingPeers;
+          const [firstScore, secondScore] = evidence.scores;
+          const hasDecision = evidence.discriminatingPeers > 0
+            && Number.isFinite(firstScore)
+            && Number.isFinite(secondScore)
+            && Math.abs(firstScore - secondScore) >= MIRROR_RESIDUAL_MARGIN;
+
+          if (!hasDecision) {
+            decision.pendingIndex = null;
+            decision.confirmations = 0;
+          } else {
+            const winningIndex = firstScore < secondScore ? 0 : 1;
+            if (decision.pendingIndex === winningIndex) decision.confirmations += 1;
+            else {
+              decision.pendingIndex = winningIndex;
+              decision.confirmations = 1;
+            }
+            if (decision.confirmations >= MIRROR_CONFIRMATIONS_REQUIRED) {
+              decision.selectedIndex = winningIndex;
+            }
+          }
+
+          return {
+            confirmed: decision.selectedIndex !== null,
+            selectedIndex: decision.selectedIndex,
+            target: decision.selectedIndex === null ? null : candidates[decision.selectedIndex],
+            scores: decision.scores,
+            confirmations: decision.confirmations,
+            discriminatingPeers: decision.discriminatingPeers
+          };
+        }
+
         isFreshPositionPeer(peer) {
-          return Boolean(peer) && this.simulation.time - peer.lastHeardAt <= POSITION_PEER_MAX_AGE;
+          return Boolean(peer) && this.simulation.time - peer.lastHeardAt <= this.simulation.positionPeerMaxAge();
         }
 
         usablePositionPeers(frameId = this.positionEstimate.frameId) {
@@ -1445,12 +1902,14 @@
             && peer.confidence > 0.02
             && Number.isFinite(peer.directDistance)
             && this.isFreshPositionPeer(peer)
-          );
+          )
+            .sort((a, b) => this.positionPeerWeight(b) - this.positionPeerWeight(a))
+            .slice(0, this.simulation.solveCapacity);
         }
 
         positionPeerWeight(peer) {
           const age = Math.max(0, this.simulation.time - peer.lastHeardAt);
-          const freshness = clamp(1 - age / POSITION_PEER_MAX_AGE, 0.1, 1);
+          const freshness = clamp(1 - age / this.simulation.positionPeerMaxAge(), 0.1, 1);
           const isFrameReference = [
             POSITION_SOLUTION.ANCHOR,
             POSITION_SOLUTION.ORIGIN,
@@ -1459,9 +1918,18 @@
           ].includes(peer.solution);
           const stability = peer.settled ? 1 : isFrameReference ? 0.75 : 0.35;
           const uncertainty = 1 / (1 + peer.rangeSigma / POSITION_ROBUST_RESIDUAL_SCALE);
+          const advertisedQuality = peer.advertisedResidual === null
+            ? 1
+            : 1 / (1 + peer.advertisedResidual / POSITION_ROBUST_RESIDUAL_SCALE);
           const maturity = clamp(peer.rangeSamples / 5, 0.2, 1);
           return clamp(
-            peer.confidence * (0.25 + peer.strength * 0.75) * freshness * stability * uncertainty * maturity,
+            peer.confidence
+              * (0.25 + peer.strength * 0.75)
+              * freshness
+              * stability
+              * uncertainty
+              * advertisedQuality
+              * maturity,
             0.01,
             1
           );
@@ -1517,6 +1985,47 @@
           return { target: { x, y }, geometryScore };
         }
 
+        refineMultilaterationTarget(initialTarget, peers) {
+          let x = initialTarget.x;
+          let y = initialTarget.y;
+          for (let iteration = 0; iteration < 3; iteration += 1) {
+            let normalXX = 0;
+            let normalXY = 0;
+            let normalYY = 0;
+            let gradientX = 0;
+            let gradientY = 0;
+
+            for (const peer of peers) {
+              const deltaX = x - peer.x;
+              const deltaY = y - peer.y;
+              const predictedDistance = Math.max(Math.hypot(deltaX, deltaY), 0.001);
+              const residual = predictedDistance - peer.directDistance;
+              const robustWeight = this.positionPeerWeight(peer)
+                / (1 + (residual / POSITION_ROBUST_RESIDUAL_SCALE) ** 2);
+              const directionX = deltaX / predictedDistance;
+              const directionY = deltaY / predictedDistance;
+              normalXX += robustWeight * directionX * directionX;
+              normalXY += robustWeight * directionX * directionY;
+              normalYY += robustWeight * directionY * directionY;
+              gradientX += robustWeight * directionX * residual;
+              gradientY += robustWeight * directionY * residual;
+            }
+
+            const determinant = normalXX * normalYY - normalXY * normalXY;
+            if (determinant <= Number.EPSILON) break;
+            const stepX = (-gradientX * normalYY + gradientY * normalXY) / determinant;
+            const stepY = (-gradientY * normalXX + gradientX * normalXY) / determinant;
+            const stepLength = Math.hypot(stepX, stepY);
+            const stepScale = stepLength > POSITION_ROBUST_RESIDUAL_SCALE * 2
+              ? POSITION_ROBUST_RESIDUAL_SCALE * 2 / stepLength
+              : 1;
+            x += stepX * stepScale;
+            y += stepY * stepScale;
+            if (stepLength <= POSITION_SETTLED_EPSILON) break;
+          }
+          return { x, y };
+        }
+
         multilaterationSolution(peers) {
           if (peers.length < 3) return null;
 
@@ -1524,7 +2033,7 @@
           const initial = this.multilaterationPass(peers);
           if (!initial) return null;
           const refined = this.multilaterationPass(peers, initial.target) || initial;
-          const { x, y } = refined.target;
+          const { x, y } = this.refineMultilaterationTarget(refined.target, peers);
 
           let weightedSquaredError = 0;
           let totalWeight = 0;
@@ -1544,6 +2053,91 @@
             constraintCount: peers.length,
             residualError
           };
+        }
+
+        bestDirectPeerBaseline(peers) {
+          let best = null;
+          for (let firstIndex = 0; firstIndex < peers.length - 1; firstIndex += 1) {
+            for (let secondIndex = firstIndex + 1; secondIndex < peers.length; secondIndex += 1) {
+              const first = peers[firstIndex];
+              const second = peers[secondIndex];
+              const candidates = this.circleIntersections(first, second);
+              if (!candidates) continue;
+
+              const candidateSeparation = Math.hypot(
+                candidates[0].x - candidates[1].x,
+                candidates[0].y - candidates[1].y
+              );
+              if (candidateSeparation <= POSITION_SETTLED_EPSILON) continue;
+
+              const rangeScale = Math.max(first.directDistance + second.directDistance, 1);
+              const intersectionGeometry = clamp(candidateSeparation / rangeScale, 0.05, 1);
+              const weight = Math.min(this.positionPeerWeight(first), this.positionPeerWeight(second));
+              const score = weight * (0.25 + intersectionGeometry * 0.75);
+              if (!best || score > best.score) {
+                best = { first, second, candidates, intersectionGeometry, score };
+              }
+            }
+          }
+          return best;
+        }
+
+        solveFromDirectPeers(peers) {
+          // Frame references define coordinates; only these directly received peers define local range constraints.
+          const multilateration = this.multilaterationSolution(peers);
+          if (multilateration) {
+            this.convergePosition(
+              multilateration.target,
+              POSITION_SOLUTION.POSITIONED,
+              multilateration.confidence,
+              {
+                constraintCount: multilateration.constraintCount,
+                residualError: multilateration.residualError
+              }
+            );
+            return true;
+          }
+
+          const baseline = this.bestDirectPeerBaseline(peers);
+          if (baseline) {
+            const baselineIds = [baseline.first.id, baseline.second.id];
+            const independentPeers = peers.filter(peer => !baselineIds.includes(peer.id));
+            const branch = this.updateMirrorDecision(
+              baseline.candidates,
+              independentPeers,
+              baselineIds
+            );
+            const previous = { x: this.positionEstimate.x, y: this.positionEstimate.y };
+            const target = branch.confirmed
+              ? branch.target
+              : baseline.candidates.slice().sort((first, second) => (
+                Math.hypot(first.x - previous.x, first.y - previous.y)
+                - Math.hypot(second.x - previous.x, second.y - previous.y)
+              ))[0];
+            const baselineConfidence = Math.min(
+              baseline.first.confidence,
+              baseline.second.confidence
+            ) * Math.sqrt(baseline.intersectionGeometry);
+            this.convergePosition(
+              target,
+              branch.confirmed ? POSITION_SOLUTION.POSITIONED : POSITION_SOLUTION.MIRRORED,
+              branch.confirmed ? baselineConfidence : baselineConfidence * 0.65,
+              {
+                mirrorCandidates: baseline.candidates,
+                constraintCount: 2 + branch.discriminatingPeers,
+                residualError: branch.confirmed
+                  ? branch.scores[branch.selectedIndex]
+                  : this.rangeResidualAt(target, [baseline.first, baseline.second])
+              }
+            );
+            return true;
+          }
+
+          if (peers.length) {
+            this.setRadialBelief(peers[0]);
+            return true;
+          }
+          return false;
         }
 
         anchoredFrameEvidence() {
@@ -1621,6 +2215,7 @@
           local.axisId = this.determineAxisId(originObservation);
           local.orientationId = this.determineOrientationId(originObservation);
 
+          // These three roles bootstrap a common frame. Every other node solves from any usable local peers.
           if (this.id === frameId) {
             local.solution = POSITION_SOLUTION.ORIGIN;
             local.x = 0;
@@ -1666,63 +2261,20 @@
             return;
           }
 
-          // Three non-collinear neighbor estimates make one 2-D position observable; all fresh ranges share the fit.
-          const multilateration = this.multilaterationSolution(this.usablePositionPeers());
-          if (multilateration) {
-            this.convergePosition(
-              multilateration.target,
-              POSITION_SOLUTION.ADJUSTING,
-              multilateration.confidence,
-              {
-                constraintCount: multilateration.constraintCount,
-                residualError: multilateration.residualError
-              }
-            );
-            return;
-          }
-
-          if (mirrorCandidates) {
-            const residualError = this.rangeResidualAt(mirrorCandidates[0], [originObservation, axisObservation]);
-            this.convergePosition(
-              mirrorCandidates[0],
-              POSITION_SOLUTION.POSITIONED,
-              Math.min(originObservation.strength, axisObservation.strength, axisObservation.confidence),
-              { mirrorCandidates, constraintCount: 2, residualError }
-            );
-            return;
-          }
-
-          if (originObservation) {
-            this.setRadialBelief({
-              ...originObservation,
-              x: 0,
-              y: 0,
-              confidence: 1
-            });
-            return;
-          }
-
-          const stablePeer = [...this.knownPeers.values()].find(peer =>
-            peer.frameId === frameId
-            && this.isFreshPositionPeer(peer)
-            && peer.settled
-            && [
-              POSITION_SOLUTION.ORIGIN,
-              POSITION_SOLUTION.AXIS,
-              POSITION_SOLUTION.ORIENTATION,
-              POSITION_SOLUTION.POSITIONED,
-              POSITION_SOLUTION.ADJUSTING
-            ].includes(peer.solution)
-          );
-          if (stablePeer) this.setRadialBelief(stablePeer);
+          this.solveFromDirectPeers(this.usablePositionPeers());
         }
 
-        receivePosition(remote, strength, senderId) {
-          if (!remote || remote.version !== POSITION_PROTOCOL_VERSION) return;
-          if (!Number.isFinite(remote.frameId) || !Number.isFinite(remote.x) || !Number.isFinite(remote.y)) return;
-          if (!Number.isFinite(remote.confidence) || senderId === this.id) return;
+        receivePosition(remote, strength, senderId, advertisedLeaderId) {
+          if (!remote || remote.version !== POSITION_PROTOCOL_VERSION) return "unsupported-position-payload";
+          if (!Number.isFinite(remote.frameId) || !Number.isFinite(remote.x) || !Number.isFinite(remote.y)) {
+            return "invalid-position-coordinates";
+          }
+          if (!Number.isFinite(remote.confidence) || senderId === this.id) return "invalid-position-source";
 
-          this.rememberPeerPosition(remote, strength, senderId);
+          // Relay leases react to this one advertisement; they do not depend on position-table admission.
+          this.observeNeighborLeaderPath(advertisedLeaderId, remote.leaderViaId);
+          const rememberedPeer = this.rememberPeerPosition(remote, strength, senderId);
+          if (!rememberedPeer) return "peer-table-rejected";
           const discoveredLeaderId = remote.isAnchor || remote.frameId === ANCHORED_FRAME_ID
             ? ANCHORED_FRAME_ID
             : Math.max(senderId, remote.frameId);
@@ -1734,13 +2286,14 @@
             && this.positionEstimate.frameId !== ANCHORED_FRAME_ID
           ) {
             const evidence = this.anchoredFrameEvidence();
-            if (!evidence.multilateration) return;
+            if (!evidence.multilateration) return "anchored-evidence-pending";
             initialAnchoredSolution = evidence.multilateration;
           }
 
           this.adoptPositionFrame(discoveredLeaderId, senderId);
           if (initialAnchoredSolution) this.seedAnchoredPosition(initialAnchoredSolution);
           this.solvePositionFromKnowledge();
+          return "position-updated";
         }
 
         scheduleNextPattern(phrase) {
@@ -1760,9 +2313,14 @@
 
         applyDueSchedule() {
           const phrase = this.currentPhrase();
+          const patternDue = phrase >= this.next.patternPhrase;
+          const paletteDue = phrase >= this.next.palettePhrase;
+          if (!patternDue && !paletteDue) return;
+
+          const auditBefore = this.simulation.auditNodeState(this);
           const changes = [];
 
-          if (phrase >= this.next.patternPhrase) {
+          if (patternDue) {
             this.current.patternPhrase = this.next.patternPhrase;
             this.current.patternId = this.next.patternId;
             changes.push(`pattern P${this.current.patternId}`);
@@ -1772,7 +2330,7 @@
             }
           }
 
-          if (phrase >= this.next.palettePhrase) {
+          if (paletteDue) {
             this.current.palettePhrase = this.next.palettePhrase;
             this.current.paletteId = this.next.paletteId;
             changes.push(`palette C${this.current.paletteId}`);
@@ -1784,96 +2342,239 @@
 
           if (changes.length) {
             this.simulation.log(this, "schedule", `phrase ${phrase}: changed ${changes.join(" + ")}`);
+            this.simulation.auditLocalTransition(
+              this,
+              "scheduled-lighting-change",
+              auditBefore,
+              { phrase, changes }
+            );
           }
         }
 
         follow(header) {
           if (!header) {
-            if (this.uplinkId !== 0) {
-              this.simulation.log(this, "route", `uplink ${formatId(this.uplinkId)} timed out`);
-            }
+            const lostUplinkId = this.uplinkId;
             this.uplinkId = 0;
+            this.leaderId = this.id;
+            this.leaderViaId = this.id;
             this.uplinkDeadline = 0;
             this.lastUplinkSeenAt = null;
+            if (lostUplinkId !== 0) {
+              const relationship = this.simulation.fixedRelay ? "leader state" : "uplink";
+              this.simulation.log(this, "route", `${relationship} ${formatId(lostUplinkId)} timed out; became leader`);
+              if (!this.isAnchor) {
+                this.resetPositionEstimate();
+                this.simulation.log(this, "position", "discarded lost leader frame; restarted at local origin (0,0)");
+              }
+            }
             return;
           }
 
-          if (this.uplinkId === header.id) return;
-          this.uplinkId = header.id;
-          this.simulation.log(this, "route", `following higher ID ${formatId(header.id)}`);
+          const advertisedLeaderId = this.simulation.fixedRelay
+            ? Math.max(header.id, header.uplinkId || 0)
+            : header.id;
+          if (this.uplinkId === advertisedLeaderId) return;
+          this.uplinkId = advertisedLeaderId;
+          this.leaderId = advertisedLeaderId;
+          this.leaderViaId = 0;
+          this.uplinkDeadline = this.simulation.time + UPLINK_TIMEOUT;
+          this.lastUplinkSeenAt = null;
+          this.simulation.log(
+            this,
+            "route",
+            `${this.simulation.fixedRelay ? "following logical leader" : "following"} ${formatId(advertisedLeaderId)}`
+          );
+        }
+
+        lightingMessageFingerprint(message) {
+          return `${message.header.id}:${message.command}:${Math.round(message.timebase * 1000)}`;
+        }
+
+        hasSeenLightingMessage(message) {
+          return this.recentLightingMessages.includes(this.lightingMessageFingerprint(message));
+        }
+
+        rememberLightingMessage(message) {
+          if (message.recipients === RECIPIENTS.INFO) return;
+          const fingerprint = this.lightingMessageFingerprint(message);
+          if (this.recentLightingMessages.includes(fingerprint)) return;
+          this.recentLightingMessages.push(fingerprint);
+          if (this.recentLightingMessages.length > RECENT_LIGHTING_MESSAGE_LIMIT) {
+            this.recentLightingMessages.shift();
+          }
         }
 
         resetForIdConflict() {
           const previous = this.id;
           this.id = this.simulation.randomMeshId();
           this.uplinkId = 0;
+          this.leaderId = this.id;
+          this.leaderViaId = this.id;
           this.uplinkDeadline = 0;
           this.lastUplinkSeenAt = null;
           this.rebroadcastUntil = -1;
+          this.recentLightingMessages = [];
           this.activeAt = this.simulation.time + Math.max(700, STATUS_TIMEOUT_BASE - this.id / 2);
           this.nextBroadcastAt = this.activeAt + this.simulation.random() * STATUS_UPDATE_PERIOD;
-          this.nextPositionBroadcastAt = this.activeAt + this.simulation.random() * POSITION_UPDATE_PERIOD;
+          this.nextPositionBroadcastAt = this.activeAt + this.simulation.random() * this.simulation.positionBroadcastPeriod;
           this.resetPositionEstimate();
           this.simulation.log(this, "conflict", `ID collision ${formatId(previous)} → ${formatId(this.id)}`);
         }
 
-        onPeerPing(header) {
+        hasFreshLeaderState() {
+          return !this.isFollowing()
+            || (this.leaderViaId !== 0 && this.simulation.time <= this.uplinkDeadline);
+        }
+
+        recordLeaderPath(physicalSenderId) {
+          if (!this.isFollowing() || !Number.isFinite(physicalSenderId)) return;
+          this.leaderViaId = physicalSenderId;
+          this.uplinkDeadline = this.simulation.time + UPLINK_TIMEOUT;
+          this.lastUplinkSeenAt = this.simulation.time;
+        }
+
+        observeNeighborLeaderPath(advertisedLeaderId, neighborLeaderViaId) {
+          if (!this.simulation.fixedRelay || !this.isFollowing() || !this.hasFreshLeaderState()) return;
+          if (!Number.isFinite(advertisedLeaderId) || !Number.isFinite(neighborLeaderViaId)) return;
+
+          const neighborHasWeakerLeader = advertisedLeaderId < this.leaderId;
+          const neighborNeedsAnyRelay = advertisedLeaderId === this.leaderId
+            && neighborLeaderViaId === 0;
+          const neighborUsesThisRelay = advertisedLeaderId === this.leaderId
+            && neighborLeaderViaId === this.id;
+          if (neighborHasWeakerLeader || neighborNeedsAnyRelay || neighborUsesThisRelay) {
+            this.rebroadcastUntil = this.simulation.time + REBROADCAST_TIME;
+          }
+        }
+
+        onPeerPing(header, refreshUplink = true) {
           if (header.id === this.id) {
             this.resetForIdConflict();
             return;
           }
 
-          if (header.id > this.uplinkId && header.id > this.id) {
+          if (this.simulation.fixedRelay) {
+            const advertisedLeaderId = Math.max(header.id, header.uplinkId || 0);
+            if (advertisedLeaderId > this.leaderId) this.follow(header);
+          } else if (header.id > this.uplinkId && header.id > this.id) {
             this.follow(header);
           }
 
-          if (header.id === this.uplinkId) {
+          const heardLeaderId = this.simulation.fixedRelay
+            ? Math.max(header.id, header.uplinkId || 0)
+            : header.id;
+          if (refreshUplink && heardLeaderId === this.uplinkId) {
             this.uplinkDeadline = this.simulation.time + UPLINK_TIMEOUT;
             this.lastUplinkSeenAt = this.simulation.time;
           }
 
-          if (header.uplinkId === this.id || (header.uplinkId === 0 && header.id < this.id)) {
+          const neighborNeedsOurLeader = this.simulation.fixedRelay
+            && this.isFollowing()
+            && Math.max(header.id, header.uplinkId || 0) < this.leaderId;
+          const legacyRelayTrigger = !this.simulation.fixedRelay
+            && (header.uplinkId === this.id || (header.uplinkId === 0 && header.id < this.id));
+          if (neighborNeedsOurLeader || legacyRelayTrigger) {
             this.rebroadcastUntil = this.simulation.time + REBROADCAST_TIME;
           }
         }
 
-        receive(message, strength, traceId, hop = 0) {
-          if (!message || message.header.version !== this.version) return;
-          this.receivedCount += 1;
-          const hadIdConflict = message.header.id === this.id;
-          this.onPeerPing(message.header);
-          if (!hadIdConflict) this.receivePosition(message.position, strength, message.header.id);
-
-          let ignore = false;
+        recipientDecision(message) {
           switch (message.recipients) {
             case RECIPIENTS.ALL:
-              ignore = message.header.id !== this.uplinkId;
-              break;
+              return message.header.id === this.uplinkId
+                ? { accept: true, reason: "chosen-uplink" }
+                : { accept: false, reason: `sender-${formatId(message.header.id)}-is-not-uplink-${formatId(this.uplinkId)}` };
             case RECIPIENTS.ROOT:
-              ignore = message.header.uplinkId !== this.id;
-              break;
+              if (this.simulation.fixedRelay && this.isRelayActive()) {
+                return { accept: true, reason: "transparent-root-forward" };
+              }
+              return message.header.uplinkId === this.id
+                ? { accept: true, reason: "addressed-to-this-root" }
+                : { accept: false, reason: `root-target-${formatId(message.header.uplinkId)}-does-not-match` };
             case RECIPIENTS.INFO:
-              ignore = false;
-              break;
+              return { accept: true, reason: "information-packet" };
             default:
-              ignore = true;
+              return { accept: false, reason: "unknown-recipient-class" };
           }
+        }
 
-          if (ignore) {
-            this.ignoredCount += 1;
+        receive(message, strength, traceId, hop = 0, auditMeta = {}) {
+          const audit = this.simulation.beginReceiveAudit(this, message, strength, traceId, hop, auditMeta);
+          if (!message || !message.header) {
+            this.simulation.finishReceiveAudit(this, audit, {
+              outcome: "rejected",
+              reason: "malformed-message",
+              positionOutcome: null
+            });
+            return;
+          }
+          if (message.header.version !== this.version) {
+            this.simulation.finishReceiveAudit(this, audit, {
+              outcome: "rejected",
+              reason: `protocol-version-${message.header.version}-unsupported`,
+              positionOutcome: null
+            });
             return;
           }
 
+          if (
+            this.simulation.fixedRelay
+            && message.recipients !== RECIPIENTS.INFO
+            && this.hasSeenLightingMessage(message)
+          ) {
+            this.simulation.finishReceiveAudit(this, audit, {
+              outcome: "ignored",
+              reason: "duplicate-transparent-relay-packet",
+              positionOutcome: "relayed-position-not-ranged"
+            });
+            return;
+          }
+          if (this.simulation.fixedRelay) this.rememberLightingMessage(message);
+
+          this.receivedCount += 1;
+          const hadIdConflict = message.header.id === this.id;
+          this.onPeerPing(message.header, !this.simulation.fixedRelay);
+          const advertisedLeaderId = this.simulation.fixedRelay
+            ? Math.max(message.header.id, message.header.uplinkId || 0)
+            : message.header.id;
+          const positionOutcome = this.simulation.fixedRelay && auditMeta.rebroadcast
+            ? "relayed-position-not-ranged"
+            : hadIdConflict
+            ? "skipped-id-conflict"
+            : this.receivePosition(message.position, strength, message.header.id, advertisedLeaderId);
+          const decision = this.recipientDecision(message);
+
+          if (!decision.accept) {
+            this.ignoredCount += 1;
+            this.simulation.finishReceiveAudit(this, audit, {
+              outcome: "ignored",
+              reason: decision.reason,
+              positionOutcome
+            });
+            return;
+          }
+
+          let appliedState = false;
           if (message.recipients !== RECIPIENTS.ROOT || !this.isFollowing()) {
-            const corrected = message.timebase - this.localMillis() + 3;
-            if (Math.abs(corrected - this.timebase) > 10) this.timebase = corrected;
+            const isClockSource = message.header.id === this.uplinkId
+              && message.command !== COMMAND.POSITION;
+            if (isClockSource) {
+              const sentAt = Number.isFinite(auditMeta.sentAt) ? auditMeta.sentAt : this.simulation.time;
+              const transitTime = Math.max(0, this.simulation.time - sentAt);
+              const corrected = message.timebase + transitTime - this.localMillis();
+              if (Math.abs(corrected - this.timebase) > 10) this.timebase = corrected;
+            }
 
             if (message.command === COMMAND.STATE && message.data && message.data.states) {
-              const before = dnaKey(this.dna);
+              const beforeDNA = dnaKey(this.dna);
               this.current = cloneTubeState(message.data.states.current);
               this.next = cloneTubeState(message.data.states.next);
               this.executedCount += 1;
-              if (before !== dnaKey(this.dna)) {
+              appliedState = true;
+              if (this.simulation.fixedRelay && message.header.id === this.uplinkId) {
+                this.recordLeaderPath(auditMeta.senderMeshId ?? message.header.id);
+              }
+              if (beforeDNA !== dnaKey(this.dna)) {
                 this.simulation.log(this, "state", `adopted now ${this.simulation.describeDNA(this.dna)}`);
               }
               this.simulation.log(
@@ -1884,13 +2585,31 @@
             }
           }
 
-          if (this.isRelayActive() && message.recipients !== RECIPIENTS.INFO) {
-            const relayed = {
+          const shouldRelay = this.isRelayActive() && message.recipients !== RECIPIENTS.INFO;
+          const receiveRecord = this.simulation.finishReceiveAudit(this, audit, {
+            outcome: "accepted",
+            reason: decision.reason,
+            positionOutcome,
+            appliedState,
+            relayed: false
+          });
+          if (shouldRelay) {
+            const relayMessage = {
+              logicalHeader: this.simulation.fixedRelay ? { ...message.header } : null,
+              logicalTimebase: this.simulation.fixedRelay ? message.timebase : null,
               recipients: this.isFollowing() ? message.recipients : RECIPIENTS.ALL,
               command: message.command,
               data: cloneData(message.data)
             };
-            this.simulation.broadcast(this, relayed, traceId, true, hop + 1, message.header.id);
+            const didRelay = this.simulation.broadcast(
+              this,
+              relayMessage,
+              traceId,
+              true,
+              hop + 1,
+              message.header.id
+            );
+            this.simulation.markAuditRelayed(receiveRecord, didRelay);
           }
         }
 
@@ -1903,11 +2622,15 @@
         }
 
         sendPosition() {
-          this.simulation.broadcast(this, {
+          const sent = this.simulation.broadcast(this, {
             recipients: RECIPIENTS.INFO,
             command: COMMAND.POSITION,
             data: null
           });
+          if (sent) {
+            this.simulation.stats.positionTransmissions += 1;
+            this.simulation.stats.positionApplicationBytes += this.simulation.positionPacketBytes();
+          }
         }
 
         forceNext() {
@@ -1926,7 +2649,13 @@
           this.applyDueSchedule();
 
           if (this.isFollowing() && this.uplinkDeadline && this.simulation.time > this.uplinkDeadline) {
+            const auditBefore = this.simulation.auditNodeState(this);
             this.follow(null);
+            this.simulation.auditLocalTransition(
+              this,
+              this.simulation.fixedRelay ? "leader-state-timeout" : "uplink-timeout",
+              auditBefore
+            );
           }
 
           while (this.simulation.time >= this.nextBroadcastAt) {
@@ -1937,7 +2666,7 @@
           }
 
           while (this.simulation.time >= this.nextPositionBroadcastAt) {
-            this.nextPositionBroadcastAt += POSITION_UPDATE_PERIOD;
+            this.nextPositionBroadcastAt += this.simulation.nextPositionInterval();
             if (this.status === STATUS.STARTED) this.sendPosition();
           }
         }
@@ -1950,21 +2679,102 @@
           this.entities = [];
           this.time = 0;
           this.paused = false;
-          this.speed = 2;
+          this.speed = 0.5;
           this.range = 600;
           this.dropoff = "linear";
+          this.deliveryModel = "hard";
+          this.fixedRelay = false;
           this.rssiJitterSigmaDb = 0;
           this.txPowerSigmaDb = 0;
           this.linkShadowSigmaDb = 0;
           this.leaderBpm = DEFAULT_BPM;
+          this.peerCapacity = 4;
+          this.solveCapacity = 4;
+          this.anchorReserve = 2;
+          this.positionStalePeriods = 6;
+          this.payloadProfileKey = "balanced";
+          this.coordinateEncodingKey = "int12";
+          this.coordinateQuantum = 5;
+          this.wireEnvelope = "compact";
+          this.positionBroadcastPeriod = POSITION_UPDATE_PERIOD;
+          this.positionBroadcastJitter = 0.12;
+          this.outlierErrorThreshold = PERSISTENT_OUTLIER_ERROR;
+          this.outlierDuration = PERSISTENT_OUTLIER_TIME;
+          this.currentTubeCount = 2;
+          this.currentAnchorCount = 0;
           this.deliveryQueue = [];
           this.waves = [];
           this.pulses = [];
           this.logs = [];
           this.trace = 0;
-          this.stats = { eligible: 0, delivered: 0, dropped: 0, rebroadcasts: 0 };
+          this.messageAudit = [];
+          this.auditCountsByDeviceKey = new Map();
+          this.auditStatsByDeviceKey = new Map();
+          this.auditSequence = 0;
+          this.auditDeviceSequence = 0;
+          this.stats = this.emptyStats();
           this.width = 900;
           this.height = 600;
+        }
+
+        emptyStats() {
+          return {
+            eligible: 0,
+            delivered: 0,
+            dropped: 0,
+            rebroadcasts: 0,
+            peerEvictions: 0,
+            peerAdmissionDrops: 0,
+            positionTransmissions: 0,
+            positionApplicationBytes: 0,
+            coordinateSaturations: 0
+          };
+        }
+
+        payloadProfile() { return POSITION_PAYLOAD_PROFILES[this.payloadProfileKey]; }
+        coordinateEncoding() { return COORDINATE_ENCODINGS[this.coordinateEncodingKey]; }
+        positionPeerMaxAge() { return this.positionBroadcastPeriod * this.positionStalePeriods; }
+
+        positionPayloadBytes() {
+          return this.payloadProfile().fixedPayloadBytes
+            + this.coordinateEncoding().bytes
+            + LEADER_VIA_ID_BYTES;
+        }
+
+        positionPacketBytes() {
+          return this.wireEnvelope === "fixed"
+            ? CURRENT_NODE_MESSAGE_BYTES
+            : COMPACT_POSITION_ENVELOPE_BYTES + this.positionPayloadBytes();
+        }
+
+        peerEntryBytes() {
+          return this.payloadProfile().fixedPeerBytes + this.coordinateEncoding().bytes;
+        }
+
+        peerTableBytes() { return this.peerCapacity * this.peerEntryBytes(); }
+
+        coordinateMaximum() {
+          return ((2 ** (this.coordinateEncoding().bits - 1)) - 1) * this.coordinateQuantum;
+        }
+
+        positionTrafficBytesPerSecond() {
+          if (this.positionBroadcastPeriod <= 0) return 0;
+          return this.entities.length * this.positionPacketBytes() * 1000 / this.positionBroadcastPeriod;
+        }
+
+        quantizeCoordinate(value) {
+          const encoding = this.coordinateEncoding();
+          const maximum = (2 ** (encoding.bits - 1)) - 1;
+          const minimum = -(2 ** (encoding.bits - 1));
+          const unbounded = Math.round(value / this.coordinateQuantum);
+          const encoded = clamp(unbounded, minimum, maximum);
+          if (encoded !== unbounded) this.stats.coordinateSaturations += 1;
+          return encoded * this.coordinateQuantum;
+        }
+
+        nextPositionInterval() {
+          const jitter = (this.random() * 2 - 1) * this.positionBroadcastJitter;
+          return this.positionBroadcastPeriod * (1 + jitter);
         }
 
         random() { return this.rng(); }
@@ -2023,8 +2833,21 @@
           return this.addDevice(x, y, { isAnchor: true });
         }
 
-        reset() {
-          this.seed = (this.seed + 0x9E3779B9) >>> 0;
+        removeEntity(entity) {
+          const index = this.entities.indexOf(entity);
+          if (index === -1) return false;
+
+          const node = entity.network;
+          this.log(node, "system", "removed from simulation");
+          this.entities.splice(index, 1);
+          this.deliveryQueue = this.deliveryQueue.filter(delivery => delivery.target !== node);
+          this.waves = this.waves.filter(wave => wave.sender !== entity);
+          this.pulses = this.pulses.filter(pulse => pulse.sender !== entity && pulse.target !== entity);
+          return true;
+        }
+
+        clearNetwork(seed) {
+          this.seed = seed >>> 0;
           this.rng = mulberry32(this.seed);
           this.entities = [];
           this.time = 0;
@@ -2033,8 +2856,62 @@
           this.pulses = [];
           this.logs = [];
           this.trace = 0;
-          this.stats = { eligible: 0, delivered: 0, dropped: 0, rebroadcasts: 0 };
-          return this.addDevice(this.width / 2, this.height / 2);
+          this.messageAudit = [];
+          this.auditCountsByDeviceKey = new Map();
+          this.auditStatsByDeviceKey = new Map();
+          this.auditSequence = 0;
+          this.auditDeviceSequence = 0;
+          this.stats = this.emptyStats();
+        }
+
+        loadScenario(tubeCount = this.currentTubeCount, anchorCount = this.currentAnchorCount) {
+          const tubes = clamp(Math.round(Number(tubeCount) || 1), 1, 128);
+          const anchors = clamp(Math.round(Number(anchorCount) || 0), 0, 16);
+          this.currentTubeCount = tubes;
+          this.currentAnchorCount = anchors;
+          const scenarioSeed = (
+            0x51A7E
+            ^ Math.imul(tubes, 0x45D9F3B)
+          ) >>> 0;
+          this.clearNetwork(scenarioSeed);
+
+          const centerX = this.width / 2;
+          const centerY = this.height / 2;
+          let firstTube = null;
+          if (tubes === 1) {
+            firstTube = this.addDevice(centerX, centerY);
+          } else {
+            const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+            const fieldRadius = Math.max(75, Math.min(this.width * 0.36, this.height * 0.36));
+            for (let index = 0; index < tubes; index += 1) {
+              const radius = Math.sqrt((index + 0.5) / tubes) * fieldRadius;
+              const angle = index * goldenAngle;
+              const tube = this.addDevice(
+                centerX + Math.cos(angle) * radius,
+                centerY + Math.sin(angle) * radius
+              );
+              if (!firstTube) firstTube = tube;
+            }
+          }
+
+          const anchorRadiusX = Math.max(100, this.width * 0.4);
+          const anchorRadiusY = Math.max(90, this.height * 0.37);
+          for (let index = 0; index < anchors; index += 1) {
+            const angle = -Math.PI / 2 + (index / anchors) * Math.PI * 2;
+            this.addAnchor(
+              centerX + Math.cos(angle) * anchorRadiusX,
+              centerY + Math.sin(angle) * anchorRadiusY
+            );
+          }
+          return firstTube || this.entities[0] || null;
+        }
+
+        reset() {
+          return this.loadScenario(this.currentTubeCount, this.currentAnchorCount);
+        }
+
+        clearField() {
+          this.clearNetwork(this.seed);
         }
 
         entityForNode(node) { return this.entities.find(entity => entity.network === node); }
@@ -2042,6 +2919,7 @@
         distance(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
 
         localMaximumWarning(entity) {
+          if (this.fixedRelay) return null;
           const node = entity.network;
           if (node.isFollowing() || node.status !== STATUS.STARTED) return null;
 
@@ -2087,6 +2965,15 @@
         signalAtDistance(distance, range = this.range, dropoff = this.dropoff) {
           if (distance >= range) return 0;
           return this.signalForNormalizedDistance(distance / range, dropoff);
+        }
+
+        packetDeliveryProbability(meanStrength) {
+          if (meanStrength <= 0) return 0;
+          if (this.deliveryModel === "hard") return 1;
+          if (this.deliveryModel === "proportional") return meanStrength;
+
+          const thresholdProgress = clamp((meanStrength - 0.08) / 0.24, 0, 1);
+          return thresholdProgress * thresholdProgress * (3 - 2 * thresholdProgress);
         }
 
         stableUnitInterval(senderKey, targetKey, salt) {
@@ -2146,20 +3033,297 @@
           return "ACTION";
         }
 
+        auditNodeState(node) {
+          const logicalLeaderId = this.fixedRelay
+            ? (node.uplinkId || node.id)
+            : node.leaderId;
+          return {
+            meshId: node.id,
+            uplinkId: this.fixedRelay ? null : node.uplinkId,
+            leaderId: logicalLeaderId,
+            leaderViaId: this.fixedRelay ? node.leaderViaId : null,
+            leaderPath: this.fixedRelay
+              ? !node.isFollowing()
+                ? "self"
+                : node.leaderViaId === 0
+                ? "waiting"
+                : node.leaderViaId === logicalLeaderId ? "direct" : "relayed"
+              : "legacy-uplink",
+            role: node.role(),
+            transportStatus: node.status,
+            relayActive: node.isRelayActive(),
+            dna: {
+              pattern: node.current.patternId,
+              patternName: PATTERNS[node.current.patternId]?.name || null,
+              palette: node.current.paletteId,
+              paletteName: PALETTES[node.current.paletteId]?.name || null
+            },
+            current: cloneTubeState(node.current),
+            next: cloneTubeState(node.next),
+            position: {
+              frameId: node.positionEstimate.frameId,
+              solution: node.positionEstimate.solution,
+              x: +node.positionEstimate.x.toFixed(3),
+              y: +node.positionEstimate.y.toFixed(3),
+              confidence: +node.positionEstimate.confidence.toFixed(4)
+            },
+            clock: {
+              timebase: +node.timebase.toFixed(3),
+              visualTime: +node.visualTime().toFixed(3),
+              beatFrame: +node.current.beatFrame.toFixed(3)
+            }
+          };
+        }
+
+        auditMessage(message) {
+          if (!message || !message.header) return null;
+          return {
+            header: { ...message.header },
+            recipients: message.recipients,
+            recipientsName: this.recipientName(message.recipients),
+            command: message.command,
+            commandName: this.commandName(message.command),
+            timebase: message.timebase,
+            data: cloneData(message.data),
+            position: message.position ? { ...message.position } : null
+          };
+        }
+
+        appendAudit(event) {
+          const record = {
+            sequence: ++this.auditSequence,
+            atMs: Math.round(this.time),
+            ...event
+          };
+          this.messageAudit.push(record);
+          const count = this.auditCountsByDeviceKey.get(record.deviceKey) || 0;
+          this.auditCountsByDeviceKey.set(record.deviceKey, count + 1);
+          const stats = this.auditStatsByDeviceKey.get(record.deviceKey) || {
+            total: 0,
+            sent: 0,
+            received: 0,
+            accepted: 0,
+            ignored: 0,
+            rejected: 0,
+            radioMisses: 0,
+            appliedStates: 0,
+            relayed: 0,
+            localTransitions: 0
+          };
+          stats.total += 1;
+          if (record.kind === "send") stats.sent += 1;
+          if (record.kind === "receive") stats.received += 1;
+          if (record.kind === "radio-drop") stats.radioMisses += 1;
+          if (record.kind === "local-transition") stats.localTransitions += 1;
+          if (record.outcome === "accepted") stats.accepted += 1;
+          if (record.outcome === "ignored") stats.ignored += 1;
+          if (record.outcome === "rejected") stats.rejected += 1;
+          if (record.appliedState) stats.appliedStates += 1;
+          if (record.relayed) stats.relayed += 1;
+          this.auditStatsByDeviceKey.set(record.deviceKey, stats);
+          return record;
+        }
+
+        markAuditRelayed(record, relayed) {
+          record.relayed = relayed;
+          if (!relayed) return;
+          const stats = this.auditStatsByDeviceKey.get(record.deviceKey);
+          if (stats) stats.relayed += 1;
+        }
+
+        auditSend(sender, messageSnapshot, traceId, hop, rebroadcast, behalfOfId) {
+          return this.appendAudit({
+            kind: "send",
+            deviceKey: sender.auditDeviceKey,
+            deviceId: sender.id,
+            peerKey: null,
+            peerId: null,
+            traceId,
+            hop,
+            rebroadcast,
+            behalfOfId,
+            outcome: "broadcast",
+            reason: rebroadcast ? "relay-on-behalf" : "originated",
+            message: messageSnapshot,
+            before: this.auditNodeState(sender),
+            after: null,
+            radio: null
+          });
+        }
+
+        auditRadioDrop(
+          sender,
+          target,
+          messageSnapshot,
+          traceId,
+          hop,
+          distance,
+          meanStrength,
+          rebroadcast,
+          behalfOfId,
+          reason = "radio-probability-drop"
+        ) {
+          return this.appendAudit({
+            kind: "radio-drop",
+            deviceKey: target.auditDeviceKey,
+            deviceId: target.id,
+            peerKey: sender.auditDeviceKey,
+            peerId: sender.id,
+            traceId,
+            hop,
+            rebroadcast,
+            behalfOfId,
+            outcome: "not-received",
+            reason,
+            message: messageSnapshot,
+            before: this.auditNodeState(target),
+            after: null,
+            radio: {
+              distance: +distance.toFixed(3),
+              meanStrength: +meanStrength.toFixed(5),
+              deliveryProbability: +this.packetDeliveryProbability(meanStrength).toFixed(5),
+              measuredStrength: null
+            }
+          });
+        }
+
+        beginReceiveAudit(target, message, strength, traceId, hop, auditMeta = {}) {
+          return {
+            kind: "receive",
+            deviceKey: target.auditDeviceKey,
+            deviceId: target.id,
+            peerKey: auditMeta.senderDeviceKey ?? null,
+            peerId: message?.header?.id ?? null,
+            physicalPeerId: auditMeta.senderMeshId ?? null,
+            traceId,
+            hop,
+            rebroadcast: auditMeta.rebroadcast === true,
+            behalfOfId: auditMeta.behalfOfId ?? null,
+            message: auditMeta.messageSnapshot || this.auditMessage(message),
+            before: this.auditNodeState(target),
+            radio: {
+              transmitterId: auditMeta.senderMeshId ?? null,
+              distance: Number.isFinite(auditMeta.distance) ? +auditMeta.distance.toFixed(3) : null,
+              meanStrength: Number.isFinite(auditMeta.meanStrength) ? +auditMeta.meanStrength.toFixed(5) : null,
+              deliveryProbability: Number.isFinite(auditMeta.deliveryProbability)
+                ? +auditMeta.deliveryProbability.toFixed(5)
+                : null,
+              measuredStrength: Number.isFinite(strength) ? +strength.toFixed(5) : null
+            }
+          };
+        }
+
+        finishReceiveAudit(target, audit, result) {
+          return this.appendAudit({
+            ...audit,
+            outcome: result.outcome,
+            reason: result.reason,
+            positionOutcome: result.positionOutcome || null,
+            appliedState: result.appliedState === true,
+            relayed: result.relayed === true,
+            after: this.auditNodeState(target)
+          });
+        }
+
+        auditLocalTransition(node, reason, before, details = null) {
+          return this.appendAudit({
+            kind: "local-transition",
+            deviceKey: node.auditDeviceKey,
+            deviceId: node.id,
+            peerKey: null,
+            peerId: null,
+            traceId: null,
+            hop: 0,
+            rebroadcast: false,
+            behalfOfId: null,
+            outcome: "local-state-change",
+            reason,
+            positionOutcome: null,
+            appliedState: false,
+            relayed: false,
+            message: null,
+            before,
+            after: this.auditNodeState(node),
+            radio: null,
+            details
+          });
+        }
+
+        recentAuditForNode(node, limit = 12) {
+          const records = [];
+          for (let index = this.messageAudit.length - 1; index >= 0 && records.length < limit; index -= 1) {
+            const event = this.messageAudit[index];
+            if (event.deviceKey === node.auditDeviceKey) records.push(event);
+          }
+          return records;
+        }
+
+        auditForNode(node) {
+          return this.messageAudit.filter(event => event.deviceKey === node.auditDeviceKey);
+        }
+
+        auditCountForNode(node) {
+          return this.auditCountsByDeviceKey.get(node.auditDeviceKey) || 0;
+        }
+
+        auditStatsForNode(node) {
+          return this.auditStatsByDeviceKey.get(node.auditDeviceKey) || {
+            total: 0,
+            sent: 0,
+            received: 0,
+            accepted: 0,
+            ignored: 0,
+            rejected: 0,
+            radioMisses: 0,
+            appliedStates: 0,
+            relayed: 0,
+            localTransitions: 0
+          };
+        }
+
+        queryMessageAudit(filters = {}) {
+          const requestedDeviceId = typeof filters.deviceId === "string"
+            ? Number.parseInt(filters.deviceId, 16)
+            : filters.deviceId;
+          let events = this.messageAudit.filter(event => {
+            if (Number.isFinite(filters.deviceKey) && event.deviceKey !== filters.deviceKey) return false;
+            if (Number.isFinite(requestedDeviceId) && event.deviceId !== requestedDeviceId) return false;
+            if (Number.isFinite(filters.traceId) && event.traceId !== filters.traceId) return false;
+            if (filters.kind && event.kind !== filters.kind) return false;
+            if (filters.outcome && event.outcome !== filters.outcome) return false;
+            if (filters.command && event.message?.commandName !== filters.command) return false;
+            return true;
+          });
+          if (Number.isFinite(filters.limit) && filters.limit >= 0) {
+            events = events.slice(-Math.floor(filters.limit));
+          }
+          return events;
+        }
+
         broadcast(sender, partialMessage, inheritedTrace = null, rebroadcast = false, hop = 0, behalfOfId = null) {
           if (sender.status !== STATUS.STARTED) return false;
           const senderEntity = this.entityForNode(sender);
           if (!senderEntity) return false;
 
           const traceId = inheritedTrace || ++this.trace;
+          const transparentRelay = this.fixedRelay
+            && rebroadcast
+            && partialMessage.logicalHeader;
           const message = {
-            header: { id: sender.id, uplinkId: sender.uplinkId, version: sender.version },
+            header: transparentRelay ? { ...partialMessage.logicalHeader } : {
+              id: sender.id,
+              uplinkId: sender.uplinkId,
+              version: sender.version
+            },
             recipients: partialMessage.recipients,
-            timebase: sender.visualTime(),
+            timebase: transparentRelay ? partialMessage.logicalTimebase : sender.visualTime(),
             command: partialMessage.command,
             data: cloneData(partialMessage.data),
-            position: sender.announcePosition()
+            position: transparentRelay ? null : sender.announcePosition()
           };
+          if (this.fixedRelay) sender.rememberLightingMessage(message);
+          const auditedMessage = this.auditMessage(message);
+          this.auditSend(sender, auditedMessage, traceId, hop, rebroadcast, behalfOfId);
 
           if (!rebroadcast) {
             const commandName = this.commandName(message.command);
@@ -2173,7 +3337,7 @@
             this.log(
               sender,
               "relay",
-              `rebroadcast ${commandName}:${this.recipientName(message.recipients)} as ${formatId(sender.id)} on behalf of ${formatId(behalfOfId)} · hop ${hop} · trace #${traceId}`
+              `rebroadcast ${commandName}:${this.recipientName(message.recipients)} from logical leader ${formatId(message.header.id)} via physical ${formatId(sender.id)} · hop ${hop} · trace #${traceId}`
             );
           }
 
@@ -2193,24 +3357,49 @@
             if (targetEntity.network === sender) continue;
             const distance = this.distance(senderEntity, targetEntity);
             const meanStrength = this.meanSignalBetween(senderEntity, targetEntity, distance);
-            if (meanStrength <= 0) continue;
+            if (meanStrength <= 0) {
+              this.auditRadioDrop(
+                sender,
+                targetEntity.network,
+                auditedMessage,
+                traceId,
+                hop,
+                distance,
+                0,
+                rebroadcast,
+                behalfOfId,
+                "outside-hard-range"
+              );
+              continue;
+            }
 
             this.stats.eligible += 1;
-            const success = this.random() < meanStrength;
+            const deliveryProbability = this.packetDeliveryProbability(meanStrength);
+            const success = this.random() < deliveryProbability;
             const start = this.time + (distance / this.range) * RADIO_WAVE_TIME;
             const end = start + 260;
             this.pulses.push({ sender: senderEntity, target: targetEntity, success, strength: meanStrength, start, end, traceId, rebroadcast, hop, behalfOfId });
 
             if (!success) {
               this.stats.dropped += 1;
+              this.auditRadioDrop(
+                sender,
+                targetEntity.network,
+                auditedMessage,
+                traceId,
+                hop,
+                distance,
+                meanStrength,
+                rebroadcast,
+                behalfOfId
+              );
               continue;
             }
 
             this.stats.delivered += 1;
             const measuredStrength = this.measuredSignalStrength(meanStrength);
-            const latency = (distance / this.range) * RADIO_WAVE_TIME;
             this.deliveryQueue.push({
-              at: this.time + latency,
+              at: this.time,
               target: targetEntity.network,
               message: {
                 header: { ...message.header },
@@ -2218,11 +3407,22 @@
                 timebase: message.timebase,
                 command: message.command,
                 data: cloneData(message.data),
-                position: { ...message.position }
+                position: message.position ? { ...message.position } : null
               },
               strength: measuredStrength,
               traceId,
-              hop
+              hop,
+              auditMeta: {
+                senderDeviceKey: sender.auditDeviceKey,
+                senderMeshId: sender.id,
+                rebroadcast,
+                behalfOfId,
+                distance,
+                meanStrength,
+                deliveryProbability,
+                sentAt: this.time,
+                messageSnapshot: auditedMessage
+              }
             });
           }
           return true;
@@ -2237,18 +3437,28 @@
           if (this.logs.length > 100) this.logs.length = 100;
         }
 
+        deliverReadyPackets() {
+          this.deliveryQueue.sort((a, b) => a.at - b.at);
+          while (this.deliveryQueue.length && this.deliveryQueue[0].at <= this.time) {
+            const delivery = this.deliveryQueue.shift();
+            delivery.target.receive(
+              delivery.message,
+              delivery.strength,
+              delivery.traceId,
+              delivery.hop,
+              delivery.auditMeta
+            );
+          }
+        }
+
         update(realDeltaMs) {
           if (this.paused) return;
           const delta = Math.min(realDeltaMs, 80) * this.speed;
           this.time += delta;
 
-          this.deliveryQueue.sort((a, b) => a.at - b.at);
-          while (this.deliveryQueue.length && this.deliveryQueue[0].at <= this.time) {
-            const delivery = this.deliveryQueue.shift();
-            delivery.target.receive(delivery.message, delivery.strength, delivery.traceId, delivery.hop);
-          }
-
+          this.deliverReadyPackets();
           for (const entity of this.entities) entity.network.update(delta);
+          this.deliverReadyPackets();
           this.waves = this.waves.filter(wave => wave.end > this.time);
           this.pulses = this.pulses.filter(pulse => pulse.end > this.time);
         }
@@ -2258,9 +3468,14 @@
       const context = canvas.getContext("2d");
       const space = document.getElementById("space");
       const simulation = new Simulation();
+      let evaluator = null;
       let selected = null;
       let dragging = null;
+      let panning = null;
       let dragOffset = { x: 0, y: 0 };
+      let canvasPixelRatio = 1;
+      const camera = { x: 0, y: 0, zoom: 1 };
+      const displayRegistrationByFrame = new Map();
       let lastFrame = performance.now();
       let inspectorLastUpdated = 0;
       let diagnosticsLastUpdated = 0;
@@ -2271,9 +3486,11 @@
         addEight: document.getElementById("addEight"),
         pauseToggle: document.getElementById("pauseToggle"),
         resetSimulation: document.getElementById("resetSimulation"),
+        clearSimulation: document.getElementById("clearSimulation"),
         rangeControl: document.getElementById("rangeControl"),
         rangeOutput: document.getElementById("rangeOutput"),
         dropoffControl: document.getElementById("dropoffControl"),
+        deliveryModelControl: document.getElementById("deliveryModelControl"),
         rssiJitterControl: document.getElementById("rssiJitterControl"),
         rssiJitterOutput: document.getElementById("rssiJitterOutput"),
         rssiJitterPreset: document.getElementById("rssiJitterPreset"),
@@ -2290,12 +3507,40 @@
         forceNext: document.getElementById("forceNext"),
         showTopology: document.getElementById("showTopology"),
         showRadio: document.getElementById("showRadio"),
+        showSignalWaves: document.getElementById("showSignalWaves"),
         showEstimates: document.getElementById("showEstimates"),
+        fixedRelay: document.getElementById("fixedRelay"),
         deviceCount: document.getElementById("deviceCount"),
         rootCount: document.getElementById("rootCount"),
         relayCount: document.getElementById("relayCount"),
         clusterCount: document.getElementById("clusterCount"),
         deliveryRate: document.getElementById("deliveryRate"),
+        scenarioDeviceCount: document.getElementById("scenarioDeviceCount"),
+        scenarioAnchorCount: document.getElementById("scenarioAnchorCount"),
+        runScenario: document.getElementById("runScenario"),
+        peerCapacityControl: document.getElementById("peerCapacityControl"),
+        peerCapacityOutput: document.getElementById("peerCapacityOutput"),
+        solveCapacityControl: document.getElementById("solveCapacityControl"),
+        solveCapacityOutput: document.getElementById("solveCapacityOutput"),
+        anchorReserveControl: document.getElementById("anchorReserveControl"),
+        anchorReserveOutput: document.getElementById("anchorReserveOutput"),
+        payloadProfileControl: document.getElementById("payloadProfileControl"),
+        coordinateEncodingControl: document.getElementById("coordinateEncodingControl"),
+        coordinateQuantumControl: document.getElementById("coordinateQuantumControl"),
+        wireEnvelopeControl: document.getElementById("wireEnvelopeControl"),
+        positionPeriodControl: document.getElementById("positionPeriodControl"),
+        positionPeriodOutput: document.getElementById("positionPeriodOutput"),
+        qualityScore: document.getElementById("qualityScore"),
+        medianError: document.getElementById("medianError"),
+        p95Error: document.getElementById("p95Error"),
+        persistentOutliers: document.getElementById("persistentOutliers"),
+        locationWireCost: document.getElementById("locationWireCost"),
+        locationRamCost: document.getElementById("locationRamCost"),
+        outlierErrorControl: document.getElementById("outlierErrorControl"),
+        outlierErrorOutput: document.getElementById("outlierErrorOutput"),
+        outlierTimeControl: document.getElementById("outlierTimeControl"),
+        outlierTimeOutput: document.getElementById("outlierTimeOutput"),
+        evaluationNote: document.getElementById("evaluationNote"),
         selectedId: document.getElementById("selectedId"),
         selectedKind: document.getElementById("selectedKind"),
         selectedRole: document.getElementById("selectedRole"),
@@ -2306,17 +3551,21 @@
         dnaName: document.getElementById("dnaName"),
         topologyWarning: document.getElementById("topologyWarning"),
         factId: document.getElementById("factId"),
+        leaderFactLabel: document.getElementById("leaderFactLabel"),
         factUplink: document.getElementById("factUplink"),
+        factLeaderPath: document.getElementById("factLeaderPath"),
         factState: document.getElementById("factState"),
         factRelay: document.getElementById("factRelay"),
         factLastHeard: document.getElementById("factLastHeard"),
         factEstimate: document.getElementById("factEstimate"),
         factEstimateFrame: document.getElementById("factEstimateFrame"),
         factPositionMode: document.getElementById("factPositionMode"),
+        factPeerTable: document.getElementById("factPeerTable"),
         factClock: document.getElementById("factClock"),
         factNextPattern: document.getElementById("factNextPattern"),
         factNextPalette: document.getElementById("factNextPalette"),
         factBpm: document.getElementById("factBpm"),
+        relayExplanation: document.getElementById("relayExplanation"),
         patternProgressLabel: document.getElementById("patternProgressLabel"),
         patternProgressValue: document.getElementById("patternProgressValue"),
         patternProgressTrack: document.getElementById("patternProgressTrack"),
@@ -2328,6 +3577,25 @@
         factPosition: document.getElementById("factPosition"),
         factNeighbors: document.getElementById("factNeighbors"),
         factSignal: document.getElementById("factSignal"),
+        qualityChart: document.getElementById("qualityChart"),
+        factEvaluationCoverage: document.getElementById("factEvaluationCoverage"),
+        factWorstError: document.getElementById("factWorstError"),
+        factPeerEvictions: document.getElementById("factPeerEvictions"),
+        factPeerDrops: document.getElementById("factPeerDrops"),
+        factWireBytes: document.getElementById("factWireBytes"),
+        factCoordinateRange: document.getElementById("factCoordinateRange"),
+        factTableBytes: document.getElementById("factTableBytes"),
+        outlierList: document.getElementById("outlierList"),
+        copySelectedAudit: document.getElementById("copySelectedAudit"),
+        copyRunAudit: document.getElementById("copyRunAudit"),
+        auditCopyStatus: document.getElementById("auditCopyStatus"),
+        factAuditEvents: document.getElementById("factAuditEvents"),
+        factAuditTraffic: document.getElementById("factAuditTraffic"),
+        factAuditDecisions: document.getElementById("factAuditDecisions"),
+        factAuditDrops: document.getElementById("factAuditDrops"),
+        factAuditApplied: document.getElementById("factAuditApplied"),
+        factAuditRelays: document.getElementById("factAuditRelays"),
+        messageAuditList: document.getElementById("messageAuditList"),
         copySnapshot: document.getElementById("copySnapshot"),
         mirrorSnapshot: document.getElementById("mirrorSnapshot"),
         copyStatus: document.getElementById("copyStatus"),
@@ -2338,12 +3606,12 @@
 
       function resizeCanvas() {
         const rect = space.getBoundingClientRect();
-        const ratio = Math.min(window.devicePixelRatio || 1, 2);
-        canvas.width = Math.max(1, Math.floor(rect.width * ratio));
-        canvas.height = Math.max(1, Math.floor(rect.height * ratio));
+        canvasPixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.max(1, Math.floor(rect.width * canvasPixelRatio));
+        canvas.height = Math.max(1, Math.floor(rect.height * canvasPixelRatio));
         canvas.style.width = `${rect.width}px`;
         canvas.style.height = `${rect.height}px`;
-        context.setTransform(ratio, 0, 0, ratio, 0, 0);
+        context.setTransform(canvasPixelRatio, 0, 0, canvasPixelRatio, 0, 0);
         simulation.setBounds(rect.width, rect.height);
       }
 
@@ -2367,9 +3635,26 @@
         }
       }
 
-      function canvasPoint(event) {
+      function screenPoint(event) {
         const rect = canvas.getBoundingClientRect();
         return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      }
+
+      function worldPoint(screen) {
+        return {
+          x: (screen.x - camera.x) / camera.zoom,
+          y: (screen.y - camera.y) / camera.zoom
+        };
+      }
+
+      function resetCamera() {
+        camera.x = 0;
+        camera.y = 0;
+        camera.zoom = 1;
+      }
+
+      function resetDisplayRegistration() {
+        displayRegistrationByFrame.clear();
       }
 
       function hitTest(point) {
@@ -2396,36 +3681,204 @@
         applyValue();
       }
 
+      async function copyJSON(value, successLabel) {
+        const text = JSON.stringify(value, null, 2);
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+          } else {
+            const textarea = document.createElement("textarea");
+            textarea.value = text;
+            textarea.style.position = "fixed";
+            textarea.style.opacity = "0";
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand("copy");
+            textarea.remove();
+          }
+          ui.copyStatus.textContent = successLabel;
+          ui.auditCopyStatus.textContent = successLabel;
+        } catch (error) {
+          ui.copyStatus.textContent = "Copy unavailable";
+          ui.auditCopyStatus.textContent = "Copy unavailable";
+        }
+        setTimeout(() => {
+          ui.copyStatus.textContent = "";
+          ui.auditCopyStatus.textContent = "";
+        }, 1600);
+      }
+
+      function resetEvaluation() {
+        if (!evaluator) return;
+        evaluator.reset();
+        evaluator.update();
+        updateEvaluationUI();
+      }
+
+      function updateNetworkMetrics() {
+        const leaders = simulation.entities.filter(entity => !entity.network.isFollowing()).length;
+        const clusters = new Set(
+          simulation.entities
+            .filter(entity => !entity.network.isAnchor)
+            .map(entity => dnaKey(entity.network.dna))
+        ).size;
+        ui.deviceCount.textContent = String(simulation.entities.length);
+        ui.rootCount.textContent = String(leaders);
+        ui.relayCount.textContent = String(simulation.stats.rebroadcasts);
+        ui.clusterCount.textContent = String(clusters);
+        ui.deliveryRate.textContent = simulation.stats.eligible
+          ? `${Math.round((simulation.stats.delivered / simulation.stats.eligible) * 100)}%`
+          : "—";
+      }
+
+      function showEmptyField() {
+        ui.selectedKind.textContent = "Field empty";
+        ui.selectedId.textContent = "---";
+        ui.selectedRole.textContent = "No device";
+        ui.dnaCard.hidden = true;
+        ui.lightingScheduleSection.hidden = true;
+        ui.topologyWarning.hidden = true;
+        ui.factId.textContent = "---";
+        ui.factUplink.textContent = "none";
+        ui.factLeaderPath.textContent = "—";
+        ui.factState.textContent = "no device";
+        ui.factRelay.textContent = "inactive";
+        ui.factLastHeard.textContent = "never";
+        ui.factEstimate.textContent = "—";
+        ui.factEstimateFrame.textContent = "—";
+        ui.factPositionMode.textContent = "—";
+        ui.factPeerTable.textContent = `0 / ${simulation.peerCapacity}`;
+        ui.factClock.textContent = "—";
+        ui.factPosition.textContent = "—";
+        ui.factNeighbors.textContent = "0";
+        ui.factSignal.textContent = "none";
+        for (const list of [ui.positionKnowledgeList, ui.trafficList, ui.messageAuditList]) {
+          list.replaceChildren();
+          const item = document.createElement("li");
+          item.className = "empty-state";
+          item.textContent = "The field is empty.";
+          list.appendChild(item);
+        }
+        ui.factAuditEvents.textContent = "0";
+        ui.factAuditTraffic.textContent = "0 / 0";
+        ui.factAuditDecisions.textContent = "0 / 0";
+        ui.factAuditDrops.textContent = "0";
+        ui.factAuditApplied.textContent = "0";
+        ui.factAuditRelays.textContent = "0 / 0";
+        updateNetworkMetrics();
+      }
+
+      function runSelectedScenario() {
+        resetCamera();
+        resetDisplayRegistration();
+        selected = simulation.loadScenario(
+          Number(ui.scenarioDeviceCount.value),
+          Number(ui.scenarioAnchorCount.value)
+        );
+        resetEvaluation();
+        updateInspector(true);
+        updateDiagnostics(performance.now(), true);
+      }
+
+      function clearCurrentField() {
+        resetCamera();
+        resetDisplayRegistration();
+        simulation.clearField();
+        selected = null;
+        resetEvaluation();
+        showEmptyField();
+        updateDiagnostics(performance.now(), true);
+      }
+
+      function deleteSelectedDevice() {
+        if (!selected) return;
+        const removedIndex = simulation.entities.indexOf(selected);
+        if (!simulation.removeEntity(selected)) return;
+
+        selected = simulation.entities[removedIndex]
+          || simulation.entities[removedIndex - 1]
+          || null;
+        if (selected) updateInspector(true);
+        else showEmptyField();
+        if (evaluator) updateEvaluationUI();
+        updateNetworkMetrics();
+        updateDiagnostics(performance.now(), true);
+      }
+
+      function applyPeerCapacity() {
+        simulation.peerCapacity = Number(ui.peerCapacityControl.value);
+        simulation.solveCapacity = Math.min(simulation.solveCapacity, simulation.peerCapacity);
+        simulation.anchorReserve = Math.min(simulation.anchorReserve, simulation.peerCapacity);
+        ui.solveCapacityControl.value = String(simulation.solveCapacity);
+        ui.anchorReserveControl.value = String(simulation.anchorReserve);
+        ui.peerCapacityOutput.value = String(simulation.peerCapacity);
+        ui.solveCapacityOutput.value = String(simulation.solveCapacity);
+        ui.anchorReserveOutput.value = String(simulation.anchorReserve);
+        for (const entity of simulation.entities) entity.network.enforcePeerCapacity();
+        if (evaluator) updateEvaluationUI();
+      }
+
       canvas.addEventListener("pointerdown", event => {
-        const point = canvasPoint(event);
+        if (event.button !== 0) return;
+        canvas.focus({ preventScroll: true });
+        const screen = screenPoint(event);
+        const point = worldPoint(screen);
         const hit = hitTest(point);
-        if (!hit) return;
-        selected = hit;
-        dragging = hit;
-        dragOffset = { x: hit.x - point.x, y: hit.y - point.y };
+        if (hit) {
+          selected = hit;
+          dragging = hit;
+          dragOffset = { x: hit.x - point.x, y: hit.y - point.y };
+          updateInspector(true);
+        } else {
+          panning = {
+            pointerX: screen.x,
+            pointerY: screen.y,
+            cameraX: camera.x,
+            cameraY: camera.y
+          };
+        }
         canvas.classList.add("dragging");
         canvas.setPointerCapture(event.pointerId);
-        updateInspector(true);
       });
 
       canvas.addEventListener("pointermove", event => {
-        if (!dragging) return;
-        const point = canvasPoint(event);
-        dragging.x = clamp(point.x + dragOffset.x, 45, simulation.width - 45);
-        dragging.y = clamp(point.y + dragOffset.y, 78, simulation.height - 72);
-        dragging.network.lockAnchorPosition();
+        const screen = screenPoint(event);
+        if (dragging) {
+          const point = worldPoint(screen);
+          dragging.x = clamp(point.x + dragOffset.x, 45, simulation.width - 45);
+          dragging.y = clamp(point.y + dragOffset.y, 78, simulation.height - 72);
+          dragging.network.lockAnchorPosition();
+        } else if (panning) {
+          camera.x = panning.cameraX + screen.x - panning.pointerX;
+          camera.y = panning.cameraY + screen.y - panning.pointerY;
+        }
       });
 
       function endDrag(event) {
         dragging = null;
+        panning = null;
         canvas.classList.remove("dragging");
         if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
       }
 
       canvas.addEventListener("pointerup", endDrag);
       canvas.addEventListener("pointercancel", endDrag);
+      canvas.addEventListener("keydown", event => {
+        if (event.key !== "Backspace" && event.key !== "Delete") return;
+        event.preventDefault();
+        deleteSelectedDevice();
+      });
+      canvas.addEventListener("wheel", event => {
+        event.preventDefault();
+        const screen = screenPoint(event);
+        const beforeZoom = worldPoint(screen);
+        const zoomFactor = Math.exp(-event.deltaY * 0.0015);
+        camera.zoom = clamp(camera.zoom * zoomFactor, 0.25, 4);
+        camera.x = screen.x - beforeZoom.x * camera.zoom;
+        camera.y = screen.y - beforeZoom.y * camera.zoom;
+      }, { passive: false });
       canvas.addEventListener("dblclick", event => {
-        const point = canvasPoint(event);
+        const point = worldPoint(screenPoint(event));
         if (!hitTest(point)) addDeviceAt(point.x, point.y);
       });
 
@@ -2443,6 +3896,62 @@
         );
       });
       ui.addEight.addEventListener("click", () => addNearCenter(8));
+      ui.runScenario.addEventListener("click", runSelectedScenario);
+      ui.peerCapacityControl.addEventListener("input", applyPeerCapacity);
+      ui.solveCapacityControl.addEventListener("input", () => {
+        simulation.solveCapacity = Math.min(
+          Number(ui.solveCapacityControl.value),
+          simulation.peerCapacity
+        );
+        ui.solveCapacityControl.value = String(simulation.solveCapacity);
+        ui.solveCapacityOutput.value = String(simulation.solveCapacity);
+      });
+      ui.anchorReserveControl.addEventListener("input", () => {
+        simulation.anchorReserve = Math.min(
+          Number(ui.anchorReserveControl.value),
+          simulation.peerCapacity
+        );
+        ui.anchorReserveControl.value = String(simulation.anchorReserve);
+        ui.anchorReserveOutput.value = String(simulation.anchorReserve);
+        for (const entity of simulation.entities) entity.network.enforcePeerCapacity();
+      });
+      ui.payloadProfileControl.addEventListener("change", () => {
+        simulation.payloadProfileKey = ui.payloadProfileControl.value;
+        if (evaluator) updateEvaluationUI();
+      });
+      ui.coordinateEncodingControl.addEventListener("change", () => {
+        simulation.coordinateEncodingKey = ui.coordinateEncodingControl.value;
+        if (evaluator) updateEvaluationUI();
+      });
+      ui.coordinateQuantumControl.addEventListener("change", () => {
+        simulation.coordinateQuantum = Number(ui.coordinateQuantumControl.value);
+        if (evaluator) updateEvaluationUI();
+      });
+      ui.wireEnvelopeControl.addEventListener("change", () => {
+        simulation.wireEnvelope = ui.wireEnvelopeControl.value;
+        if (evaluator) updateEvaluationUI();
+      });
+      ui.positionPeriodControl.addEventListener("input", () => {
+        simulation.positionBroadcastPeriod = Number(ui.positionPeriodControl.value) * 1000;
+        ui.positionPeriodOutput.value = `${Number(ui.positionPeriodControl.value).toFixed(2).replace(/0$/, "").replace(/\.0$/, "")} s`;
+        for (const entity of simulation.entities) {
+          entity.network.nextPositionBroadcastAt = Math.min(
+            entity.network.nextPositionBroadcastAt,
+            simulation.time + simulation.positionBroadcastPeriod
+          );
+        }
+        if (evaluator) updateEvaluationUI();
+      });
+      ui.outlierErrorControl.addEventListener("input", () => {
+        simulation.outlierErrorThreshold = Number(ui.outlierErrorControl.value);
+        ui.outlierErrorOutput.value = `${simulation.outlierErrorThreshold} px`;
+        if (evaluator) updateEvaluationUI();
+      });
+      ui.outlierTimeControl.addEventListener("input", () => {
+        simulation.outlierDuration = Number(ui.outlierTimeControl.value) * 1000;
+        ui.outlierTimeOutput.value = `${ui.outlierTimeControl.value} s`;
+        if (evaluator) updateEvaluationUI();
+      });
       ui.pauseToggle.addEventListener("click", () => {
         simulation.paused = !simulation.paused;
         ui.pauseToggle.textContent = simulation.paused ? "▶" : "Ⅱ";
@@ -2450,14 +3959,25 @@
         ui.pauseToggle.setAttribute("aria-label", ui.pauseToggle.title);
       });
       ui.resetSimulation.addEventListener("click", () => {
+        resetCamera();
+        resetDisplayRegistration();
         selected = simulation.reset();
+        resetEvaluation();
         updateInspector(true);
       });
+      ui.clearSimulation.addEventListener("click", clearCurrentField);
       ui.rangeControl.addEventListener("input", () => {
         simulation.range = Number(ui.rangeControl.value);
         ui.rangeOutput.value = `${simulation.range} px`;
       });
       ui.dropoffControl.addEventListener("change", () => { simulation.dropoff = ui.dropoffControl.value; });
+      ui.deliveryModelControl.addEventListener("change", () => {
+        simulation.deliveryModel = ui.deliveryModelControl.value;
+      });
+      ui.fixedRelay.addEventListener("change", () => {
+        simulation.fixedRelay = ui.fixedRelay.checked;
+        runSelectedScenario();
+      });
       bindDecibelControl(ui.rssiJitterControl, ui.rssiJitterOutput, ui.rssiJitterPreset, "rssiJitterSigmaDb");
       bindDecibelControl(ui.txSpreadControl, ui.txSpreadOutput, ui.txSpreadPreset, "txPowerSigmaDb");
       bindDecibelControl(ui.linkBiasControl, ui.linkBiasOutput, ui.linkBiasPreset, "linkShadowSigmaDb");
@@ -2480,27 +4000,11 @@
           if (!entity.network.isFollowing()) entity.network.forceNext();
         }
       });
-      ui.copySnapshot.addEventListener("click", async () => {
-        const text = JSON.stringify(createSnapshot(), null, 2);
-        try {
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            await navigator.clipboard.writeText(text);
-          } else {
-            const textarea = document.createElement("textarea");
-            textarea.value = text;
-            textarea.style.position = "fixed";
-            textarea.style.opacity = "0";
-            document.body.appendChild(textarea);
-            textarea.select();
-            document.execCommand("copy");
-            textarea.remove();
-          }
-          ui.copyStatus.textContent = "Copied";
-        } catch (error) {
-          ui.copyStatus.textContent = "Copy unavailable";
-        }
-        setTimeout(() => { ui.copyStatus.textContent = ""; }, 1600);
+      ui.copySnapshot.addEventListener("click", () => copyJSON(createSnapshot(), "Snapshot copied"));
+      ui.copySelectedAudit.addEventListener("click", () => {
+        if (selected) copyJSON(createDeviceAuditExport(selected.network), "Device audit copied");
       });
+      ui.copyRunAudit.addEventListener("click", () => copyJSON(createRunAuditExport(), "Run audit copied"));
       ui.mirrorSnapshot.addEventListener("change", () => {
         if (!ui.mirrorSnapshot.checked && location.hash.startsWith("#tubes=")) {
           history.replaceState(null, "", location.href.split("#")[0]);
@@ -2509,22 +4013,19 @@
       });
 
       function drawGrid() {
-        const { width, height } = simulation;
-        context.clearRect(0, 0, width, height);
-        context.fillStyle = "#090d16";
-        context.fillRect(0, 0, width, height);
-
+        const left = -camera.x / camera.zoom;
+        const top = -camera.y / camera.zoom;
+        const right = left + simulation.width / camera.zoom;
+        const bottom = top + simulation.height / camera.zoom;
         const spacing = 32;
+        const firstX = Math.floor(left / spacing) * spacing + 0.5;
+        const firstY = Math.floor(top / spacing) * spacing + 0.5;
         context.beginPath();
-        for (let x = 0.5; x < width; x += spacing) { context.moveTo(x, 0); context.lineTo(x, height); }
-        for (let y = 0.5; y < height; y += spacing) { context.moveTo(0, y); context.lineTo(width, y); }
+        for (let x = firstX; x <= right; x += spacing) { context.moveTo(x, top); context.lineTo(x, bottom); }
+        for (let y = firstY; y <= bottom; y += spacing) { context.moveTo(left, y); context.lineTo(right, y); }
         context.strokeStyle = "rgba(133, 151, 184, 0.055)";
-        context.lineWidth = 1;
+        context.lineWidth = 1 / camera.zoom;
         context.stroke();
-
-        context.fillStyle = "rgba(143, 158, 187, 0.24)";
-        context.font = "700 9px ui-monospace, monospace";
-        context.fillText("SIMULATION SPACE · POSITION IS OMNISCIENT", 15, 19);
       }
 
       function drawRadioField() {
@@ -2615,6 +4116,7 @@
       }
 
       function drawRadioWaves() {
+        if (!ui.showSignalWaves.checked) return;
         for (const wave of simulation.waves) {
           const progress = (simulation.time - wave.start) / RADIO_WAVE_TIME;
           if (progress <= 0 || progress > 1) continue;
@@ -2683,14 +4185,47 @@
         return roleId ? simulation.entities.find(entity => entity.network.id === roleId) || null : null;
       }
 
+      function displayRegistrationFit(frameId, transform) {
+        const ambiguousSolutions = new Set([
+          POSITION_SOLUTION.UNPLACED,
+          POSITION_SOLUTION.RADIAL,
+          POSITION_SOLUTION.MIRRORED
+        ]);
+        let squaredError = 0;
+        let sampleCount = 0;
+        for (const entity of simulation.entities) {
+          const estimate = entity.network.positionEstimate;
+          if (estimate.frameId !== frameId || ambiguousSolutions.has(estimate.solution)) continue;
+          if (!Number.isFinite(estimate.x) || !Number.isFinite(estimate.y)) continue;
+          const displayPoint = estimateCanvasCoordinates(transform, estimate.x, estimate.y);
+          squaredError += (displayPoint.x - entity.x) ** 2 + (displayPoint.y - entity.y) ** 2;
+          sampleCount += 1;
+        }
+        return {
+          sampleCount,
+          error: sampleCount ? Math.sqrt(squaredError / sampleCount) : null
+        };
+      }
+
       function estimateDisplayTransform(frameId) {
         const origin = estimateCanvasOrigin(frameId);
+        const identity = {
+          origin,
+          estimatedX: { x: 1, y: 0 },
+          physicalX: { x: 1, y: 0 },
+          reflection: 1,
+          rotation: 0,
+          registrationError: null,
+          alternativeError: null,
+          registrationSampleCount: 0,
+          reflectionSource: "fixed"
+        };
         if (frameId === ANCHORED_FRAME_ID) {
-          return { origin, estimatedX: { x: 1, y: 0 }, physicalX: { x: 1, y: 0 }, reflection: 1, rotation: 0 };
+          return identity;
         }
         const axisEntity = positionFrameRoleEntity(frameId, "axisId");
         if (!axisEntity || axisEntity.network.positionEstimate.frameId !== frameId) {
-          return { origin, estimatedX: { x: 1, y: 0 }, physicalX: { x: 1, y: 0 }, reflection: 1, rotation: 0 };
+          return identity;
         }
 
         const estimatedAxis = axisEntity.network.positionEstimate;
@@ -2698,12 +4233,12 @@
         const estimatedLength = Math.hypot(estimatedAxis.x, estimatedAxis.y);
         const physicalLength = Math.hypot(physicalAxis.x, physicalAxis.y);
         if (estimatedLength <= POSITION_SETTLED_EPSILON || physicalLength <= POSITION_SETTLED_EPSILON) {
-          return { origin, estimatedX: { x: 1, y: 0 }, physicalX: { x: 1, y: 0 }, reflection: 1, rotation: 0 };
+          return identity;
         }
 
         const estimatedX = { x: estimatedAxis.x / estimatedLength, y: estimatedAxis.y / estimatedLength };
         const physicalX = { x: physicalAxis.x / physicalLength, y: physicalAxis.y / physicalLength };
-        let reflection = 1;
+        let orientationReflection = 1;
         const orientationEntity = positionFrameRoleEntity(frameId, "orientationId");
         if (orientationEntity && orientationEntity.network.positionEstimate.frameId === frameId) {
           const estimatedOrientation = orientationEntity.network.positionEstimate;
@@ -2714,17 +4249,40 @@
           const estimatedSide = estimatedAxis.x * estimatedOrientation.y - estimatedAxis.y * estimatedOrientation.x;
           const physicalSide = physicalAxis.x * physicalOrientation.y - physicalAxis.y * physicalOrientation.x;
           if (Math.abs(estimatedSide) > POSITION_SETTLED_EPSILON && Math.abs(physicalSide) > POSITION_SETTLED_EPSILON) {
-            reflection = Math.sign(estimatedSide) === Math.sign(physicalSide) ? 1 : -1;
+            orientationReflection = Math.sign(estimatedSide) === Math.sign(physicalSide) ? 1 : -1;
           }
         }
 
-        // Registration uses simulator-only physical vectors; device estimates and their metric errors remain untouched.
-        return {
+        const baseTransform = {
           origin,
           estimatedX,
           physicalX,
-          reflection,
           rotation: Math.atan2(physicalX.y, physicalX.x) - Math.atan2(estimatedX.y, estimatedX.x)
+        };
+        const normalFit = displayRegistrationFit(frameId, { ...baseTransform, reflection: 1 });
+        const reflectedFit = displayRegistrationFit(frameId, { ...baseTransform, reflection: -1 });
+        let reflection = displayRegistrationByFrame.get(frameId)?.reflection || orientationReflection;
+        let reflectionSource = "orientation";
+
+        if (normalFit.sampleCount >= 3 && reflectedFit.sampleCount >= 3) {
+          const currentFit = reflection > 0 ? normalFit : reflectedFit;
+          const alternateFit = reflection > 0 ? reflectedFit : normalFit;
+          if (alternateFit.error + DISPLAY_REFLECTION_HYSTERESIS < currentFit.error) reflection *= -1;
+          reflectionSource = "best-fit";
+          displayRegistrationByFrame.set(frameId, { reflection });
+        }
+
+        const selectedFit = reflection > 0 ? normalFit : reflectedFit;
+        const alternateFit = reflection > 0 ? reflectedFit : normalFit;
+
+        // Registration uses simulator-only truth for overlay and scoring; no device estimate is modified.
+        return {
+          ...baseTransform,
+          reflection,
+          registrationError: selectedFit.error,
+          alternativeError: alternateFit.error,
+          registrationSampleCount: selectedFit.sampleCount,
+          reflectionSource
         };
       }
 
@@ -2746,6 +4304,144 @@
       function estimateColor(node, alpha = 1) {
         const hue = (node.id * 137.508) % 360;
         return `hsla(${hue}, 82%, 72%, ${alpha})`;
+      }
+
+      class EvaluationTracker {
+        constructor(simulationModel) {
+          this.simulation = simulationModel;
+          this.reset();
+        }
+
+        reset() {
+          this.history = [];
+          this.outlierStates = new Map();
+          this.outlierEvents = [];
+          this.nextSampleAt = 0;
+          this.current = {
+            score: 0,
+            medianError: null,
+            p95Error: null,
+            worstError: null,
+            positioned: 0,
+            total: 0,
+            persistentOutliers: []
+          };
+        }
+
+        isUniqueSolution(node) {
+          return ![
+            POSITION_SOLUTION.UNPLACED,
+            POSITION_SOLUTION.RADIAL,
+            POSITION_SOLUTION.MIRRORED
+          ].includes(node.positionEstimate.solution);
+        }
+
+        referenceFrameId(tubes) {
+          const counts = new Map();
+          for (const entity of tubes) {
+            const node = entity.network;
+            if (!this.isUniqueSolution(node)) continue;
+            const frameId = node.positionEstimate.frameId;
+            counts.set(frameId, (counts.get(frameId) || 0) + 1);
+          }
+          if (counts.has(ANCHORED_FRAME_ID)) return ANCHORED_FRAME_ID;
+          const ordered = [...counts.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0]);
+          return ordered.length ? ordered[0][0] : null;
+        }
+
+        percentile(sortedValues, fraction) {
+          if (!sortedValues.length) return null;
+          const index = clamp(Math.ceil(sortedValues.length * fraction) - 1, 0, sortedValues.length - 1);
+          return sortedValues[index];
+        }
+
+        updateOutlier(node, error) {
+          const existing = this.outlierStates.get(node.id) || {
+            since: null,
+            maximumError: 0,
+            reported: false
+          };
+
+          if (error === null || error <= this.simulation.outlierErrorThreshold) {
+            existing.since = null;
+            existing.maximumError = 0;
+            existing.reported = false;
+            this.outlierStates.set(node.id, existing);
+            return null;
+          }
+
+          if (existing.since === null) existing.since = this.simulation.time;
+          existing.maximumError = Math.max(existing.maximumError, error);
+          const duration = this.simulation.time - existing.since;
+          if (duration >= this.simulation.outlierDuration && !existing.reported) {
+            existing.reported = true;
+            this.outlierEvents.unshift({
+              nodeId: node.id,
+              detectedAt: this.simulation.time,
+              maximumError: existing.maximumError
+            });
+            if (this.outlierEvents.length > 20) this.outlierEvents.length = 20;
+          }
+          this.outlierStates.set(node.id, existing);
+          return existing.reported
+            ? { nodeId: node.id, error, duration, maximumError: existing.maximumError }
+            : null;
+        }
+
+        sample() {
+          const tubes = this.simulation.entities.filter(entity =>
+            !entity.network.isAnchor && entity.network.status === STATUS.STARTED
+          );
+          const referenceFrameId = this.referenceFrameId(tubes);
+          const transform = referenceFrameId === null ? null : estimateDisplayTransform(referenceFrameId);
+          const errors = [];
+          const persistentOutliers = [];
+          let scoreTotal = 0;
+          let positioned = 0;
+
+          for (const entity of tubes) {
+            const node = entity.network;
+            const isPositioned = transform
+              && node.positionEstimate.frameId === referenceFrameId
+              && this.isUniqueSolution(node);
+            let error = null;
+            if (isPositioned) {
+              const estimate = estimateCanvasPoint(node, transform);
+              error = Math.hypot(estimate.x - entity.x, estimate.y - entity.y);
+              errors.push(error);
+              positioned += 1;
+              scoreTotal += 100 * Math.exp(-error / QUALITY_ERROR_SCALE);
+            }
+            const outlier = this.updateOutlier(node, error);
+            if (outlier) persistentOutliers.push(outlier);
+          }
+
+          errors.sort((a, b) => a - b);
+          this.current = {
+            score: tubes.length ? scoreTotal / tubes.length : 0,
+            medianError: this.percentile(errors, 0.5),
+            p95Error: this.percentile(errors, 0.95),
+            worstError: errors.length ? errors[errors.length - 1] : null,
+            positioned,
+            total: tubes.length,
+            persistentOutliers
+          };
+          this.history.push({
+            at: this.simulation.time,
+            score: this.current.score,
+            medianError: this.current.medianError,
+            p95Error: this.current.p95Error,
+            outlierCount: persistentOutliers.length
+          });
+          if (this.history.length > QUALITY_HISTORY_LIMIT) this.history.shift();
+        }
+
+        update() {
+          if (this.simulation.time < this.nextSampleAt) return false;
+          this.nextSampleAt = this.simulation.time + QUALITY_SAMPLE_PERIOD;
+          this.sample();
+          return true;
+        }
       }
 
       function drawEstimatedPositions() {
@@ -2774,9 +4470,12 @@
           context.textAlign = "left";
           const rotationDegrees = Math.round(transform.rotation * 180 / Math.PI);
           const reflectionLabel = transform.reflection < 0 ? " · MIRRORED" : "";
+          const fitLabel = transform.registrationError === null
+            ? ""
+            : ` · FIT ${Math.round(transform.registrationError)}px · ${transform.reflection < 0 ? "NO-FLIP" : "FLIP"} ${Math.round(transform.alternativeError)}px`;
           const frameLabel = frameId === ANCHORED_FRAME_ID
             ? "ANCHORED FRAME · FIXED CANVAS COORDINATES"
-            : `F ${formatId(frameId)} ORIGIN (0,0) · VIEW ${rotationDegrees}°${reflectionLabel}`;
+            : `F ${formatId(frameId)} ORIGIN (0,0) · VIEW ${rotationDegrees}°${reflectionLabel}${fitLabel}`;
           context.fillText(frameLabel, origin.x + 18, origin.y + 14);
         }
 
@@ -2941,6 +4640,14 @@
         context.closePath();
       }
 
+      function leaderPathLabel(node, compact = false) {
+        if (!node.isFollowing()) return compact ? "SELF" : "self-originated";
+        if (!simulation.fixedRelay) return compact ? `UP ${formatId(node.uplinkId)}` : "legacy uplink";
+        if (node.leaderViaId === 0) return compact ? "WAIT RELAY" : "waiting for leader state";
+        if (node.leaderViaId === node.uplinkId) return compact ? "DIRECT" : `direct from ${formatId(node.uplinkId)}`;
+        return compact ? `VIA ${formatId(node.leaderViaId)}` : `relayed via ${formatId(node.leaderViaId)}`;
+      }
+
       function drawAnchor(entity) {
         const node = entity.network;
         const isSelected = entity === selected;
@@ -2992,7 +4699,11 @@
         context.fillStyle = node.status === STATUS.RECEIVING ? "#667189" : "#f6d365";
         const statusLabel = node.status === STATUS.RECEIVING
           ? "ANCHOR · BOOT"
-          : node.isFollowing() ? `ANCHOR · ↑${formatId(node.uplinkId)}` : "ANCHOR · LEAD";
+          : node.isFollowing()
+          ? simulation.fixedRelay
+            ? `ANCHOR · F ${formatId(node.uplinkId)} · ${leaderPathLabel(node, true)}`
+            : `ANCHOR · ↑${formatId(node.uplinkId)}`
+          : "ANCHOR · LEAD";
         context.fillText(statusLabel, entity.x, entity.y + 31);
 
         if (node.isRelayActive()) {
@@ -3057,7 +4768,7 @@
           roundedRectPath(ledX, ledY, ledWidth, ledHeight, 1.8);
           context.fillStyle = node.status === STATUS.RECEIVING
             ? "rgba(90, 98, 114, 0.28)"
-            : animationColor(node.dna, index, ledCount, node.animationTime());
+            : animationColor(node.dna, index, ledCount, node.patternTime());
           context.fill();
         }
 
@@ -3091,7 +4802,11 @@
           : !node.isFollowing() ? "#8ef0d0" : "#94a0b8";
         const statusLabel = node.status === STATUS.RECEIVING
           ? "BOOT"
-          : !node.isFollowing() ? "LEADING" : `FOLLOW ↑${formatId(node.uplinkId)}`;
+          : !node.isFollowing()
+          ? "LEADING"
+          : simulation.fixedRelay
+          ? `FOLLOW ${formatId(node.uplinkId)} · ${leaderPathLabel(node, true)}`
+          : `FOLLOW ↑${formatId(node.uplinkId)}`;
         context.fillText(statusLabel, entity.x, y + height + 15);
 
         const dotY = y + height + 25;
@@ -3126,6 +4841,14 @@
       }
 
       function draw() {
+        context.setTransform(canvasPixelRatio, 0, 0, canvasPixelRatio, 0, 0);
+        context.clearRect(0, 0, simulation.width, simulation.height);
+        context.fillStyle = "#090d16";
+        context.fillRect(0, 0, simulation.width, simulation.height);
+
+        context.save();
+        context.translate(camera.x, camera.y);
+        context.scale(camera.zoom, camera.zoom);
         drawGrid();
         drawRadioField();
         drawTopology();
@@ -3134,6 +4857,223 @@
         drawEstimatedPositions();
         const ordered = [...simulation.entities].sort((a, b) => (a === selected ? 1 : 0) - (b === selected ? 1 : 0));
         for (const entity of ordered) drawDevice(entity);
+        context.restore();
+
+        context.fillStyle = "rgba(143, 158, 187, 0.24)";
+        context.font = "700 9px ui-monospace, monospace";
+        context.textAlign = "left";
+        context.fillText(`SIMULATION SPACE · ${Math.round(camera.zoom * 100)}% · POSITION IS OMNISCIENT`, 15, 19);
+      }
+
+      function formatBytes(bytes) {
+        if (bytes < 1024) return `${Math.round(bytes)} B`;
+        return `${(bytes / 1024).toFixed(bytes < 10240 ? 1 : 0)} KiB`;
+      }
+
+      function formatByteRate(bytesPerSecond) {
+        if (bytesPerSecond < 1024) return `${Math.round(bytesPerSecond)} B/s`;
+        return `${(bytesPerSecond / 1024).toFixed(1)} KiB/s`;
+      }
+
+      function auditDNAStateLabel(state) {
+        if (!state?.dna) return "no DNA state";
+        const pattern = PATTERNS[state.dna.pattern]?.name || `P${state.dna.pattern}`;
+        const palette = PALETTES[state.dna.palette]?.name || `C${state.dna.palette}`;
+        return `P${state.dna.pattern} ${pattern} / C${state.dna.palette} ${palette}`;
+      }
+
+      function auditPayloadLabel(message) {
+        const states = message?.data?.states;
+        if (!states) return "";
+        const pattern = PATTERNS[states.current.patternId]?.name || `P${states.current.patternId}`;
+        const palette = PALETTES[states.current.paletteId]?.name || `C${states.current.paletteId}`;
+        return ` · payload P${states.current.patternId} ${pattern} / C${states.current.paletteId} ${palette}`;
+      }
+
+      function auditEventLabel(event) {
+        const command = event.message?.commandName || "LOCAL";
+        const trace = event.traceId === null ? "" : ` · trace #${event.traceId}`;
+        if (event.kind === "send") {
+          const relay = event.rebroadcast ? ` relay for ${formatId(event.behalfOfId)}` : "";
+          return `TX ${command}:${event.message.recipientsName}${relay}${trace}${auditPayloadLabel(event.message)}`;
+        }
+        if (event.kind === "radio-drop") {
+          const signal = event.radio?.meanStrength === null
+            ? ""
+            : ` · signal ${(event.radio.meanStrength * 100).toFixed(1)}%`;
+          const delivery = event.radio?.deliveryProbability === null
+            ? ""
+            : ` · delivery ${(event.radio.deliveryProbability * 100).toFixed(1)}%`;
+          return `NO RX ${command} from ${formatId(event.peerId)} · ${event.reason}${signal}${delivery}${trace}${auditPayloadLabel(event.message)}`;
+        }
+        if (event.kind === "local-transition") {
+          return `LOCAL ${event.reason} · ${auditDNAStateLabel(event.before)} → ${auditDNAStateLabel(event.after)}`;
+        }
+        const applied = event.appliedState
+          ? ` · applied ${auditDNAStateLabel(event.before)} → ${auditDNAStateLabel(event.after)}`
+          : "";
+        const relay = event.relayed ? " · relayed" : "";
+        const physicalPath = event.physicalPeerId !== null
+          && event.physicalPeerId !== event.peerId
+          ? ` via ${formatId(event.physicalPeerId)}`
+          : "";
+        return `RX ${command} from ${formatId(event.peerId)}${physicalPath} · ${event.outcome}: ${event.reason}${applied}${relay}${trace}${auditPayloadLabel(event.message)}`;
+      }
+
+      function drawQualityChart() {
+        const chart = ui.qualityChart;
+        const rect = chart.getBoundingClientRect();
+        const ratio = Math.min(window.devicePixelRatio || 1, 2);
+        const width = Math.max(1, Math.floor(rect.width));
+        const height = Math.max(1, Math.floor(rect.height));
+        if (chart.width !== Math.floor(width * ratio) || chart.height !== Math.floor(height * ratio)) {
+          chart.width = Math.floor(width * ratio);
+          chart.height = Math.floor(height * ratio);
+        }
+        const chartContext = chart.getContext("2d");
+        chartContext.setTransform(ratio, 0, 0, ratio, 0, 0);
+        chartContext.clearRect(0, 0, width, height);
+        chartContext.fillStyle = "rgba(4, 7, 12, 0.72)";
+        chartContext.fillRect(0, 0, width, height);
+
+        const left = 25;
+        const right = 8;
+        const top = 8;
+        const bottom = 17;
+        const plotWidth = Math.max(1, width - left - right);
+        const plotHeight = Math.max(1, height - top - bottom);
+        chartContext.font = "700 8px ui-monospace, monospace";
+        chartContext.textAlign = "right";
+        for (const score of [0, 50, 100]) {
+          const y = top + plotHeight * (1 - score / 100);
+          chartContext.strokeStyle = "rgba(151, 167, 200, 0.13)";
+          chartContext.lineWidth = 1;
+          chartContext.beginPath();
+          chartContext.moveTo(left, y);
+          chartContext.lineTo(width - right, y);
+          chartContext.stroke();
+          chartContext.fillStyle = "rgba(148, 160, 184, 0.72)";
+          chartContext.fillText(String(score), left - 4, y + 3);
+        }
+
+        const history = evaluator.history;
+        if (history.length) {
+          const firstAt = history[0].at;
+          const lastAt = Math.max(firstAt + 1, history[history.length - 1].at);
+          const pointFor = sample => ({
+            x: left + ((sample.at - firstAt) / (lastAt - firstAt)) * plotWidth,
+            y: top + (1 - sample.score / 100) * plotHeight
+          });
+
+          chartContext.strokeStyle = "#8ef0d0";
+          chartContext.lineWidth = 1.8;
+          chartContext.beginPath();
+          history.forEach((sample, index) => {
+            const point = pointFor(sample);
+            if (index === 0) chartContext.moveTo(point.x, point.y);
+            else chartContext.lineTo(point.x, point.y);
+          });
+          chartContext.stroke();
+
+          chartContext.fillStyle = "#ff7f91";
+          for (const sample of history) {
+            if (!sample.outlierCount) continue;
+            const point = pointFor(sample);
+            chartContext.beginPath();
+            chartContext.arc(point.x, point.y, 2.5, 0, Math.PI * 2);
+            chartContext.fill();
+          }
+
+          chartContext.fillStyle = "rgba(148, 160, 184, 0.72)";
+          chartContext.textAlign = "left";
+          chartContext.fillText(`${((lastAt - firstAt) / 1000).toFixed(0)}s history`, left, height - 5);
+        }
+      }
+
+      function updateEvaluationUI() {
+        const evaluation = evaluator.current;
+        ui.qualityScore.textContent = evaluation.total ? evaluation.score.toFixed(0) : "—";
+        ui.medianError.textContent = evaluation.medianError === null ? "—" : `${evaluation.medianError.toFixed(1)} px`;
+        ui.p95Error.textContent = evaluation.p95Error === null ? "—" : `${evaluation.p95Error.toFixed(1)} px`;
+        ui.persistentOutliers.textContent = String(evaluation.persistentOutliers.length);
+        ui.locationWireCost.textContent = formatByteRate(simulation.positionTrafficBytesPerSecond());
+        ui.locationRamCost.textContent = formatBytes(simulation.peerTableBytes());
+        ui.factEvaluationCoverage.textContent = `${evaluation.positioned} / ${evaluation.total}`;
+        ui.factWorstError.textContent = evaluation.worstError === null ? "—" : `${evaluation.worstError.toFixed(1)} px`;
+        ui.factPeerEvictions.textContent = String(simulation.stats.peerEvictions);
+        ui.factPeerDrops.textContent = String(simulation.stats.peerAdmissionDrops);
+        ui.factWireBytes.textContent = `${simulation.positionPayloadBytes()} B / ${simulation.positionPacketBytes()} B`;
+        ui.factCoordinateRange.textContent = `±${simulation.coordinateMaximum().toLocaleString()} px · ${simulation.stats.coordinateSaturations} clipped`;
+        ui.factTableBytes.textContent = `${simulation.peerCapacity} × ${simulation.peerEntryBytes()} B = ${formatBytes(simulation.peerTableBytes())}`;
+        ui.evaluationNote.textContent = `Quality registers one shared frame to physical truth for scoring only, choosing rotation and optional reflection by best fit. A tube never receives that registration or any true position. An outlier is reported after remaining more than ${simulation.outlierErrorThreshold} px wrong for ${(simulation.outlierDuration / 1000).toFixed(0)} simulated seconds.`;
+
+        ui.outlierList.replaceChildren();
+        const currentOutliers = evaluation.persistentOutliers.slice().sort((a, b) => b.error - a.error);
+        const recentEvents = evaluator.outlierEvents
+          .filter(event => !currentOutliers.some(outlier => outlier.nodeId === event.nodeId))
+          .slice(0, Math.max(0, 5 - currentOutliers.length));
+        if (!currentOutliers.length && !recentEvents.length) {
+          const item = document.createElement("li");
+          item.className = "empty-state";
+          item.textContent = "No persistent position outliers detected.";
+          ui.outlierList.appendChild(item);
+        } else {
+          for (const outlier of currentOutliers.slice(0, 5)) {
+            const item = document.createElement("li");
+            item.className = "outlier-item";
+            item.textContent = `${formatId(outlier.nodeId)} · ${outlier.error.toFixed(1)} px wrong for ${(outlier.duration / 1000).toFixed(1)}s · max ${outlier.maximumError.toFixed(1)} px`;
+            ui.outlierList.appendChild(item);
+          }
+          for (const event of recentEvents) {
+            const item = document.createElement("li");
+            item.className = "outlier-item";
+            item.textContent = `${formatId(event.nodeId)} · previous persistent outlier · max ${event.maximumError.toFixed(1)} px`;
+            ui.outlierList.appendChild(item);
+          }
+        }
+        drawQualityChart();
+      }
+
+      function createLightingCatalog() {
+        return {
+          patterns: PATTERNS.map((pattern, id) => ({ id, name: pattern.name })),
+          palettes: PALETTES.map((palette, id) => ({ id, name: palette.name, colors: [...palette.colors] }))
+        };
+      }
+
+      function createDeviceAuditExport(node) {
+        return {
+          schema: "tubes-message-audit/v1",
+          scope: "device",
+          capturedAtSimulationMs: Math.round(simulation.time),
+          deviceKey: node.auditDeviceKey,
+          currentMeshId: formatId(node.id),
+          lightingCatalog: createLightingCatalog(),
+          currentState: simulation.auditNodeState(node),
+          summary: { ...simulation.auditStatsForNode(node) },
+          events: simulation.auditForNode(node)
+        };
+      }
+
+      function createRunAuditExport() {
+        return {
+          schema: "tubes-message-audit/v1",
+          scope: "run",
+          capturedAtSimulationMs: Math.round(simulation.time),
+          scenario: {
+            tubes: simulation.currentTubeCount,
+            anchors: simulation.currentAnchorCount
+          },
+          lightingCatalog: createLightingCatalog(),
+          simulation: createSnapshot().simulation,
+          evaluation: {
+            current: evaluator.current,
+            history: evaluator.history,
+            outlierEvents: evaluator.outlierEvents
+          },
+          eventCount: simulation.messageAudit.length,
+          events: simulation.messageAudit
+        };
       }
 
       function createSnapshot() {
@@ -3144,20 +5084,65 @@
         const tubeEntities = simulation.entities.filter(entity => !entity.network.isAnchor);
         const anchorEntities = simulation.entities.filter(entity => entity.network.isAnchor);
         const clusters = new Set(tubeEntities.map(entity => dnaKey(entity.network.dna))).size;
+        const displayFrameIds = new Set(
+          simulation.entities.map(entity => entity.network.positionEstimate.frameId)
+        );
+        const displayRegistration = [...displayFrameIds].map(frameId => {
+          const transform = estimateDisplayTransform(frameId);
+          return {
+            frameId: formatFrameId(frameId),
+            rotationDegrees: +(transform.rotation * 180 / Math.PI).toFixed(2),
+            reflected: transform.reflection < 0,
+            source: transform.reflectionSource,
+            fitError: transform.registrationError === null ? null : +transform.registrationError.toFixed(2),
+            alternateFitError: transform.alternativeError === null ? null : +transform.alternativeError.toFixed(2),
+            sampleCount: transform.registrationSampleCount
+          };
+        });
 
         return {
-          schema: "tubes-mesh-simulator/v3",
+          schema: "tubes-mesh-simulator/v4",
           capturedAtSimulationMs: Math.round(simulation.time),
           simulation: {
             paused: simulation.paused,
             speed: simulation.speed,
             radioRange: simulation.range,
             dropoff: simulation.dropoff,
+            deliveryModel: simulation.deliveryModel,
+            fixedRelay: simulation.fixedRelay,
             radioUncertainty: {
               rssiJitterSigmaDb: simulation.rssiJitterSigmaDb,
               transmitPowerSigmaDb: simulation.txPowerSigmaDb,
               linkShadowSigmaDb: simulation.linkShadowSigmaDb
             },
+            scenario: {
+              tubes: simulation.currentTubeCount,
+              anchors: simulation.currentAnchorCount
+            },
+            positioningResources: {
+              peerCapacity: simulation.peerCapacity,
+              solveCapacity: simulation.solveCapacity,
+              anchorReserve: simulation.anchorReserve,
+              modeledPeerEntryBytes: simulation.peerEntryBytes(),
+              modeledPeerTableBytesPerDevice: simulation.peerTableBytes()
+            },
+            positioningWire: {
+              payloadProfile: simulation.payloadProfileKey,
+              coordinateEncoding: simulation.coordinateEncodingKey,
+              coordinateQuantum: simulation.coordinateQuantum,
+              envelope: simulation.wireEnvelope,
+              positionPayloadBytes: simulation.positionPayloadBytes(),
+              positionPacketBytes: simulation.positionPacketBytes(),
+              broadcastPeriodMs: simulation.positionBroadcastPeriod,
+              modeledTrafficBytesPerSecond: +simulation.positionTrafficBytesPerSecond().toFixed(1)
+            },
+            evaluationRules: {
+              persistentOutlierError: simulation.outlierErrorThreshold,
+              persistentOutlierDurationMs: simulation.outlierDuration,
+              qualityErrorScale: QUALITY_ERROR_SCALE,
+              historySamplePeriodMs: QUALITY_SAMPLE_PERIOD
+            },
+            displayRegistration,
             leaderBpm: simulation.leaderBpm
           },
           summary: {
@@ -3172,7 +5157,22 @@
             droppedPackets: simulation.stats.dropped,
             pendingDeliveries: simulation.deliveryQueue.length,
             activeRadioWaves: simulation.waves.length,
-            topologyWarnings: warnings.length
+            topologyWarnings: warnings.length,
+            peerEvictions: simulation.stats.peerEvictions,
+            peerAdmissionDrops: simulation.stats.peerAdmissionDrops,
+            positionTransmissions: simulation.stats.positionTransmissions,
+            positionApplicationBytes: simulation.stats.positionApplicationBytes,
+            coordinateSaturations: simulation.stats.coordinateSaturations,
+            messageAuditEvents: simulation.messageAudit.length,
+            locationQuality: {
+              score: +evaluator.current.score.toFixed(2),
+              positioned: evaluator.current.positioned,
+              total: evaluator.current.total,
+              medianError: evaluator.current.medianError === null ? null : +evaluator.current.medianError.toFixed(2),
+              p95Error: evaluator.current.p95Error === null ? null : +evaluator.current.p95Error.toFixed(2),
+              worstError: evaluator.current.worstError === null ? null : +evaluator.current.worstError.toFixed(2),
+              persistentOutliers: evaluator.current.persistentOutliers.length
+            }
           },
           nodes: simulation.entities.map((entity, index) => {
             const node = entity.network;
@@ -3187,7 +5187,20 @@
                 hasLights: !node.isAnchor,
                 role: node.role(),
                 transportStatus: node.status,
-                uplinkId: node.uplinkId ? formatId(node.uplinkId) : null,
+                uplinkId: simulation.fixedRelay
+                  ? null
+                  : node.uplinkId ? formatId(node.uplinkId) : null,
+                leaderId: formatId(simulation.fixedRelay ? (node.uplinkId || node.id) : node.leaderId),
+                leaderViaId: simulation.fixedRelay && node.leaderViaId
+                  ? formatId(node.leaderViaId)
+                  : null,
+                leaderPath: simulation.fixedRelay
+                  ? !node.isFollowing()
+                    ? "self"
+                    : node.leaderViaId === 0
+                    ? "waiting"
+                    : node.leaderViaId === node.uplinkId ? "direct" : "relayed"
+                  : "legacy-uplink",
                 relayDuty: {
                   active: node.isRelayActive(),
                   remainingMs: Math.max(0, Math.round(node.rebroadcastUntil - simulation.time))
@@ -3223,7 +5236,17 @@
                   mirrorCandidates: node.positionEstimate.mirrorCandidates.map(candidate => ({
                     x: +candidate.x.toFixed(2),
                     y: +candidate.y.toFixed(2)
-                  }))
+                  })),
+                  mirrorDecision: {
+                    selectedIndex: node.mirrorDecision.selectedIndex,
+                    pendingIndex: node.mirrorDecision.pendingIndex,
+                    confirmations: node.mirrorDecision.confirmations,
+                    confirmationsRequired: MIRROR_CONFIRMATIONS_REQUIRED,
+                    discriminatingPeers: node.mirrorDecision.discriminatingPeers,
+                    scores: node.mirrorDecision.scores.map(score => (
+                      score === null ? null : +score.toFixed(2)
+                    ))
+                  }
                 },
                 knownPeers: [...node.knownPeers.values()].map(peer => ({
                   id: formatId(peer.id),
@@ -3235,6 +5258,9 @@
                   estimate: { x: +peer.x.toFixed(2), y: +peer.y.toFixed(2) },
                   confidence: +peer.confidence.toFixed(3),
                   settled: peer.settled,
+                  advertisedConstraintCount: peer.advertisedConstraintCount,
+                  advertisedResidual: peer.advertisedResidual,
+                  txCalibrationDb: peer.txCalibrationDb,
                   rawDistance: +peer.rawDistance.toFixed(2),
                   directDistance: +peer.directDistance.toFixed(2),
                   rangeSigma: +peer.rangeSigma.toFixed(2),
@@ -3246,11 +5272,17 @@
                 current: cloneTubeState(node.current),
                 next: cloneTubeState(node.next),
                 currentPhrase: node.currentPhrase(),
-                counters: {
+                  counters: {
                   received: node.receivedCount,
                   executed: node.executedCount,
                   ignored: node.ignoredCount
-                }
+                },
+                peerTable: {
+                  used: node.knownPeers.size,
+                  capacity: simulation.peerCapacity,
+                  modeledBytes: simulation.peerTableBytes()
+                },
+                messageAudit: { ...simulation.auditStatsForNode(node) }
               },
               simulatorOnly: {
                 position: { x: Math.round(entity.x), y: Math.round(entity.y) },
@@ -3263,7 +5295,13 @@
           }),
           topology: simulation.entities
             .filter(entity => entity.network.uplinkId)
-            .map(entity => ({ from: formatId(entity.network.id), uplink: formatId(entity.network.uplinkId) })),
+            .map(entity => ({
+              from: formatId(entity.network.id),
+              relationship: simulation.fixedRelay ? "logical-leader" : "uplink",
+              target: formatId(entity.network.uplinkId),
+              uplink: simulation.fixedRelay ? null : formatId(entity.network.uplinkId),
+              leader: simulation.fixedRelay ? formatId(entity.network.uplinkId) : null
+            })),
           warnings,
           activeRadioWaves: simulation.waves.map(wave => {
             const progress = clamp((simulation.time - wave.start) / RADIO_WAVE_TIME, 0, 1);
@@ -3282,7 +5320,8 @@
           pendingDeliveries: simulation.deliveryQueue.map(delivery => ({
             dueAtMs: Math.round(delivery.at),
             targetId: formatId(delivery.target.id),
-            immediateSenderId: formatId(delivery.message.header.id),
+            logicalHeaderId: formatId(delivery.message.header.id),
+            physicalTransmitterId: formatId(delivery.auditMeta.senderMeshId),
             senderUplinkId: delivery.message.header.uplinkId ? formatId(delivery.message.header.uplinkId) : null,
             recipients: simulation.recipientName(delivery.message.recipients),
             command: delivery.message.command,
@@ -3298,7 +5337,10 @@
               y: +delivery.message.position.y.toFixed(2),
               confidence: +delivery.message.position.confidence.toFixed(3),
               settled: delivery.message.position.settled,
-              sequence: delivery.message.position.sequence
+              sequence: delivery.message.position.sequence,
+              leaderViaId: delivery.message.position.leaderViaId
+                ? formatId(delivery.message.position.leaderViaId)
+                : null
             } : null,
             strength: +delivery.strength.toFixed(3),
             traceId: delivery.traceId,
@@ -3309,20 +5351,43 @@
             nodeId: formatId(log.node.id),
             type: log.type,
             message: log.message
+          })),
+          evaluationHistory: evaluator.history.map(sample => ({
+            atMs: Math.round(sample.at),
+            score: +sample.score.toFixed(2),
+            medianError: sample.medianError === null ? null : +sample.medianError.toFixed(2),
+            p95Error: sample.p95Error === null ? null : +sample.p95Error.toFixed(2),
+            outlierCount: sample.outlierCount
+          })),
+          outlierEvents: evaluator.outlierEvents.map(event => ({
+            nodeId: formatId(event.nodeId),
+            detectedAtMs: Math.round(event.detectedAt),
+            maximumError: +event.maximumError.toFixed(2)
           }))
         };
       }
 
       function createCompactSnapshot(snapshot = createSnapshot()) {
         return {
-          v: 7,
+          v: 9,
           t: snapshot.capturedAtSimulationMs,
           p: snapshot.simulation.paused ? 1 : 0,
-          r: [snapshot.simulation.radioRange, snapshot.simulation.dropoff],
+          m: snapshot.simulation.fixedRelay ? 1 : 0,
+          r: [snapshot.simulation.radioRange, snapshot.simulation.dropoff, snapshot.simulation.deliveryModel],
           u: [
             snapshot.simulation.radioUncertainty.rssiJitterSigmaDb,
             snapshot.simulation.radioUncertainty.transmitPowerSigmaDb,
             snapshot.simulation.radioUncertainty.linkShadowSigmaDb
+          ],
+          e: [
+            snapshot.simulation.positioningResources.peerCapacity,
+            snapshot.simulation.positioningResources.solveCapacity,
+            snapshot.simulation.positioningResources.anchorReserve,
+            snapshot.simulation.positioningWire.payloadProfile,
+            snapshot.simulation.positioningWire.coordinateEncoding,
+            snapshot.simulation.positioningWire.coordinateQuantum,
+            snapshot.simulation.positioningWire.envelope,
+            snapshot.simulation.positioningWire.broadcastPeriodMs
           ],
           s: [
             snapshot.summary.nodes,
@@ -3335,7 +5400,8 @@
           n: snapshot.nodes.map(node => [
             node.deviceLocal.id,
             node.deviceLocal.kind === "anchor" ? "A" : "T",
-            node.deviceLocal.uplinkId || "-",
+            node.deviceLocal.leaderId || node.deviceLocal.uplinkId || "-",
+            node.deviceLocal.leaderViaId || "-",
             node.deviceLocal.role === "Leading" ? "L" : "F",
             node.deviceLocal.relayDuty.active ? 1 : 0,
             node.deviceLocal.current.patternId,
@@ -3401,7 +5467,10 @@
 
         ui.selectedId.textContent = formatId(node.id);
         ui.selectedKind.textContent = node.isAnchor ? "Selected fixed anchor" : "Selected tube";
-        ui.selectedRole.textContent = node.isAnchor ? `Anchor · ${node.role()}` : node.role();
+        const leaderSuffix = node.isFollowing() ? ` ${formatId(node.uplinkId)}` : "";
+        ui.selectedRole.textContent = node.isAnchor
+          ? `Anchor · ${node.role()}${leaderSuffix}`
+          : `${node.role()}${leaderSuffix}`;
         ui.dnaCard.hidden = node.isAnchor;
         ui.lightingScheduleSection.hidden = node.isAnchor;
         ui.dnaStrip.style.setProperty("--dna-gradient", `linear-gradient(90deg, ${palette.colors.join(", ")})`);
@@ -3411,13 +5480,20 @@
         ui.topologyWarning.hidden = !topologyWarning;
         ui.topologyWarning.textContent = topologyWarning ? `Local maximum: ${topologyWarning.explanation}` : "";
         ui.factId.textContent = formatId(node.id);
-        ui.factUplink.textContent = node.uplinkId ? formatId(node.uplinkId) : "none";
+        ui.leaderFactLabel.textContent = simulation.fixedRelay ? "Chosen leader" : "Chosen uplink";
+        ui.factUplink.textContent = node.uplinkId
+          ? formatId(node.uplinkId)
+          : "none";
+        ui.factLeaderPath.textContent = leaderPathLabel(node);
         ui.factState.textContent = node.status === STATUS.RECEIVING
           ? "receiving / silent"
           : node.isAnchor ? `anchor / ${node.role().toLowerCase()}` : node.role().toLowerCase();
         const relaySeconds = Math.max(0, (node.rebroadcastUntil - simulation.time) / 1000);
         const relayFor = node.uplinkId ? `for ${formatId(node.uplinkId)}` : "downstream";
         ui.factRelay.textContent = node.isRelayActive() ? `active ${relayFor} · ${relaySeconds.toFixed(1)}s` : "inactive";
+        ui.relayExplanation.textContent = simulation.fixedRelay
+          ? "Leader via records the physical source of the latest valid leader state. A node renews relay duty while nearby advertisements say their state arrived through it, or that they are still waiting for a relay."
+          : "With relay duty active, current-code mode rebroadcasts an accepted packet after replacing its header with the relay's own ID and uplink ID.";
         ui.factLastHeard.textContent = node.lastUplinkSeenAt === null
           ? "never"
           : `${Math.max(0, (simulation.time - node.lastUplinkSeenAt) / 1000).toFixed(1)} s ago`;
@@ -3449,7 +5525,14 @@
         const residualLabel = node.positionEstimate.residualError === null
           ? ""
           : ` · residual ${node.positionEstimate.residualError.toFixed(2)}`;
-        ui.factPositionMode.textContent = `${positioningScope} · ${node.positionEstimate.solution}${axisLabel}${orientationLabel}${constraintLabel}${residualLabel}${pendingAnchorLabel}`;
+        const mirrorDecision = node.mirrorDecision;
+        const mirrorLabel = node.positionEstimate.mirrorCandidates.length
+          ? mirrorDecision.selectedIndex === null
+            ? ` · mirror evidence ${mirrorDecision.confirmations}/${MIRROR_CONFIRMATIONS_REQUIRED}`
+            : ` · branch ${mirrorDecision.selectedIndex === 0 ? "+Y" : "−Y"}`
+          : "";
+        ui.factPositionMode.textContent = `${positioningScope} · ${node.positionEstimate.solution}${axisLabel}${orientationLabel}${constraintLabel}${residualLabel}${mirrorLabel}${pendingAnchorLabel}`;
+        ui.factPeerTable.textContent = `${node.knownPeers.size} / ${simulation.peerCapacity} · solve ${Math.min(node.knownPeers.size, simulation.solveCapacity)}`;
         const beat = node.current.beatFrame / BEAT_UNITS;
         const phrase = node.currentPhrase();
         ui.factClock.textContent = node.isAnchor ? "n/a · no lights" : `${beat.toFixed(2)} / ${phrase}`;
@@ -3529,25 +5612,42 @@
           }
         }
 
-        const leaders = simulation.entities.filter(entity => !entity.network.isFollowing()).length;
-        const clusters = new Set(
-          simulation.entities
-            .filter(entity => !entity.network.isAnchor)
-            .map(entity => dnaKey(entity.network.dna))
-        ).size;
-        ui.deviceCount.textContent = String(simulation.entities.length);
-        ui.rootCount.textContent = String(leaders);
-        ui.relayCount.textContent = String(simulation.stats.rebroadcasts);
-        ui.clusterCount.textContent = String(clusters);
-        ui.deliveryRate.textContent = simulation.stats.eligible
-          ? `${Math.round((simulation.stats.delivered / simulation.stats.eligible) * 100)}%`
-          : "—";
+        const auditStats = simulation.auditStatsForNode(node);
+        ui.factAuditEvents.textContent = String(auditStats.total);
+        ui.factAuditTraffic.textContent = `${auditStats.sent} / ${auditStats.received}`;
+        ui.factAuditDecisions.textContent = `${auditStats.accepted} / ${auditStats.ignored}`;
+        ui.factAuditDrops.textContent = String(auditStats.radioMisses);
+        ui.factAuditApplied.textContent = String(auditStats.appliedStates);
+        ui.factAuditRelays.textContent = `${auditStats.relayed} / ${auditStats.localTransitions}`;
+        ui.messageAuditList.replaceChildren();
+        const recentAudit = simulation.recentAuditForNode(node, 12);
+        if (!recentAudit.length) {
+          const item = document.createElement("li");
+          item.className = "empty-state";
+          item.textContent = "No message audit events yet.";
+          ui.messageAuditList.appendChild(item);
+        } else {
+          for (const event of recentAudit) {
+            const item = document.createElement("li");
+            item.className = "traffic-item";
+            const time = document.createElement("span");
+            time.className = "traffic-time";
+            time.textContent = `${(event.atMs / 1000).toFixed(1)}s`;
+            const message = document.createElement("span");
+            message.textContent = auditEventLabel(event);
+            item.append(time, message);
+            ui.messageAuditList.appendChild(item);
+          }
+        }
+
+        updateNetworkMetrics();
       }
 
       function frame(now) {
         const delta = now - lastFrame;
         lastFrame = now;
         simulation.update(delta);
+        if (evaluator.update()) updateEvaluationUI();
         draw();
         updateInspector();
         updateDiagnostics(now);
@@ -3557,7 +5657,13 @@
       const resizeObserver = new ResizeObserver(resizeCanvas);
       resizeObserver.observe(space);
       resizeCanvas();
-      selected = simulation.reset();
+      evaluator = new EvaluationTracker(simulation);
+      selected = simulation.loadScenario(
+        Number(ui.scenarioDeviceCount.value),
+        Number(ui.scenarioAnchorCount.value)
+      );
+      applyPeerCapacity();
+      resetEvaluation();
       updateInspector(true);
       updateDiagnostics(performance.now(), true);
       requestAnimationFrame(frame);
@@ -3569,12 +5675,32 @@
           POSITION_PROTOCOL_VERSION,
           ANCHORED_FRAME_ID,
           POSITION_SOLUTION,
+          POSITION_PAYLOAD_PROFILES,
+          COORDINATE_ENCODINGS,
+          DEVICE_COUNT_PRESETS,
+          ANCHOR_COUNT_PRESETS,
           RECIPIENTS,
           COMMAND
         },
+        evaluator,
         addDevice: (x, y) => addDeviceAt(x, y),
         addAnchor: (x, y) => addAnchorAt(x, y),
+        clearField: () => {
+          clearCurrentField();
+          return createSnapshot();
+        },
+        loadScenario: (tubeCount, anchorCount = 0) => {
+          if (!DEVICE_COUNT_PRESETS.includes(tubeCount)) throw new Error(`Unsupported tube count: ${tubeCount}`);
+          if (!ANCHOR_COUNT_PRESETS.includes(anchorCount)) throw new Error(`Unsupported anchor count: ${anchorCount}`);
+          ui.scenarioDeviceCount.value = String(tubeCount);
+          ui.scenarioAnchorCount.value = String(anchorCount);
+          runSelectedScenario();
+          return createSnapshot();
+        },
         getSnapshot: createSnapshot,
+        getMessageAudit: filters => simulation.queryMessageAudit(filters),
+        getRunAudit: createRunAuditExport,
+        getSelectedDeviceAudit: () => selected ? createDeviceAuditExport(selected.network) : null,
         getCompactSnapshot: () => createCompactSnapshot(createSnapshot())
       };
     })();

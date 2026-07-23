@@ -25,7 +25,7 @@ The design should extend the existing behavior rather than create a second netwo
 
 - [`node.h`](../node.h) defines a fixed `NodeMessage` with a 64-byte data area, the sender's `id`, the sender's current `uplinkId`, recipients, timebase, and command.
 - The ESP-NOW callback reaches `LightNode::onPeerData()` with the immediate sender's MAC address and RSSI.
-- A relay replaces the message header with its own header before transmitting. Therefore the header describes the immediate transmitter, while the command data may be carried on behalf of an uplink.
+- The current relay implementation replaces the message header with its own header before transmitting. The intended lighting behavior is instead transparent: preserve the accepted leader's logical header while ESP-NOW's receive metadata continues to identify the physical transmitter.
 - `RECIPIENTS_INFO` is accepted by every receiver and is deliberately excluded from rebroadcasting.
 - [`espnow_broadcast.cpp`](../../../wled00/espnow_broadcast.cpp) moves received packets out of the Wi-Fi callback into a small main-loop queue. Position calculations must stay out of the Wi-Fi callback.
 - [`controller.h`](../controller.h) receives only a command and payload. It no longer has the RSSI or immediate-sender identity needed for ranging.
@@ -151,7 +151,7 @@ Other devices propagate the newest owner and heartbeat sequence in their own adv
 
 ### Fixed-size direct-peer table
 
-Use a compile-time array, not `std::map` and not an unbounded history. A starting value of 12 or 16 entries is reasonable and should remain configurable.
+Use a compile-time array, not `std::map` and not an unbounded history. The simulator now defaults to four entries to stress the smallest useful table; firmware capacity should remain compile-time configurable and be validated against expected installation density.
 
 Each entry needs approximately:
 
@@ -194,8 +194,9 @@ The following is a layout proposal, not C++ to paste into the project. The real 
 | TX calibration quarter-dB | 1 | Sender-specific offset from nominal TX calibration |
 | Frame hop | 1 | Diagnostic and loop-sanity value |
 | Position sequence | 2 | Sender's position revision |
+| Leader via ID | 2 | Physical sender of this device's latest valid lighting-leader state; zero while waiting |
 
-Total: 34 bytes, leaving room in the current 64-byte `NodeMessage::data` area.
+Total: 36 bytes, leaving room in the current 64-byte `NodeMessage::data` area.
 
 Keep the outer `CURRENT_NODE_VERSION` unchanged for the first experiment if mixed old/new firmware must continue exchanging lighting traffic. An old node will see an unknown information command and ignore it. Position payload versioning handles changes within the new command. Increment the outer version only for an intentional incompatible mesh migration.
 
@@ -278,7 +279,7 @@ Such a node advertises a `can-orient` flag. The origin deterministically selects
 
 Other nodes should not automatically choose positive Y merely because two circles produced a pair of candidates. They may resolve the pair only when they have a range to the orientation device, enough other positioned peers, or a previous unambiguous solution that remains valid. Otherwise they should advertise `mirrored` or `radial`, with `position-valid` clear.
 
-This is stricter than the current simulator, which sometimes selects the positive candidate for display convenience.
+Mirror resolution uses bounded local state. Score both candidates against fresh direct ranges to orientation or already positioned peers. Require a material residual advantage for several consecutive solver updates before selecting a branch; retain the selected branch until the opposite branch wins by the same sustained rule. This needs only two residual accumulators, a selected and pending branch bit, and a small confirmation counter. It neither stores history nor consults total network membership. Protect fresh origin, axis, and orientation records from normal peer-table eviction so a small table does not discard the references that establish handedness.
 
 ### Inadequate floating geometry
 
@@ -342,6 +343,8 @@ RSSI remains a coarse and biased range sensor. Multipath, antenna orientation, e
 
 Each device solves only for itself. It does not download or optimize a global graph.
 
+The floating origin, axis, and orientation establish a shared coordinate convention; they are not required to remain direct ranging references. After bootstrap, every valid position advertisement in that frame is an ordinary potential constraint. A device beyond radio range of the origin can therefore localize from nearby positioned devices, then advertise its result to the next radio neighborhood.
+
 Select fresh direct peers that:
 
 - advertise the same frame identity and epoch;
@@ -349,16 +352,26 @@ Select fresh direct peers that:
 - have sufficient confidence and mature RSSI samples;
 - are not all nearly collinear.
 
-Anchor peers carry authoritative coordinates and maximum coordinate confidence, but the local RSSI-derived range to an anchor retains its measured variance. Positioned ordinary peers receive lower weight and must propagate decreasing confidence with frame hop and residual.
+Anchor peers carry authoritative coordinates and maximum coordinate confidence, but the local RSSI-derived range to an anchor retains its measured variance. Positioned ordinary peers receive lower weight and must propagate decreasing confidence with residual and uncertainty.
 
-With three or more non-collinear positioned peers, solve weighted multilateration. The simulator's two-pass linear least-squares method is suitable as a first ESP32 implementation:
+The number of usable direct constraints determines what may be claimed:
+
+- one positioned peer produces a radial constraint centered on that peer, not necessarily the frame origin;
+- two positioned peers produce two circle-intersection candidates around that local baseline;
+- a third geometrically independent direct peer can resolve the mirror branch;
+- three or more non-collinear positioned peers permit a unique local multilateration fit.
+
+Mirrored and radial beliefs are advertised as ambiguous and are not themselves used as positioned constraints. This prevents an arbitrary provisional branch from propagating outward as if it were established geometry.
+
+With three or more non-collinear positioned peers, solve weighted multilateration. The simulator uses a bounded robust fit suitable for an ESP32 implementation:
 
 1. compute an initial weighted fit;
 2. measure each range residual at that fit;
 3. reduce the weight of inconsistent links;
-4. compute one refined fit;
-5. derive residual and geometry quality;
-6. move only partway toward the result.
+4. compute one refined linear fit;
+5. perform up to three bounded nonlinear range-residual corrections;
+6. derive residual and geometry quality;
+7. move only partway toward the result.
 
 The solver is `O(P)` for `P` retained peers and uses a fixed number of scalar accumulators. It does not require a matrix library or heap allocation.
 
@@ -388,13 +401,18 @@ The current ESP-NOW receive queue holds only a small number of packets. Stress-t
 
 Lighting leadership, floating coordinate election, and anchor authority are different state machines.
 
-- Lighting routing uses the current `id/uplinkId`, recipient rules, and relay timers.
+- Lighting routing uses the logical leader ID, recipient rules, and relay timers. A follower does not retain an intermediate uplink, but it records the transient `leaderViaId` from the physical sender of its latest accepted leader state.
 - Position frame propagation uses frame kind, namespace, authority heartbeat, frame epoch, and position quality.
-- A lighting packet relayed on behalf of a leader still describes the relay in its header.
-- A range is always associated with that immediate header sender, never with the lighting leader or `uplinkId`.
+- A relayed lighting packet preserves the accepted leader's header and timebase. A receiver therefore follows the same logical leader whether it heard the packet directly or through one or more relays.
+- The physical transmitter remains available from the ESP-NOW receive callback's MAC/peer metadata. Diagnostics may record both identities: `logical leader F79 via physical transmitter 5E5`.
+- A range is always associated with that physical transmitter, never with the lighting header's logical leader.
 - A position advertisement is information traffic and is never relayed verbatim.
+- Each relay periodically originates its own position advertisement under its own ID. The advertisement includes its `leaderViaId`, so a neighbor can distinguish direct leader reception, relayed reception, and a leader claim that has not yet produced a valid lighting state.
+- A node renews relay duty when it hears a weaker leader claim, a same-leader neighbor still waiting for state, or a same-leader neighbor whose `leaderViaId` names this node. The lease expires after none of those locally observable conditions has occurred for the relay interval; no child list, route, tier, or population count is stored.
+- Transparent relay forwarding uses bounded duplicate suppression. A small ring of recent `(leader ID, command, leader timebase)` fingerprints is sufficient for the simulator model and requires no topology or network-size knowledge; firmware should size the ring explicitly for available RAM and expected burst depth.
+- In the current simulator policy, a non-anchor whose lighting uplink expires also invalidates the floating position frame learned through that leader. It clears its bounded peer table and restarts as a new local origin at `(0,0)`. A surveyed anchor retains its authoritative coordinate.
 
-Keeping the state machines separate prevents a lighting topology change from silently changing coordinate meaning. Anchor authority outranks floating ID election. Reusing `MeshId` for deterministic tie-breaking is fine; reusing `uplinkId` as a measured position target is not.
+Keeping the state machines separate prevents a lighting topology change from silently reinterpreting coordinate meaning: loss of the authority path causes an explicit frame reset instead. Anchor authority outranks floating ID election. Reusing `MeshId` for deterministic tie-breaking is fine; reusing `uplinkId` as a measured position target is not.
 
 ## Partitions, joins, reboots, and movement
 
@@ -432,6 +450,28 @@ The simulator represents the smaller units as configured anchors. The Devices to
 - Anchor advertisements remain one-hop; tubes propagate the anchored frame only by advertising their own resulting beliefs.
 
 This deliberate simulator exception models configured surveyed coordinates. It must not become a helper that exposes arbitrary tube positions to the estimator.
+
+### Resource and quality evaluator
+
+The simulator includes packaged field scenarios and explicit small-device limits so protocol variants can be compared under repeatable geometry.
+
+- `peer slots` is a hard per-device ceiling; the simulator never allows the local table to grow beyond it;
+- `solve with` separately caps how many retained peers participate in one solver update;
+- `anchor reserve` protects a limited number of fresh direct anchors from ordinary eviction pressure;
+- payload profile, coordinate encoding, coordinate resolution, packet envelope, and broadcast period produce modeled payload, packet, table-RAM, and traffic costs;
+- advertised coordinates are actually quantized before a receiver stores or solves with them;
+- profiles that carry TX calibration and quality fields allow the receiver to correct stable transmit bias and down-weight high-residual peers;
+- independent scenario controls cover one through sixty-four tubes and zero through five anchors, allowing the same tube field to be rerun as an unanchored baseline and then with one, two, or three anchors.
+
+The modeled peer-entry allocation represents a packed ESP32 target structure, not JavaScript heap usage. The compact envelope is an experimental smaller position packet. Selecting the current fixed envelope reports the existing 84-byte `NodeMessage` application size; reducing fields inside its 64-byte data area does not reduce that fixed packet without a transport-format change.
+
+Quality is computed only by the simulator. It chooses one shared reference frame, applies the same display-only rigid registration used to compare an anchor-free map with physical truth, and then measures each uniquely positioned tube's error. Tubes in a different or ambiguous frame reduce coverage instead of being independently registered into a misleading perfect score. The overall score averages an exponential error score across every active tube, so missing coverage contributes zero. Median, 95th-percentile, worst error, coverage, peer pressure, and a bounded time history accompany the score.
+
+A persistent-outlier detector records a device only after its registered error exceeds the configured threshold for the configured simulated duration. It retains recent events after recovery. Neither the score nor the outlier detector feeds information back into any device.
+
+The simulator also keeps an unbounded, run-scoped message audit for causal analysis. Every broadcast produces one sender event and exactly one eventual outcome per other simulated device: delivered and accepted, delivered and ignored/rejected, probabilistically dropped, or outside hard range. Receive events retain the packet payload, routing decision, measured signal, position-processing result, relay action, and compact before/after snapshots of uplink, lighting DNA and schedule, and position belief. Local scheduled lighting changes and uplink timeouts are recorded beside message events because they can explain visible behavior without a new packet arriving. Scenario restart clears the audit; this history is simulator instrumentation and is not proposed as ESP32-resident state.
+
+Tube count and anchor count are independent scenario inputs. This supports direct comparisons such as eight tubes with zero, one, two, and three anchors while holding deterministic tube placement constant. A future test runner can apply a fixed simulated duration, such as 30 seconds, and derive time-to-coverage, time-to-settle, stable-score duration, peer pressure, and persistent-outlier counts from the existing evaluator history and message audit.
 
 ## Suggested firmware boundaries
 
@@ -488,6 +528,7 @@ Success means every device reports only immediate senders and never attributes a
 - Add the fixed-size peer eviction policy.
 - Add weighted two-pass multilateration, residuals, geometry checks, and damping.
 - Let anchor-positioned tubes provide lower-confidence constraints to devices beyond direct anchor range.
+- Let floating-frame positioned tubes do the same beyond direct origin range; origin, axis, and orientation remain frame metadata rather than mandatory solver inputs.
 - Iterate from neighbor advertisements until stable without relaying anchor packets.
 
 ### Stage 5: Floating fallback
@@ -514,14 +555,16 @@ The firmware design is ready for implementation when these scenarios have explic
 5. **Moved anchor in simulation:** its advertised position follows its physical position exactly; normal tubes still cannot read physical coordinates.
 6. **Moved anchor in hardware:** coordinates remain configured and residual diagnostics expose the mismatch.
 7. **Floating two-node component:** one origin and one positive-X axis; their estimated separation matches the filtered range.
-8. **Floating three-node component:** a stable orientation triangle forms; reflection is resolved by the elected orientation node.
-9. **Collinear or poorly connected geometry:** the system reports partial/ambiguous geometry rather than false confidence.
-10. **Four-plus dense nodes:** estimates converge through bounded local updates and stay stable under normal RSSI jitter.
-11. **Multi-hop anchor path:** the installation frame propagates, but every range remains tied to an immediate sender.
-12. **Table overflow:** low-value peers are evicted without evicting fresh direct anchors.
-13. **Partition and merge:** anchorless partitions float; they reset into the anchored frame when connectivity returns.
-14. **Anchor reboot:** its fixed frame survives while sender filter state and heartbeat ownership update safely.
-15. **Small no-light anchor:** ignores rendering, keeps its configured position, and still routes valid lighting traffic.
+8. **Relayed-position neighborhood:** a device outside origin radio range converges from three directly heard, same-frame positioned peers; no relayed packet RSSI is attributed to the origin.
+9. **Relayed two-reference neighborhood:** a device outside origin range retains two explicit mirror candidates and does not become a positioned constraint for devices farther away.
+10. **Floating three-node component:** a stable orientation triangle forms; reflection is resolved by the elected orientation node.
+11. **Collinear or poorly connected geometry:** the system reports partial/ambiguous geometry rather than false confidence.
+12. **Four-plus dense nodes:** estimates converge through bounded local updates and stay stable under normal RSSI jitter.
+13. **Multi-hop anchor path:** the installation frame propagates, but every range remains tied to an immediate sender.
+14. **Table overflow:** low-value peers are evicted without evicting fresh direct anchors.
+15. **Partition and merge:** anchorless partitions float; they reset into the anchored frame when connectivity returns.
+16. **Anchor reboot:** its fixed frame survives while sender filter state and heartbeat ownership update safely.
+17. **Small no-light anchor:** ignores rendering, keeps its configured position, and still routes valid lighting traffic.
 16. **Positioning disabled or invalid:** existing lighting synchronization behaves exactly as before.
 
 ## Explicitly outside the first implementation
