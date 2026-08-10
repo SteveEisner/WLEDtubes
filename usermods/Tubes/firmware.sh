@@ -68,9 +68,9 @@ normalize_mac() {
 
 load_raw_device_identity() {
   local info_file="$1"
-  device_mac="$("$jq_bin" -er '.info.mac | strings' "$info_file" | normalize_mac)"
-  device_name="$("$jq_bin" -er '.info.name | strings' "$info_file")"
-  device_arch="$("$jq_bin" -er '.info.arch | strings' "$info_file")"
+  device_mac="$("$jq_bin" -e -r '.info.mac | strings' "$info_file" | normalize_mac)"
+  device_name="$("$jq_bin" -e -r '.info.name | strings' "$info_file")"
+  device_arch="$("$jq_bin" -e -r '.info.arch | strings' "$info_file")"
   device_release="$("$jq_bin" -r '.info.release // ""' "$info_file")"
 }
 
@@ -134,9 +134,9 @@ select_profile() {
 infer_two_family_hardware_profile() {
   local config_file="$1"
   local led_pin button_pin
-  led_pin="$("$jq_bin" -er 'select((.hw.led.ins // []) | length == 1) | .hw.led.ins[0].pin | select(length == 1) | .[0]' "$config_file")" \
+  led_pin="$("$jq_bin" -e -r 'select((.hw.led.ins // []) | length == 1) | .hw.led.ins[0].pin | select(length == 1) | .[0]' "$config_file")" \
     || return 1
-  button_pin="$("$jq_bin" -er 'select((.hw.btn.ins // []) | length > 0) | .hw.btn.ins[0].pin | select(length == 1) | .[0]' "$config_file")" \
+  button_pin="$("$jq_bin" -e -r 'select((.hw.btn.ins // []) | length > 0) | .hw.btn.ins[0].pin | select(length == 1) | .[0]' "$config_file")" \
     || return 1
 
   if [[ "$led_pin" == "16" && "$button_pin" == "0" ]]; then
@@ -288,12 +288,15 @@ config_has_explicit_output() {
 validate_explicit_output() {
   local config_file="$1"
   "$jq_bin" -e \
-    --argjson pin "$profile_led_pin" \
-    --argjson type "$profile_led_type" \
+    --arg pin "$profile_led_pin" \
+    --arg type "$profile_led_type" \
     '
+      ($pin | tonumber) as $pin_num
+      | ($type | tonumber) as $type_num
+      |
       ((.hw.led.ins // []) | length == 1)
-      and (.hw.led.ins[0].pin == [$pin])
-      and (.hw.led.ins[0].type == $type)
+      and (.hw.led.ins[0].pin == [$pin_num])
+      and (.hw.led.ins[0].type == $type_num)
       and ((.hw.led.ins[0].start // 0) == 0)
       and ((.hw.led.ins[0].len | numbers) > 0)
       and (.hw.led.ins[0].len <= 1500)
@@ -303,7 +306,7 @@ validate_explicit_output() {
 
 configured_led_count() {
   local config_file="$1"
-  "$jq_bin" -er '
+  "$jq_bin" -e -r '
     if ((.hw.led.ins // []) | length) > 0
     then [.hw.led.ins[].len] | add
     else .hw.led.total
@@ -316,8 +319,8 @@ make_legacy_config_explicit() {
   local destination_file="$2"
   local total
   local max_current
-  total="$("$jq_bin" -er '.hw.led.total | numbers' "$source_file")"
-  max_current="$("$jq_bin" -er '.hw.led.maxpwr | numbers' "$source_file")"
+  total="$("$jq_bin" -e -r '.hw.led.total | numbers' "$source_file")"
+  max_current="$("$jq_bin" -e -r '.hw.led.maxpwr | numbers' "$source_file")"
 
   # These migration-era labels identify the 112-LED default only when there is
   # no explicit bus to preserve. Explicit output lengths always remain authoritative.
@@ -334,23 +337,28 @@ make_legacy_config_explicit() {
   # Dig2Go bus explicit prevents a newer WLED release from replacing them with
   # its own fallback length during first boot.
   "$jq_bin" \
-    --argjson total "$total" \
-    --argjson max_current "$max_current" \
-    --argjson pin "$profile_led_pin" \
-    --argjson type "$profile_led_type" \
+    --arg total "$total" \
+    --arg max_current "$max_current" \
+    --arg pin "$profile_led_pin" \
+    --arg type "$profile_led_type" \
     '
+      ($total | tonumber) as $total_num
+      | ($max_current | tonumber) as $max_current_num
+      | ($pin | tonumber) as $pin_num
+      | ($type | tonumber) as $type_num
+      |
       .hw.led.ins = [{
         start: 0,
-        len: $total,
-        pin: [$pin],
+        len: $total_num,
+        pin: [$pin_num],
         order: 0,
         rev: false,
         skip: 0,
-        type: $type,
+        type: $type_num,
         ref: false,
         rgbwm: 0,
         freq: 0,
-        maxpwr: $max_current,
+        maxpwr: $max_current_num,
         ledma: 55
       }]
     ' "$source_file" > "$destination_file"
@@ -516,7 +524,7 @@ verify_device() {
   [[ "$device_release" == "$profile_release" ]] \
     || fail "running release '$device_release' does not match '$profile_release'"
   configured_count="$(configured_led_count "$work_dir/cfg.json")"
-  running_count="$("$jq_bin" -er '.info.leds.count | numbers' "$work_dir/info.json")"
+  running_count="$("$jq_bin" -e -r '.info.leds.count | numbers' "$work_dir/info.json")"
   [[ "$configured_count" == "$running_count" ]] \
     || fail "running LED count $running_count does not match configured count $configured_count"
 

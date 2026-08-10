@@ -122,9 +122,15 @@ save_pending_verification() {
     --arg mac "$selected_mac" \
     --arg profile "$selected_profile" \
     --arg release "$selected_release" \
-    --argjson variant "$selected_variant" \
-    --argjson leds "$selected_led_count" \
-    '{mac:$mac,profile:$profile,variant:$variant,release:$release,leds:$leds}' \
+    --arg variant "$selected_variant" \
+    --arg leds "$selected_led_count" \
+    '{
+      mac: $mac,
+      profile: $profile,
+      variant: ($variant | tonumber),
+      release: $release,
+      leds: ($leds | tonumber)
+    }' \
     > "$batch_dir/$selected_mac/expected.json"
 }
 

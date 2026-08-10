@@ -138,7 +138,7 @@ grep -q '^offer .* 14$' "$fake_state/mesh.log"
 grep -q '^verify .*222222222222 .*--family dig2go .*--variant 0 .*--release DIG2GO_TUBES' "$fake_state/mesh.log"
 test -f "$backup_dir"/batch-*/111111111111/info.json
 test -f "$backup_dir"/batch-*/111111111111/cfg.json
-jq -e 'select(.mac == "111111111111" and .result == "skipped-ambiguous-identity")' \
+jq -s -e 'map(select(.mac == "111111111111" and .result == "skipped-ambiguous-identity")) | length == 1' \
   "$backup_dir"/batch-*/results.jsonl >/dev/null
 
 echo "PASS: unattended batch skips ambiguous identity and verifies enrolled devices"
