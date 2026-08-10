@@ -4,6 +4,11 @@ Remote upgrades use ESP-NOW to select one physical device and verify it after
 reboot. Firmware and configuration still travel over the selected device's
 direct Wi-Fi access point; firmware is never carried over the mesh.
 
+The `greg/p2p-update` collaboration branch extends this workflow toward
+same-hardware peer-assisted OTA. Its scope, migration pillars, and rules for
+following Steve's evolving `main` are in [P2P_UPDATE_BRANCH.md](P2P_UPDATE_BRANCH.md).
+The procedure below documents the currently deployed host-assisted workflow.
+
 ## Fast fleet workflow
 
 Flash the USB-connected controller with current firmware once. That controller
