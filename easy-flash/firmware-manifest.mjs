@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { open, readFile, realpath, stat } from "node:fs/promises";
 import path, { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { validateMergedImageStructure } from "./safety-contract.mjs";
 
 const root = fileURLToPath(new URL("./", import.meta.url));
 const defaultManifestPath = join(root, "firmware-manifest.json");
@@ -25,6 +26,7 @@ function validateManifest(manifest) {
 			if (transports.has(artifact.transport)) throw new Error(`Duplicate firmware transport for ${variant.id}: ${artifact.transport}`);
 			transports.add(artifact.transport);
 		}
+		validateMergedImageStructure(variant.target, variant.artifacts.find(({ transport }) => transport === "usb"));
 	}
 	return manifest;
 }

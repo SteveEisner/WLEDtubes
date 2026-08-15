@@ -22,8 +22,8 @@ test("connect inspects once and install reuses the prepared session", async () =
 	const app=await readFile(new URL("../app.mjs",import.meta.url),"utf8");
 	const flash=await readFile(new URL("../local-flash.mjs",import.meta.url),"utf8");
 	assert.match(app,/connectToController/); assert.match(app,/installConnectedController/); assert.doesNotMatch(app,/window\.confirm/);
-	assert.equal((flash.match(/navigator\.serial\.requestPort\(\)/g)||[]).length,1);
-	assert.ok(flash.indexOf("loader.main()") < flash.lastIndexOf("activeConnection ="));
-	assert.match(flash,/if \(!activeConnection\)/); assert.match(flash,/eraseAll:false/); assert.match(flash,/health:"unverified"/);
+	assert.equal((flash.match(/serial\.requestPort\(\)/g)||[]).length,1);
+	assert.ok(flash.indexOf("loader.main()") < flash.indexOf("active={token"));
+	assert.match(flash,/session\.token !== sessionToken/); assert.match(flash,/eraseAll:false/); assert.match(flash,/health:"unverified"/);
 	assert.doesNotMatch(flash,/Flash complete|result:\s*"complete"/i);
 });

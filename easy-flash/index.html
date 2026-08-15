@@ -20,7 +20,7 @@
 				<span class="state-dot"></span><div><strong>Waiting for controller</strong><p id="controllerStatus">Nothing will be installed when you connect.</p></div>
 			</div>
 			<button type="button" class="primary" id="connect">Connect</button>
-			<label class="physical-confirmation" id="physicalConfirmation" hidden><input id="confirmedDig2Go" type="checkbox"><span><strong>Yes, this is a QuinLED Dig2Go</strong><small>I checked the name printed on the controller. The computer detected a compatible ESP chip, but cannot prove the board model.</small></span></label>
+			<label class="physical-confirmation" id="physicalConfirmation" hidden><input id="confirmedDig2Go" type="checkbox" aria-describedby="confirmationGuidance"><span><strong>Yes, this is a QuinLED Dig2Go</strong><small id="confirmationGuidance">I checked the name printed on the controller. The computer detected a compatible ESP chip, but cannot prove the board model.</small></span></label>
 			<button type="button" class="primary install" id="install" disabled hidden>Install</button>
 			<p class="action-note" id="actionNote" hidden>Install replaces the controller firmware. It never starts automatically.</p>
 			<details id="advancedDetails"><summary>Advanced details</summary><dl id="technicalDetails"><div><dt>Firmware</dt><dd>Loading verified Dig2Go firmware…</dd></div></dl></details>

@@ -31,6 +31,8 @@
       "easy-flash/firmware-ui.mjs",
       "easy-flash/firmware-manifest.mjs",
       "easy-flash/local-flash.mjs",
+      "easy-flash/safety-contract.mjs",
+      "easy-flash/operation-receipts.mjs",
       "easy-flash/device-identity.mjs",
       "easy-flash/firmware-manifest.json",
       "easy-flash/artifacts/**/*",

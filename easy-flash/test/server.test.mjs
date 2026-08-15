@@ -1,18 +1,22 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test, { after, before } from "node:test";
-import { server } from "../server.mjs";
+import { createEasyFlashServer } from "../server.mjs";
 
 let port;
+let server;
 
 before(async () => {
+	server = createEasyFlashServer();
 	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 	port = server.address().port;
 });
 
 after(async () => {
-	server.closeAllConnections();
-	await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+	const closed = new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+	server.closeIdleConnections?.();
+	server.closeAllConnections?.();
+	await closed;
 });
 
 test("serves the laptop USB prototype without an unverified local-build artifact API", async () => {

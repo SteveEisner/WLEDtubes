@@ -35,11 +35,11 @@ test("desktop CSP and bootstrap lock down remote content and privileged renderer
 test("connect and explicit install remain separate", async () => {
 	const appSource = await readFile(new URL("../app.mjs", import.meta.url), "utf8");
 	const flashSource = await readFile(new URL("../local-flash.mjs", import.meta.url), "utf8");
-	const writePath = flashSource.slice(flashSource.indexOf("export async function installConnectedController"));
+	const writePath = flashSource.slice(flashSource.indexOf("async function installConnectedController"));
 	assert.match(appSource, /confirmedDig2Go/);
-	assert.equal((flashSource.match(/navigator\.serial\.requestPort\(\)/g) || []).length, 1);
-	assert.ok(flashSource.indexOf("loader.main()") < flashSource.lastIndexOf("activeConnection ="));
-	assert.ok(writePath.indexOf("fetchVerifiedImage(variant, artifact)") < writePath.indexOf("loader.writeFlash"));
+	assert.equal((flashSource.match(/serial\.requestPort\(\)/g) || []).length, 1);
+	assert.ok(flashSource.indexOf("loader.main()") < flashSource.indexOf("active={token"));
+	assert.ok(writePath.indexOf("fetchVerifiedImage(variant,artifact)") < writePath.indexOf("session.loader.writeFlash"));
 	assert.doesNotMatch(appSource, /autoFlash|window\.confirm/);
 });
 

@@ -41,6 +41,8 @@ Pattern, Hello, Purple, spatial, Mobile Conductor, and Waveshare S3 experimental
 
 No physical write occurs merely by loading the app/page or preparing an operation receipt. The operator must select a USB port, physically confirm Dig2Go hardware, and explicitly approve a write. The canonical browser flow remains available through `npm run easy-flash`; Safari can download artifacts but cannot use Web Serial, so browser-based USB flashing requires desktop Chrome or Edge.
 
+Until the shared update-contract modules are accepted, `safety-contract.mjs` and `operation-receipts.mjs` are narrow source-branch adapters over this manifest. They preserve the same fail-closed merged-image component geometry/hash gates and truthful transfer/write/reset stages, and are intentionally isolated for direct replacement by the canonical adapters rather than becoming a second long-term authority.
+
 The attached strip cannot be auto-detected. Strip voltage, type, color order, pixel count, wiring, and current ceiling remain human-confirmed inputs.
 
 The ESP32 ROM identifies the MCU family, not the controller board. Easy Flash therefore cannot prove that a connected ESP32 is a QuinLED Dig2Go. Direct USB recovery remains an explicitly confirmed operator action for known Dig2Go hardware; the manifest target metadata must not be treated as connected-device detection.
