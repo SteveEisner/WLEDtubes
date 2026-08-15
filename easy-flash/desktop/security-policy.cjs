@@ -19,8 +19,8 @@ const STATIC_FILES = new Set([
 	"/profiles.mjs",
 	"/firmware-ui.mjs",
 	"/local-flash.mjs",
+	"/device-identity.mjs",
 	"/styles.css",
-	"/firmware-bench.css",
 	"/vendor/esptool-js/bundle.js",
 ]);
 

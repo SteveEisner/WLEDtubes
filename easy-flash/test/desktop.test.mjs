@@ -32,21 +32,16 @@ test("desktop CSP and bootstrap lock down remote content and privileged renderer
 	assert.doesNotMatch(main, /shell\.openExternal|setDevicePermissionHandler/);
 });
 
-test("launch and preparation remain separate from the confirmed write path", async () => {
+test("connect and explicit install remain separate", async () => {
 	const appSource = await readFile(new URL("../app.mjs", import.meta.url), "utf8");
 	const flashSource = await readFile(new URL("../local-flash.mjs", import.meta.url), "utf8");
-	const writePath = flashSource.slice(flashSource.indexOf("export async function flashFromLaptop"));
-	assert.match(appSource, /physically confirmed this controller is a QuinLED Dig2Go/);
-	assert.match(appSource, /if \(!window\.confirm/);
-	assert.ok(writePath.indexOf("navigator.serial.requestPort()") < writePath.indexOf("loader.main()"));
-	assert.ok(writePath.indexOf("loader.main()") < writePath.indexOf("fetchVerifiedImage"));
+	const writePath = flashSource.slice(flashSource.indexOf("export async function installConnectedController"));
+	assert.match(appSource, /confirmedDig2Go/);
+	assert.equal((flashSource.match(/navigator\.serial\.requestPort\(\)/g) || []).length, 1);
+	assert.ok(flashSource.indexOf("loader.main()") < flashSource.lastIndexOf("activeConnection ="));
 	assert.ok(writePath.indexOf("fetchVerifiedImage(variant, artifact)") < writePath.indexOf("loader.writeFlash"));
-	assert.doesNotMatch(mainEntry(appSource), /requestPort|writeFlash/);
+	assert.doesNotMatch(appSource, /autoFlash|window\.confirm/);
 });
-
-function mainEntry(source) {
-	return source.slice(source.indexOf("renderChoices($(\"#boardChoices\")"));
-}
 
 test("packaging is narrow, reproducible, and configured for macOS and Windows x64", async () => {
 	const pkg = JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8"));
@@ -55,6 +50,7 @@ test("packaging is narrow, reproducible, and configured for macOS and Windows x6
 	assert.deepEqual(pkg.build.mac.target, ["dmg", "zip"]);
 	assert.deepEqual(pkg.build.win.target[0].arch, ["x64"]);
 	assert.ok(pkg.build.files.includes("easy-flash/artifacts/**/*"));
+	assert.ok(pkg.build.files.includes("easy-flash/device-identity.mjs"));
 	assert.ok(pkg.build.files.includes("LICENSE"));
 	assert.ok(pkg.build.files.includes("!node_modules/**/*"));
 	assert.deepEqual(pkg.build.extraResources.map(({ to }) => to), ["LICENSE.electron.txt", "LICENSES.chromium.html"]);

@@ -7,30 +7,27 @@
 	<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
 	<title>WLEDTubes Easy Flash</title>
 	<link rel="stylesheet" href="styles.css">
-	<link rel="stylesheet" href="firmware-bench.css">
 </head>
 <body>
 	<header><div class="brand"><span class="mark">WT</span><div><strong>WLEDTubes</strong><small>Easy Flash</small></div></div><span class="status">LOCAL USB BETA</span></header>
 	<main>
-		<section class="hero"><p class="eyebrow">WLEDTUBES · EASY FLASH</p><h1>Buy. Build.<br><em>Rave.</em></h1><p>Buy the supported hardware, build your Tube, and let Easy Flash handle firmware and setup—no developer tools required.</p></section>
-		<nav aria-label="Setup progress"><button class="step active" data-go="controller">1 <span>Controller</span></button><button class="step" data-go="lights">2 <span>Lights</span></button><button class="step" data-go="power">3 <span>Power</span></button><button class="step" data-go="review">4 <span>Review</span></button></nav>
-		<form id="setup">
-			<section class="panel active" id="controller"><p class="kicker">Step 1 of 4</p><h2>Which controller box is this?</h2><p class="lede">Look for the name printed on the controller.</p><div id="boardChoices" class="choices"></div><button type="button" class="next" data-next="lights">Choose lights <span>→</span></button></section>
-			<section class="panel" id="lights"><p class="kicker">Step 2 of 4</p><h2>What lights are connected?</h2><p class="lede">The controller cannot detect the strip. Choose from the label, packaging, or a known build.</p><div id="lightChoices" class="choices"></div><details><summary>Advanced — exact strip settings</summary><div class="fields"><label>Strip type<input id="stripType" value="SK6812 RGBW (confirm)"></label><label>Color order<select id="colorOrder"><option>GRB</option><option selected>GRBW</option><option>RGB</option><option>RGBW</option><option>BRG</option></select></label><label>Logical pixels<input id="pixels" type="number" min="1" max="2000" value="60"></label></div></details><button type="button" class="next" data-next="power">Choose power <span>→</span></button></section>
-			<section class="panel" id="power"><p class="kicker">Step 3 of 4</p><h2>How much power is available?</h2><p class="lede">These are clearly labeled prototype examples—not certified electrical defaults.</p><div id="powerChoices" class="choices three"></div><details><summary>Advanced — exact hard ceiling</summary><label class="exact">Maximum current (mA)<input id="milliamps" type="number" min="100" max="20000" step="50" value="1000"></label></details><button type="button" class="next" data-next="review">Review setup <span>→</span></button></section>
-			<section class="panel" id="review"><p class="kicker">Step 4 of 4</p><h2>Confirm the exact plan</h2><div class="warning"><strong>You must confirm the strip.</strong><span>Its voltage, type, color order, pixel count, wiring, and safe current cannot be auto-detected.</span></div><div id="plan"></div><label class="confirm"><input id="confirmed" type="checkbox"> I checked the physical strip and power supply against this plan.</label><div class="connect"><div><strong>Connect / Install prototype</strong><p id="serialStatus">No device selected. Dry Run works without hardware.</p></div><button type="button" id="connect">Select USB device</button></div><button type="button" class="install" id="dryRun" disabled>Run safe demo <span>→</span></button></section>
-		</form>
-		<section id="receiptPanel" class="receipt-panel" hidden><p class="eyebrow">SIMULATED RESULT</p><h2>Dry run complete</h2><p>No firmware or settings were written. Save this plan for a future confirmed bench install.</p><pre id="receipt"></pre><div class="actions"><button id="copy">Copy receipt</button><button id="download">Download JSON</button></div></section>
-		<section class="migration-pillars"><p class="eyebrow">PROTOCOL MIGRATION</p><h2>Hardware firmware. Software-defined art.</h2><p>Easy Flash installs one compatible artifact for the physical controller. Palette, tempo, pattern, role, and spatial behavior belong in runtime configuration—not additional firmware.</p><div class="profile-wait"><strong>Software profiles are waiting for Steve’s split-packet contract.</strong><span>The interface reserves that layer now without inventing a competing wire format.</span></div></section>
-		<details id="firmwareTestBench" class="firmware-bench">
-			<summary>Advanced — Hardware Firmware</summary>
-			<div class="bench-intro"><p class="eyebrow">HARDWARE TARGETS · OFFLINE LOCAL USB</p><h2>Install on the ESP connected to this laptop</h2><div class="warning"><strong>USE THE EASY FLASH APP, OR DESKTOP CHROME/EDGE</strong><span>The desktop app includes secure local Web Serial support. The browser version still works in Chrome or Edge; Safari can download artifacts but cannot access USB serial.</span></div><p>Easy Flash reads the bundled firmware locally, verifies its size and SHA-256 hash, then writes only after you choose a USB port and approve the install.</p><p>The ESP ROM identifies the chip family, not the controller board. You must physically confirm that the connected controller is a QuinLED Dig2Go before the install button is enabled.</p></div>
-			<p id="firmwareManifestStatus">Loading verified hardware firmware…</p><div id="firmwareCards" class="firmware-cards"></div>
-
-			<section id="firmwareOperationPanel" class="receipt-panel operation-receipt" hidden><p class="eyebrow">PREPARED — NOT WRITTEN</p><h2>Firmware operation receipt</h2><p>The verified artifact was prepared for download. No physical write occurred.</p><pre id="firmwareOperationReceipt"></pre></section>
-		</details>
+		<section class="hero"><p class="eyebrow">WLEDTUBES · EASY FLASH</p><h1>Buy. Build. <em>Rave.</em></h1></section>
+		<section class="install-card" aria-labelledby="installTitle">
+			<p class="kicker">INSTALL YOUR CONTROLLER</p>
+			<h2 id="installTitle">Plug in your controller</h2>
+			<p class="lede" id="instruction">Connect the controller to this computer with a USB data cable, then choose Connect.</p>
+			<div class="controller-state" id="controllerState" role="status" aria-live="polite">
+				<span class="state-dot"></span><div><strong>Waiting for controller</strong><p id="controllerStatus">Nothing will be installed when you connect.</p></div>
+			</div>
+			<button type="button" class="primary" id="connect">Connect</button>
+			<label class="physical-confirmation" id="physicalConfirmation" hidden><input id="confirmedDig2Go" type="checkbox"><span><strong>Yes, this is a QuinLED Dig2Go</strong><small>I checked the name printed on the controller. The computer detected a compatible ESP chip, but cannot prove the board model.</small></span></label>
+			<button type="button" class="primary install" id="install" disabled hidden>Install</button>
+			<p class="action-note" id="actionNote" hidden>Install replaces the controller firmware. It never starts automatically.</p>
+			<details id="advancedDetails"><summary>Advanced details</summary><dl id="technicalDetails"><div><dt>Firmware</dt><dd>Loading verified Dig2Go firmware…</dd></div></dl></details>
+		</section>
+		<section id="resultPanel" class="result-panel" hidden><p class="eyebrow">INSTALL RESULT</p><h2 id="resultTitle">Install stopped</h2><p id="resultMessage"></p></section>
 	</main>
-	<footer>Last Stable: Tubes v14 / WLED 16 · One artifact per hardware target · Local and integrity-checked</footer>
+	<footer>Tubes v14 / WLED 16 · Local and integrity-checked</footer>
 	<script type="module" src="app.mjs"></script>
 </body>
 </html>

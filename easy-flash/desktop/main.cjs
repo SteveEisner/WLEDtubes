@@ -68,9 +68,9 @@ function installSerialPolicy(window) {
 		const choices = portList.map(describeSerialPort);
 		const result = await dialog.showMessageBox(window, {
 			type: "question",
-			title: "Select the connected Dig2Go",
-			message: "Choose the USB serial device you physically confirmed is a QuinLED Dig2Go.",
-			detail: "Selecting a port does not flash it. Easy Flash will identify the ESP chip and ask for confirmation before any write.",
+			title: "Select the connected controller",
+			message: "Choose the USB controller you just plugged in.",
+			detail: "Connecting does not install anything. Easy Flash will inspect the ESP chip first.",
 			buttons: [...choices, "Cancel"],
 			cancelId: choices.length,
 			defaultId: choices.length,
@@ -82,10 +82,10 @@ function installSerialPolicy(window) {
 
 function createWindow() {
 	const window = new BrowserWindow({
-		width: 1180,
-		height: 820,
-		minWidth: 840,
-		minHeight: 640,
+		width: 500,
+		height: 560,
+		minWidth: 440,
+		minHeight: 480,
 		show: false,
 		autoHideMenuBar: true,
 		webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, devTools: !app.isPackaged, webSecurity: true, allowRunningInsecureContent: false },

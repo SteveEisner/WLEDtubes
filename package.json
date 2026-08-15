@@ -31,6 +31,7 @@
       "easy-flash/firmware-ui.mjs",
       "easy-flash/firmware-manifest.mjs",
       "easy-flash/local-flash.mjs",
+      "easy-flash/device-identity.mjs",
       "easy-flash/firmware-manifest.json",
       "easy-flash/artifacts/**/*",
       "easy-flash/vendor/esptool-js/**/*",
