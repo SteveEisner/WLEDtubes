@@ -17,7 +17,6 @@ struct FirmwareImageArtifact {
   CanonicalReleaseClass releaseClass = CanonicalReleaseUnknown;
   CanonicalArtifactKind kind = CanonicalArtifactKindUnknown;
   CanonicalArtifactTransport transport = CanonicalTransportUnknown;
-  uint32_t imageOffset = 0;
   size_t imageLengthBytes = 0;
   // Compatibility evidence from the legacy device report. This is not full
   // release or artifact identity and never substitutes for the canonical SHA.
@@ -36,7 +35,6 @@ inline FirmwareImageArtifact firmwareArtifactFromCanonical(
   artifact.releaseClass = canonical.releaseClass;
   artifact.kind = canonical.kind;
   artifact.transport = canonical.transport;
-  artifact.imageOffset = canonical.offset;
   artifact.imageLengthBytes = canonical.lengthBytes;
   artifact.releaseHash = legacyReleaseHash;
   memcpy(artifact.imageSha256, canonical.sha256, sizeof(artifact.imageSha256));
@@ -61,7 +59,6 @@ inline bool firmwareArtifactMatchesCanonical(const FirmwareImageArtifact& artifa
       && artifact.releaseClass == canonical->releaseClass
       && artifact.kind == canonical->kind
       && artifact.transport == canonical->transport
-      && artifact.imageOffset == canonical->offset
       && artifact.imageLengthBytes == canonical->lengthBytes
       && memcmp(artifact.imageSha256, canonical->sha256,
           sizeof(artifact.imageSha256)) == 0;

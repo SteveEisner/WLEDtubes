@@ -14,7 +14,7 @@ const OTA_ALIGNMENT = 0x10000;
 const UINT8_MAX = 0xff;
 const requiredArtifactFields = [
   'id', 'targetId', 'releaseClass', 'tubesRelease', 'wledBaseVersion',
-  'releaseIdentity', 'buildCommit', 'kind', 'transport', 'path', 'offset',
+  'releaseIdentity', 'buildCommit', 'kind', 'transport', 'path',
   'lengthBytes', 'sha256'
 ];
 
@@ -185,26 +185,25 @@ export function validateContract(contract, {checkFiles = true} = {}) {
     fail(errors, targets.has(artifact.targetId), `${artifact.id} has unknown targetId: ${artifact.targetId}`);
     fail(errors, classes.has(artifact.releaseClass) && artifact.releaseClass !== 'Unknown', `${artifact.id} has unknown releaseClass`);
     fail(errors, hex64.test(artifact.sha256), `${artifact.id} has invalid sha256`);
-    fail(errors, Number.isSafeInteger(artifact.offset) && artifact.offset >= 0, `${artifact.id} has invalid offset`);
     fail(errors, Number.isSafeInteger(artifact.lengthBytes) && artifact.lengthBytes > 0, `${artifact.id} has invalid lengthBytes`);
     const target = targets.get(artifact.targetId);
     fail(errors, ['complete-merged-image', 'application-image'].includes(artifact.kind), `${artifact.id} has unsupported kind`);
     fail(errors, ['usb', 'recovery', 'ota'].includes(artifact.transport), `${artifact.id} has unsupported transport`);
-    fail(errors, artifact.offset <= (target?.flashSizeBytes ?? -1)
-      && artifact.lengthBytes <= (target?.flashSizeBytes ?? -1) - artifact.offset,
-      `${artifact.id} exceeds target flash`);
     if (artifact.kind === 'application-image') {
       fail(errors, artifact.transport === 'ota', `${artifact.id} application image must use OTA`);
       fail(errors, artifact.components === undefined, `${artifact.id} application image must not have components`);
+      fail(errors, artifact.writeOffset === undefined, `${artifact.id} OTA application must not have writeOffset`);
+      fail(errors, Number.isSafeInteger(artifact.buildOffset) && artifact.buildOffset >= 0,
+        `${artifact.id} has invalid buildOffset`);
+      fail(errors, artifact.lengthBytes <= Math.max(...(target?.partition?.otaSlots || []).map(slot => slot.sizeBytes), 0),
+        `${artifact.id} exceeds every OTA slot`);
     }
     if (artifact.kind === 'complete-merged-image') {
       fail(errors, artifact.transport === 'usb' || artifact.transport === 'recovery', `${artifact.id} merged image has unsupported transport`);
-      fail(errors, artifact.offset === 0, `${artifact.id} merged image offset must be 0`);
+      fail(errors, artifact.buildOffset === undefined, `${artifact.id} merged image must not have buildOffset`);
+      fail(errors, artifact.writeOffset === 0, `${artifact.id} merged image writeOffset must be 0`);
+      fail(errors, artifact.lengthBytes <= (target?.flashSizeBytes ?? -1), `${artifact.id} exceeds target flash`);
       fail(errors, Array.isArray(artifact.components) && artifact.components.length > 0, `${artifact.id} merged image requires components`);
-    }
-    if (artifact.transport === 'ota' && target?.partition) {
-      const fits = target.partition.otaSlots.some(slot => artifact.offset === slot.offset && artifact.lengthBytes <= slot.sizeBytes);
-      fail(errors, fits, `${artifact.id} does not fit a matching OTA slot`);
     }
     const components = [...(artifact.components || [])].sort((a, b) => a.offset - b.offset);
     unique(errors, components, `${artifact.id} component`);
@@ -213,8 +212,8 @@ export function validateContract(contract, {checkFiles = true} = {}) {
       fail(errors, Number.isSafeInteger(component.offset) && component.offset >= 0, `${artifact.id}/${component.id} has invalid offset`);
       fail(errors, Number.isSafeInteger(component.lengthBytes) && component.lengthBytes > 0, `${artifact.id}/${component.id} has invalid lengthBytes`);
       fail(errors, hex64.test(component.sha256), `${artifact.id}/${component.id} has invalid sha256`);
-      fail(errors, component.offset >= artifact.offset && component.offset <= artifact.offset + artifact.lengthBytes
-        && component.lengthBytes <= artifact.offset + artifact.lengthBytes - component.offset,
+      fail(errors, component.offset >= artifact.writeOffset && component.offset <= artifact.writeOffset + artifact.lengthBytes
+        && component.lengthBytes <= artifact.writeOffset + artifact.lengthBytes - component.offset,
         `${artifact.id}/${component.id} exceeds merged image`);
       if (index > 0) fail(errors, components[index - 1].offset + components[index - 1].lengthBytes <= component.offset,
         `${artifact.id} components overlap`);
@@ -228,7 +227,7 @@ export function validateContract(contract, {checkFiles = true} = {}) {
     fail(errors, sha256(bytes) === artifact.sha256, `${artifact.id} hash mismatch`);
     for (let index = 0; index < components.length; index++) {
       const component = components[index];
-      const start = component.offset - artifact.offset;
+      const start = component.offset - artifact.writeOffset;
       fail(errors, sha256(bytes.subarray(start, start + component.lengthBytes)) === component.sha256,
         `${artifact.id}/${component.id} hash mismatch`);
     }
@@ -290,9 +289,9 @@ export function renderCpp(contract) {
   const artifacts = [...contract.artifacts].sort((a, b) => a.cppValue - b.cppValue).map(item => {
     const kind = item.kind === 'complete-merged-image' ? 'CanonicalArtifactCompleteMergedImage' : 'CanonicalArtifactApplicationImage';
     const transport = item.transport === 'usb' ? 'CanonicalTransportUsb' : item.transport === 'recovery' ? 'CanonicalTransportRecovery' : 'CanonicalTransportOta';
-    return `static constexpr CanonicalArtifactRecord CANONICAL_ARTIFACT_${item.id.replace(/[^A-Za-z0-9]/g, '_').toUpperCase()} = {\n  CanonicalArtifact${cppName(item.id)}, CanonicalTarget${cppName(item.targetId)}, CanonicalRelease${cppName(item.releaseClass)},\n  ${kind}, ${transport}, ${item.offset}U, ${item.lengthBytes}U,\n  {${hashBytes(item.sha256)}}\n};`;
+    return `static constexpr CanonicalArtifactRecord CANONICAL_ARTIFACT_${item.id.replace(/[^A-Za-z0-9]/g, '_').toUpperCase()} = {\n  CanonicalArtifact${cppName(item.id)}, CanonicalTarget${cppName(item.targetId)}, CanonicalRelease${cppName(item.releaseClass)},\n  ${kind}, ${transport}, ${item.lengthBytes}U,\n  {${hashBytes(item.sha256)}}\n};`;
   }).join('\n\n');
-  return `#pragma once\n\n#include <stdint.h>\n\n// GENERATED FILE. DO NOT EDIT.\n// Source: contracts/update/update-contract.json (schema ${contract.schemaVersion})\n// Minimal firmware admission projection: host/UI-only names, board labels, paths,\n// release text, build commits, component lists, and acceptance notes are omitted.\n// Hardware-family/device-report evidence remains a separate fail-closed input.\n// AI: below section was generated by an AI\nstatic constexpr uint8_t CANONICAL_MAX_OTA_SLOTS = 2;\n\nenum CanonicalReleaseClass : uint8_t {\n${classes}\n};\n\nenum CanonicalTargetId : uint8_t {\n  CanonicalTargetUnknown = 0,\n${targetEnums}\n};\n\nenum CanonicalArtifactId : uint8_t {\n  CanonicalArtifactUnknown = 0,\n${artifactEnums}\n};\n\nenum CanonicalArtifactKind : uint8_t {\n  CanonicalArtifactKindUnknown = 0,\n  CanonicalArtifactCompleteMergedImage = 1,\n  CanonicalArtifactApplicationImage = 2,\n};\n\nenum CanonicalArtifactTransport : uint8_t {\n  CanonicalTransportUnknown = 0,\n  CanonicalTransportUsb = 1,\n  CanonicalTransportRecovery = 2,\n  CanonicalTransportOta = 3,\n};\n\nenum CanonicalUpdateState : uint8_t {\n${states}\n};\n\nstruct CanonicalOtaSlotRecord {\n  uint32_t offset;\n  uint32_t sizeBytes;\n};\n\nstruct CanonicalTargetRecord {\n  CanonicalTargetId targetId;\n  uint8_t chipFamily;\n  uint8_t flashMode;\n  uint32_t flashSizeBytes;\n  uint8_t otaSlotCount;\n  CanonicalOtaSlotRecord otaSlots[CANONICAL_MAX_OTA_SLOTS];\n  bool inactiveSlotAdmissible;\n  uint8_t partitionTableSha256[32];\n};\n\nstruct CanonicalArtifactRecord {\n  CanonicalArtifactId artifactId;\n  CanonicalTargetId targetId;\n  CanonicalReleaseClass releaseClass;\n  CanonicalArtifactKind kind;\n  CanonicalArtifactTransport transport;\n  uint32_t offset;\n  uint32_t lengthBytes;\n  uint8_t sha256[32];\n};\n\n${targets}\n\n${artifacts}\n// AI: end\n`;
+  return `#pragma once\n\n#include <stdint.h>\n\n// GENERATED FILE. DO NOT EDIT.\n// Source: contracts/update/update-contract.json (schema ${contract.schemaVersion})\n// Minimal firmware admission projection: host/UI-only names, board labels, paths,\n// release text, build commits, component lists, source/build offsets, and acceptance notes are omitted.\n// OTA bytes are position-independent Update input; receiver admission supplies destination geometry.\n// Hardware-family/device-report evidence remains a separate fail-closed input.\n// AI: below section was generated by an AI\nstatic constexpr uint8_t CANONICAL_MAX_OTA_SLOTS = 2;\n\nenum CanonicalReleaseClass : uint8_t {\n${classes}\n};\n\nenum CanonicalTargetId : uint8_t {\n  CanonicalTargetUnknown = 0,\n${targetEnums}\n};\n\nenum CanonicalArtifactId : uint8_t {\n  CanonicalArtifactUnknown = 0,\n${artifactEnums}\n};\n\nenum CanonicalArtifactKind : uint8_t {\n  CanonicalArtifactKindUnknown = 0,\n  CanonicalArtifactCompleteMergedImage = 1,\n  CanonicalArtifactApplicationImage = 2,\n};\n\nenum CanonicalArtifactTransport : uint8_t {\n  CanonicalTransportUnknown = 0,\n  CanonicalTransportUsb = 1,\n  CanonicalTransportRecovery = 2,\n  CanonicalTransportOta = 3,\n};\n\nenum CanonicalUpdateState : uint8_t {\n${states}\n};\n\nstruct CanonicalOtaSlotRecord {\n  uint32_t offset;\n  uint32_t sizeBytes;\n};\n\nstruct CanonicalTargetRecord {\n  CanonicalTargetId targetId;\n  uint8_t chipFamily;\n  uint8_t flashMode;\n  uint32_t flashSizeBytes;\n  uint8_t otaSlotCount;\n  CanonicalOtaSlotRecord otaSlots[CANONICAL_MAX_OTA_SLOTS];\n  bool inactiveSlotAdmissible;\n  uint8_t partitionTableSha256[32];\n};\n\nstruct CanonicalArtifactRecord {\n  CanonicalArtifactId artifactId;\n  CanonicalTargetId targetId;\n  CanonicalReleaseClass releaseClass;\n  CanonicalArtifactKind kind;\n  CanonicalArtifactTransport transport;\n  uint32_t lengthBytes;\n  uint8_t sha256[32];\n};\n\n${targets}\n\n${artifacts}\n// AI: end\n`;
 }
 
 export function generatedOutputs(contract) {

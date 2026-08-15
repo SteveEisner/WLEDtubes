@@ -43,6 +43,7 @@ public:
       const uint8_t targetMac[6],
       const FirmwareImageArtifact& artifact,
       const FirmwareTargetContract& receiverTarget,
+      const FirmwareUpdateDestination& destination,
       uint32_t now,
       uint32_t leaseDuration
   ) {
@@ -55,7 +56,8 @@ public:
         || !firmwareArtifactMatchesCanonical(artifact)
         || artifact.kind != CanonicalArtifactApplicationImage
         || artifact.transport != CanonicalTransportOta
-        || !firmwareArtifactFitsInactiveSlot(receiverTarget, artifact.imageLengthBytes)
+        || !firmwareArtifactFitsInactiveSlot(receiverTarget, destination,
+            artifact.imageLengthBytes)
         || matchFirmwareArtifactTarget(artifact.target, receiverTarget)
             != FirmwareTargetMatchExact)
       return false;

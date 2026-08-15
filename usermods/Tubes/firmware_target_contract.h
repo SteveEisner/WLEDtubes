@@ -114,13 +114,35 @@ inline FirmwareTargetMatch matchFirmwareArtifactTarget(
   return FirmwareTargetMatchExact;
 }
 
+struct FirmwareUpdateDestination {
+  uint8_t otaSlot = CANONICAL_MAX_OTA_SLOTS;
+  uint32_t offset = 0;
+  uint32_t sizeBytes = 0;
+};
+
+inline FirmwareUpdateDestination firmwareInactiveSlotDestination(
+    const FirmwareTargetContract& target
+) {
+  FirmwareUpdateDestination destination;
+  if (!firmwareTargetIsKnown(target))
+    return destination;
+  destination.otaSlot = target.inactiveOtaSlot;
+  destination.offset = target.otaSlots[target.inactiveOtaSlot].offset;
+  destination.sizeBytes = target.otaSlots[target.inactiveOtaSlot].sizeBytes;
+  return destination;
+}
+
 inline bool firmwareArtifactFitsInactiveSlot(
     const FirmwareTargetContract& target,
+    const FirmwareUpdateDestination& destination,
     uint32_t length
 ) {
   if (!firmwareTargetIsKnown(target) || length == 0)
     return false;
   const CanonicalOtaSlotRecord& slot = target.otaSlots[target.inactiveOtaSlot];
-  return length <= slot.sizeBytes;
+  return destination.otaSlot == target.inactiveOtaSlot
+      && destination.offset == slot.offset
+      && destination.sizeBytes == slot.sizeBytes
+      && length <= destination.sizeBytes;
 }
 // AI: end

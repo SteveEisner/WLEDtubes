@@ -91,13 +91,13 @@ void generated_targets_preserve_cross_target_rejection() {
 
 void inactive_slot_is_explicit_and_bounded() {
   FirmwareTargetContract target = dig2GoTarget();
-  expect(firmwareArtifactFitsInactiveSlot(target, 0x1000),
+  expect(firmwareArtifactFitsInactiveSlot(target, firmwareInactiveSlotDestination(target), 0x1000),
       "declared inactive slot rejected bounded image");
   target.inactiveOtaSlot = 1;
-  expect(firmwareArtifactFitsInactiveSlot(target, 0x1000),
+  expect(firmwareArtifactFitsInactiveSlot(target, firmwareInactiveSlotDestination(target), 0x1000),
       "second inactive slot rejected bounded image");
   target.inactiveOtaSlot = CANONICAL_MAX_OTA_SLOTS;
-  expect(!firmwareArtifactFitsInactiveSlot(target, 0x1000),
+  expect(!firmwareArtifactFitsInactiveSlot(target, firmwareInactiveSlotDestination(target), 0x1000),
       "missing inactive-slot evidence was admitted");
 }
 

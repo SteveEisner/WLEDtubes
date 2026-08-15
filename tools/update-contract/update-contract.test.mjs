@@ -95,8 +95,9 @@ test('artifact vocabularies, combinations, identities, and bounds are closed', (
     ['kind', 'mystery', /unsupported kind/],
     ['transport', 'wifi', /unsupported transport/],
     ['transport', 'usb', /application image must use OTA/],
-    ['offset', 0, /does not fit a matching OTA slot/],
-    ['lengthBytes', 99999999, /exceeds target flash/],
+    ['writeOffset', 0, /OTA application must not have writeOffset/],
+    ['buildOffset', -1, /invalid buildOffset/],
+    ['lengthBytes', 99999999, /exceeds every OTA slot/],
   ];
   for (const [field, value, pattern] of cases) {
     const contract = loadContract();
@@ -106,6 +107,9 @@ test('artifact vocabularies, combinations, identities, and bounds are closed', (
   const merged = loadContract();
   merged.artifacts[0].components[0].sha256 = 'bad';
   assert.match(validateContract(merged, {checkFiles: false}).join('\n'), /invalid sha256/);
+  const mergedOffset = loadContract();
+  mergedOffset.artifacts[0].writeOffset = 65536;
+  assert.match(validateContract(mergedOffset, {checkFiles: false}).join('\n'), /writeOffset must be 0/);
   const duplicate = loadContract();
   duplicate.artifacts[0].components[1].id = duplicate.artifacts[0].components[0].id;
   assert.match(validateContract(duplicate, {checkFiles: false}).join('\n'), /duplicate .* component id/);
@@ -130,14 +134,15 @@ test('JS and minimal C++ admission fields have parity for two slots and artifact
     for (const byte of target.partition.sha256.match(/../g)) assert.match(header, new RegExp(`0x${byte}`));
   }
   for (const artifact of updateContract.artifacts) {
-    assert.match(header, new RegExp(`${artifact.offset}U, ${artifact.lengthBytes}U`));
+    assert.match(header, new RegExp(`${artifact.lengthBytes}U`));
     for (const byte of artifact.sha256.match(/../g)) assert.match(header, new RegExp(`0x${byte}`));
   }
   assert.match(header, /Minimal firmware admission projection/);
   const headerCode = header.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
   for (const omittedField of [
     'hardwareFamily', 'board', 'csvPath', 'hardwareAcceptance', 'tubesRelease',
-    'wledBaseVersion', 'releaseIdentity', 'buildCommit', 'path', 'components'
+    'wledBaseVersion', 'releaseIdentity', 'buildCommit', 'path', 'components',
+    'writeOffset', 'buildOffset'
   ])
     assert.doesNotMatch(headerCode, new RegExp(`\\b${omittedField}\\b`));
   for (const omitted of ['DIG2GO_TUBES', 'c6522acef3e954b14aad30d6f687cdb99bd1624e'])

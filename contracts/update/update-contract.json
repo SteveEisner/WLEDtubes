@@ -56,7 +56,7 @@
       "kind": "complete-merged-image",
       "transport": "usb",
       "path": "contracts/update/artifacts/dig2go-v14/usb/merged.bin",
-      "offset": 0,
+      "writeOffset": 0,
       "lengthBytes": 1324928,
       "sha256": "4608ebbe3fbaa8406214e85c5e116f35d06c46ad9e703d38a797e13dc0214b91",
       "components": [
@@ -78,7 +78,7 @@
       "kind": "application-image",
       "transport": "ota",
       "path": "contracts/update/artifacts/dig2go-v14/ota/firmware.bin",
-      "offset": 65536,
+      "buildOffset": 65536,
       "lengthBytes": 1259392,
       "sha256": "bf6dc2feedb1669361471e9cc2224b1b2b1ba0e15602e58258dfde4e41569f2d"
     }

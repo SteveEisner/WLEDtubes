@@ -4,11 +4,11 @@ export const updateContract = Object.freeze({
   "artifacts": [
     {
       "buildCommit": "c6522acef3e954b14aad30d6f687cdb99bd1624e",
+      "buildOffset": 65536,
       "cppValue": 2,
       "id": "dig2go-v14-ota-application",
       "kind": "application-image",
       "lengthBytes": 1259392,
-      "offset": 65536,
       "path": "contracts/update/artifacts/dig2go-v14/ota/firmware.bin",
       "releaseClass": "Current",
       "releaseIdentity": "DIG2GO_TUBES",
@@ -50,7 +50,6 @@ export const updateContract = Object.freeze({
       "id": "dig2go-v14-usb-merged",
       "kind": "complete-merged-image",
       "lengthBytes": 1324928,
-      "offset": 0,
       "path": "contracts/update/artifacts/dig2go-v14/usb/merged.bin",
       "releaseClass": "Current",
       "releaseIdentity": "DIG2GO_TUBES",
@@ -58,7 +57,8 @@ export const updateContract = Object.freeze({
       "targetId": "quinled-dig2go",
       "transport": "usb",
       "tubesRelease": "14",
-      "wledBaseVersion": "16.0.1"
+      "wledBaseVersion": "16.0.1",
+      "writeOffset": 0
     }
   ],
   "receiptVocabulary": {

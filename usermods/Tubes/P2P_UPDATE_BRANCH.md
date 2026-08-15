@@ -227,6 +227,17 @@ Waveshare S3 target and partition geometry but deliberately provides no S3
 artifact or hardware-acceptance claim. Missing target, artifact, or release
 class identity fails closed; silence is `Unknown`, never `Legacy`.
 
+Artifact source geometry is transport-specific. The USB merged image retains
+`writeOffset: 0` and absolute component offsets. The OTA application artifact
+records only its distinct build-time component offset (`buildOffset: 0x10000`):
+its canonical bytes are position-independent input to the platform Update API,
+not bytes bound to OTA slot 0. Session admission separately selects the
+receiver's explicit `inactiveOtaSlot` and requires the supplied destination
+index, offset, and size to match that canonical slot exactly, with the image
+length no larger than the destination. The same OTA artifact ID, full SHA, and
+source bytes are therefore admissible to either canonical inactive slot; no
+per-slot artifact copies are created.
+
 The generated C++ projection is compile-time data. Firmware does not parse JSON
 at runtime. `FirmwareTargetContract` consumes only compact target and vocabulary
 constants, while `FirmwareUpdateSession` retains its existing sequential sender,

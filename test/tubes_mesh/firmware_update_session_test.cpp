@@ -29,6 +29,10 @@ FirmwareImageArtifact exactArtifact() {
       CANONICAL_ARTIFACT_DIG2GO_V14_OTA_APPLICATION, exactTarget(), 0x12345678);
 }
 
+FirmwareUpdateDestination destinationFor(const FirmwareTargetContract& target) {
+  return firmwareInactiveSlotDestination(target);
+}
+
 FirmwareUpdateHealthProof healthyProof() {
   const FirmwareImageArtifact artifact = exactArtifact();
   FirmwareUpdateHealthProof proof;
@@ -49,7 +53,7 @@ void exact_target_completes_only_after_health_proof() {
   FirmwareUpdateSession session;
   const FirmwareImageArtifact artifact = exactArtifact();
 
-  expect(session.select(SENDER, TARGET, artifact, exactTarget(), 100, 1000),
+  expect(session.select(SENDER, TARGET, artifact, exactTarget(), destinationFor(exactTarget()), 100, 1000),
       "exact target was not selected");
   expect(session.state() == FirmwareUpdateTargetSelected, "selection state changed");
   expect(!session.forwardingEnabled(), "forwarding enabled during selection");
@@ -72,12 +76,12 @@ void unknown_or_mismatched_identity_fails_before_selection() {
   FirmwareUpdateSession session;
   FirmwareImageArtifact artifact = exactArtifact();
   FirmwareTargetContract unknown;
-  expect(!session.select(SENDER, TARGET, artifact, unknown, 0, 1000),
+  expect(!session.select(SENDER, TARGET, artifact, unknown, destinationFor(unknown), 0, 1000),
       "unknown receiver was selected");
   expect(session.state() == FirmwareUpdateIdle, "failed selection changed state");
 
   FirmwareTargetContract mismatch = exactTarget(2);
-  expect(!session.select(SENDER, TARGET, artifact, mismatch, 0, 1000),
+  expect(!session.select(SENDER, TARGET, artifact, mismatch, destinationFor(mismatch), 0, 1000),
       "partition mismatch was selected");
   expect(session.state() == FirmwareUpdateIdle, "mismatch changed state");
 }
@@ -86,17 +90,17 @@ void arbitrary_current_artifact_fails_before_selection() {
   FirmwareUpdateSession session;
   FirmwareImageArtifact artifact = exactArtifact();
   artifact.artifactId = CanonicalArtifactUnknown;
-  expect(!session.select(SENDER, TARGET, artifact, exactTarget(), 0, 1000),
+  expect(!session.select(SENDER, TARGET, artifact, exactTarget(), destinationFor(exactTarget()), 0, 1000),
       "manual Current artifact was selected");
 
   artifact = exactArtifact();
   artifact.imageSha256[31] ^= 0xff;
-  expect(!session.select(SENDER, TARGET, artifact, exactTarget(), 0, 1000),
+  expect(!session.select(SENDER, TARGET, artifact, exactTarget(), destinationFor(exactTarget()), 0, 1000),
       "artifact with noncanonical full SHA was selected");
 
   artifact = firmwareArtifactFromCanonical(
       CANONICAL_ARTIFACT_DIG2GO_V14_USB_MERGED, exactTarget(), 0x12345678);
-  expect(!session.select(SENDER, TARGET, artifact, exactTarget(), 0, 1000),
+  expect(!session.select(SENDER, TARGET, artifact, exactTarget(), destinationFor(exactTarget()), 0, 1000),
       "USB merged artifact entered OTA session");
 }
 
@@ -105,17 +109,33 @@ void canonical_application_admits_either_explicit_inactive_slot() {
   FirmwareTargetContract target = exactTarget();
   target.inactiveOtaSlot = 1;
   FirmwareImageArtifact artifact = exactArtifact();
-  artifact.target = target;
-  expect(session.select(SENDER, TARGET, artifact, target, 0, 1000),
+  const FirmwareUpdateDestination destination = destinationFor(target);
+  expect(session.select(SENDER, TARGET, artifact, target, destination, 0, 1000),
       "canonical application was not admitted for second inactive slot");
+
+  session.reset();
+  FirmwareUpdateDestination mismatched = destination;
+  mismatched.offset = target.otaSlots[0].offset;
+  expect(!session.select(SENDER, TARGET, artifact, target, mismatched, 0, 1000),
+      "mismatched destination offset was admitted");
+
+  mismatched = destination;
+  mismatched.otaSlot = CANONICAL_MAX_OTA_SLOTS;
+  expect(!session.select(SENDER, TARGET, artifact, target, mismatched, 0, 1000),
+      "invalid destination slot was admitted");
+
+  mismatched = destination;
+  mismatched.sizeBytes = artifact.imageLengthBytes - 1;
+  expect(!session.select(SENDER, TARGET, artifact, target, mismatched, 0, 1000),
+      "undersized destination was admitted");
 }
 
 void one_target_and_mac_continuity_are_enforced() {
   FirmwareUpdateSession session;
   const FirmwareImageArtifact artifact = exactArtifact();
-  expect(session.select(SENDER, TARGET, artifact, exactTarget(), 0, 1000),
+  expect(session.select(SENDER, TARGET, artifact, exactTarget(), destinationFor(exactTarget()), 0, 1000),
       "initial target was rejected");
-  expect(!session.select(SENDER, OTHER, artifact, exactTarget(), 0, 1000),
+  expect(!session.select(SENDER, OTHER, artifact, exactTarget(), destinationFor(exactTarget()), 0, 1000),
       "second target replaced active target");
   expect(!session.startTransfer(OTHER, 1), "different MAC started transfer");
   expect(session.startTransfer(TARGET, 1), "selected MAC could not start transfer");
@@ -127,7 +147,7 @@ void one_target_and_mac_continuity_are_enforced() {
 void lease_expiry_fails_closed() {
   FirmwareUpdateSession session;
   const FirmwareImageArtifact artifact = exactArtifact();
-  expect(session.select(SENDER, TARGET, artifact, exactTarget(), 100, 50),
+  expect(session.select(SENDER, TARGET, artifact, exactTarget(), destinationFor(exactTarget()), 100, 50),
       "target selection failed");
   expect(!session.startTransfer(TARGET, 150), "expired lease started transfer");
   expect(session.state() == FirmwareUpdateFailed, "expired lease did not fail session");
@@ -138,7 +158,7 @@ void wrong_hash_or_release_cannot_pass_gates() {
   FirmwareUpdateSession session;
   const FirmwareImageArtifact artifact = exactArtifact();
   uint8_t wrongHash[32] = {0};
-  expect(session.select(SENDER, TARGET, artifact, exactTarget(), 0, 1000),
+  expect(session.select(SENDER, TARGET, artifact, exactTarget(), destinationFor(exactTarget()), 0, 1000),
       "target selection failed");
   expect(session.startTransfer(TARGET, 1), "transfer did not start");
   expect(session.recordProgress(TARGET, artifact.imageLengthBytes, 2),
@@ -147,7 +167,7 @@ void wrong_hash_or_release_cannot_pass_gates() {
   expect(session.state() == FirmwareUpdateFailed, "hash failure did not fail session");
 
   session.reset();
-  expect(session.select(SENDER, TARGET, artifact, exactTarget(), 0, 1000),
+  expect(session.select(SENDER, TARGET, artifact, exactTarget(), destinationFor(exactTarget()), 0, 1000),
       "target reselection failed");
   expect(session.startTransfer(TARGET, 1), "second transfer did not start");
   expect(session.recordProgress(TARGET, artifact.imageLengthBytes, 2),
