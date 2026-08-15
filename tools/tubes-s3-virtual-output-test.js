@@ -25,7 +25,7 @@ test('S3 field shell is local and keeps Updater read-only', () => {
   assert.match(source, /tubesCopyReadOnlySnapshot/);
   assert.doesNotMatch(source, /TUBES S3 v14|Tubes release: 14/);
   const controller = read('usermods/Tubes/controller.h');
-  assert.match(controller, /TUBES_READ_ONLY_FIELD_SHELL[\s\S]*RebootOperation[\s\S]*UpdateOperation[\s\S]*UpdateOfferOperation[\s\S]*SelectOperation/);
+  assert.match(controller, /TUBES_READ_ONLY_FIELD_SHELL[\s\S]*RebootOperation[\s\S]*UpdateOperation[\s\S]*UpdateOfferOperation[\s\S]*SelectOperation[\s\S]*RoleOperation/);
   assert.match(controller, /case COMMAND_UPGRADE:[\s\S]*TUBES_READ_ONLY_FIELD_SHELL[\s\S]*return false/);
   const report = read('usermods/Tubes/device_report_protocol.h');
   assert.match(report, /TubeHardwareWaveshareS3 = 6/);

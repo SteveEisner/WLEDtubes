@@ -1281,9 +1281,10 @@ class PatternController : public MessageReceiver {
 
     const TubeOperationCode operationCode = tubeOperationCode(operation);
 #ifdef TUBES_READ_ONLY_FIELD_SHELL
-    // The field shell is an inventory/control display, never an update authority.
+    // The field shell is an inventory/control display, never an update or role authority.
     if (operationCode == RebootOperation || operationCode == UpdateOperation
-        || operationCode == UpdateOfferOperation || operationCode == SelectOperation) {
+        || operationCode == UpdateOfferOperation || operationCode == SelectOperation
+        || operationCode == RoleOperation) {
       Serial.println(F("Tubes: operation denied by read-only field-shell capability"));
       return false;
     }

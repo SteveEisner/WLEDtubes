@@ -27,11 +27,22 @@ test('S3 read-only and logical-output flags do not leak into Dig2Go', () => {
 	assert.doesNotMatch(dig2go, /WAVESHARE|TUBES_READ_ONLY_FIELD_SHELL|TUBES_(?:NULL|LOGICAL)_OUTPUT/);
 });
 
-test('S3 update and reboot denial is enforced at the controller boundary', () => {
+test('S3 authority mutation is denied at the shared controller boundary', () => {
 	const controller = read('usermods/Tubes/controller.h');
 	const execute = controller.match(/bool executeOperation\(const TubeOperation& operation\)([\s\S]*?)\n  void /);
 	assert.ok(execute, 'could not isolate executeOperation');
-	assert.match(execute[1], /#ifdef TUBES_READ_ONLY_FIELD_SHELL[\s\S]*RebootOperation[\s\S]*UpdateOperation[\s\S]*UpdateOfferOperation[\s\S]*return false;/);
+	const capability = execute[1].match(/#ifdef TUBES_READ_ONLY_FIELD_SHELL([\s\S]*?)#endif/);
+	assert.ok(capability, 'missing read-only field-shell capability gate');
+	assert.match(capability[1], /RebootOperation[\s\S]*UpdateOperation[\s\S]*UpdateOfferOperation[\s\S]*SelectOperation[\s\S]*RoleOperation[\s\S]*return false;/);
+	assert.ok(execute[1].indexOf('RoleOperation') < execute[1].indexOf('case RoleOperation:'), 'role denial must precede role effects');
+
+	const json = controller.match(/void readJsonOperations\(JsonObject& root\)([\s\S]*?)\n  void /);
+	const keyboard = controller.match(/void keyboard_command\(char \*command\)([\s\S]*?)\n  void /);
+	const incoming = controller.match(/void onAction\(Action\* action\)([\s\S]*?)\n#define /);
+	assert.ok(json && keyboard && incoming, 'could not isolate local and incoming command funnels');
+	for (const [name, body] of [['JSON', json[1]], ['keyboard', keyboard[1]], ['incoming action', incoming[1]]]) {
+		assert.match(body, /decodeOperation\([\s\S]*executeOperation\(operation\)/, `${name} path must use the shared capability boundary`);
+	}
 
 	const shell = read('usermods/WaveshareS3CompileCanary/WaveshareS3CompileCanary.cpp');
 	assert.doesNotMatch(shell, /Update\.begin|Update\.write|esp_ota_begin|ESP\.restart/);
@@ -54,7 +65,11 @@ test('legacy packet IDs, action layout, and operation bindings remain unchanged'
 	for (const binding of [
 		"'u', UpdateOperation, LocalScope", "'U', UpdateOperation, SelectedScope",
 		"'V', UpdateOfferOperation, MeshScope", "'X', RebootOperation, SelectedScope",
+		"'r', RoleOperation, LocalScope", "'R', RoleOperation, SelectedScope",
 	]) {
 		assert.ok(controller.includes(`TUBE_COMMAND(${binding})`), `legacy binding changed: ${binding}`);
 	}
+	const role = controller.match(/case RoleOperation:([\s\S]*?)case CancelOverrideOperation:/);
+	assert.ok(role, 'could not isolate legacy RoleOperation behavior');
+	assert.match(role[1], /setRole\(ControllerRole\(argument\)\)[\s\S]*broadcastAction\('R', argument\)/);
 });
