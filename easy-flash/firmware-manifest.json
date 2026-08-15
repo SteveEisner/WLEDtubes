@@ -6,6 +6,7 @@
       "label": "Last stable \u2014 Tubes v14 / WLED 16",
       "description": "Current canonical Dig2Go Tubes firmware: Tubes release 14 rebased on WLED 16.0.1.",
       "source": {
+        "repository": "https://github.com/SteveEisner/WLEDtubes",
         "commit": "c6522acef3e954b14aad30d6f687cdb99bd1624e",
         "clean": true
       },

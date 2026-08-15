@@ -47,7 +47,7 @@ function renderPlan() {
 		const p = currentPlan();
 		const artifactLabel = discoveredArtifact?.status === "verified-manifest" ? `Verified ${discoveredArtifact.releaseIdentity} · SHA-256 ${discoveredArtifact.sha256.slice(0, 12)}…` : "Unavailable — dry run only";
 		$("#plan").innerHTML = `<div class="plan-grid">${[["Hardware firmware",p.resolved.firmwareTarget],["Software profile","Runtime layer · waiting for split protocol"],["LED output",`GPIO ${p.resolved.gpio}`],["Strip",p.resolved.stripType],["Color order",`${p.resolved.colorOrder} (confirm)`],["Logical pixels",p.resolved.logicalPixelCount],["Hard current ceiling",`${p.resolved.currentLimitMilliamps} mA · prototype example`],["Geometry",p.resolved.geometry],["Artifact",artifactLabel]].map(([a,b])=>`<div class="fact"><small>${escapeHtml(a)}</small><strong>${escapeHtml(b)}</strong></div>`).join("")}</div><div class="ownership"><strong>Where settings belong</strong><br>Hardware firmware: bootability, GPIO and compiled capabilities · WLED runtime config: strip, order, pixels and current ceiling · Tubes software profile: palette, tempo, pattern, role and spatial behavior</div>`;
-	} catch (error) { $("#plan").innerHTML = `<div class="warning">${error.message}</div>`; }
+	} catch (error) { const warning = document.createElement("div"); warning.className = "warning"; warning.textContent = error.message; $("#plan").replaceChildren(warning); }
 }
 
 async function selectDevice() {
@@ -84,11 +84,15 @@ function appendFirmwareCards(container, variants) {
 			button.addEventListener("click", () => prepareFirmwareArtifact(variant, artifact, button));
 			if (artifact.transport === "usb") {
 				const browserCanFlash = canFlashLocally();
-				const flashButton = addText(card, "button", browserCanFlash ? "Flash from this laptop" : "Open in Chrome to flash USB", "firmware-action laptop-flash");
+				const physicalConfirmation = document.createElement("label"); physicalConfirmation.className = "confirm";
+				const physicalCheckbox = document.createElement("input"); physicalCheckbox.type = "checkbox";
+				physicalConfirmation.append(physicalCheckbox, document.createTextNode(" I physically confirmed this controller is a QuinLED Dig2Go.")); card.append(physicalConfirmation);
+				const flashButton = addText(card, "button", browserCanFlash ? "Install on this Dig2Go" : "Open in Easy Flash or Chrome to install", "firmware-action laptop-flash");
 				flashButton.type = "button";
-				flashButton.disabled = !browserCanFlash;
-				const flashStatus = addText(card, "p", browserCanFlash ? "Connects to USB on this laptop through Chrome/Edge." : "Safari cannot access USB serial devices. Open this same URL in desktop Chrome or Edge. Downloads still work here.", "local-flash-status");
-				flashButton.addEventListener("click", () => runLaptopFlash(variant, artifact, flashButton, flashStatus));
+				flashButton.disabled = true;
+				const flashStatus = addText(card, "p", browserCanFlash ? "No port is selected automatically. Installation requires a port choice and final approval." : "Safari cannot access USB serial devices. Open the Easy Flash app or this same local URL in desktop Chrome or Edge. Downloads still work here.", "local-flash-status");
+				physicalCheckbox.addEventListener("change", () => { flashButton.disabled = !browserCanFlash || !physicalCheckbox.checked; });
+				flashButton.addEventListener("click", () => runLaptopFlash(variant, artifact, flashButton, flashStatus, physicalCheckbox));
 			}
 		}
 		container.append(card);
@@ -101,7 +105,8 @@ function renderFirmwareCards(manifest) {
 	return artifacts;
 }
 
-async function runLaptopFlash(variant, artifact, button, status) {
+async function runLaptopFlash(variant, artifact, button, status, physicalCheckbox) {
+	if (!physicalCheckbox.checked) { status.textContent = "Physically confirm the QuinLED Dig2Go before installing."; return; }
 	if (!window.confirm(`Flash ${variant.label} to the ESP connected to this laptop? This writes hardware and replaces its current firmware.`)) return;
 	button.disabled = true;
 	try {

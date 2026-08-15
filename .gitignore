@@ -22,6 +22,7 @@ wled-update.sh
 
 /build_output/
 /node_modules/
+/dist/easy-flash-desktop/
 /logs/
 
 /wled00/extLibs

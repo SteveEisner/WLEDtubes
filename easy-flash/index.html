@@ -4,12 +4,13 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<meta name="theme-color" content="#12100e">
+	<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
 	<title>WLEDTubes Easy Flash</title>
 	<link rel="stylesheet" href="styles.css">
 	<link rel="stylesheet" href="firmware-bench.css">
 </head>
 <body>
-	<header><div class="brand"><span class="mark">WT</span><div><strong>WLEDTubes</strong><small>Easy Flash prototype</small></div></div><span class="status">LAPTOP USB BETA</span></header>
+	<header><div class="brand"><span class="mark">WT</span><div><strong>WLEDTubes</strong><small>Easy Flash</small></div></div><span class="status">LOCAL USB BETA</span></header>
 	<main>
 		<section class="hero"><p class="eyebrow">TARGET ONE · EASY FLASH</p><h1>Set up your lights.<br><em>Skip the developer tools.</em></h1><p>Choose the box, lights, and power you actually have. We’ll turn those choices into a clear install plan.</p></section>
 		<nav aria-label="Setup progress"><button class="step active" data-go="controller">1 <span>Controller</span></button><button class="step" data-go="lights">2 <span>Lights</span></button><button class="step" data-go="power">3 <span>Power</span></button><button class="step" data-go="review">4 <span>Review</span></button></nav>
@@ -23,13 +24,13 @@
 		<section class="migration-pillars"><p class="eyebrow">PROTOCOL MIGRATION</p><h2>Hardware firmware. Software-defined art.</h2><p>Easy Flash installs one compatible artifact for the physical controller. Palette, tempo, pattern, role, and spatial behavior belong in runtime configuration—not additional firmware.</p><div class="profile-wait"><strong>Software profiles are waiting for Steve’s split-packet contract.</strong><span>The interface reserves that layer now without inventing a competing wire format.</span></div></section>
 		<details id="firmwareTestBench" class="firmware-bench">
 			<summary>Advanced — Hardware Firmware</summary>
-			<div class="bench-intro"><p class="eyebrow">HARDWARE TARGETS · DOWNLOAD + LAPTOP USB</p><h2>Flash the ESP connected to this laptop</h2><div class="warning"><strong>USE DESKTOP CHROME OR EDGE FOR USB</strong><span>Safari does not provide Web Serial and cannot access the ESP USB port. Downloads work in Safari; direct flashing requires opening this same local URL in Chrome or Edge.</span></div><p>The page downloads verified firmware locally, then Web Serial writes the ESP plugged into this laptop.</p><p>Select the exact hardware target, click <strong>Flash from this laptop</strong>, choose the USB serial port, and approve the write. Easy Flash refuses the wrong ESP family and checks the downloaded image before writing. The ESP ROM cannot identify the controller board, so you must physically confirm that the device is a QuinLED Dig2Go.</p></div>
+			<div class="bench-intro"><p class="eyebrow">HARDWARE TARGETS · OFFLINE LOCAL USB</p><h2>Install on the ESP connected to this laptop</h2><div class="warning"><strong>USE THE EASY FLASH APP, OR DESKTOP CHROME/EDGE</strong><span>The desktop app includes secure local Web Serial support. The browser version still works in Chrome or Edge; Safari can download artifacts but cannot access USB serial.</span></div><p>Easy Flash reads the bundled firmware locally, verifies its size and SHA-256 hash, then writes only after you choose a USB port and approve the install.</p><p>The ESP ROM identifies the chip family, not the controller board. You must physically confirm that the connected controller is a QuinLED Dig2Go before the install button is enabled.</p></div>
 			<p id="firmwareManifestStatus">Loading verified hardware firmware…</p><div id="firmwareCards" class="firmware-cards"></div>
 
 			<section id="firmwareOperationPanel" class="receipt-panel operation-receipt" hidden><p class="eyebrow">PREPARED — NOT WRITTEN</p><h2>Firmware operation receipt</h2><p>The verified artifact was prepared for download. No physical write occurred.</p><pre id="firmwareOperationReceipt"></pre></section>
 		</details>
 	</main>
-	<footer>Last Stable: Tubes v14 / WLED 16 · One artifact per hardware target · Direct USB uses your laptop browser</footer>
+	<footer>Last Stable: Tubes v14 / WLED 16 · One artifact per hardware target · Local and integrity-checked</footer>
 	<script type="module" src="app.mjs"></script>
 </body>
 </html>

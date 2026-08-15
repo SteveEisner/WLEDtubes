@@ -2,17 +2,82 @@
   "name": "wled",
   "version": "16.0.1",
   "description": "Tools for WLED project",
-  "main": "tools/cdata.js",
-  "directories": {
-    "lib": "lib",
-    "test": "test"
-  },
+  "main": "easy-flash/desktop/main.cjs",
   "scripts": {
     "build": "node tools/cdata.js",
     "test": "node --test",
     "easy-flash": "node easy-flash/server.mjs",
+    "easy-flash:desktop": "electron .",
+    "dist:easy-flash:mac": "electron-builder --mac dmg zip --publish never",
+    "dist:easy-flash:win": "electron-builder --win nsis zip --x64 --publish never",
     "test:easy-flash": "node --test easy-flash/test/*.test.mjs",
     "dev": "nodemon -e js,html,htm,css,png,jpg,gif,ico,js -w tools/ -w wled00/data/ -x node tools/cdata.js"
+  },
+  "build": {
+    "appId": "org.wledtubes.easyflash",
+    "productName": "WLEDTubes Easy Flash",
+    "artifactName": "WLEDTubes-Easy-Flash-${version}-${os}-${arch}.${ext}",
+    "asar": true,
+    "directories": {
+      "output": "dist/easy-flash-desktop"
+    },
+    "files": [
+      "!node_modules/**/*",
+      "easy-flash/desktop/**/*",
+      "easy-flash/index.html",
+      "easy-flash/*.css",
+      "easy-flash/app.mjs",
+      "easy-flash/profiles.mjs",
+      "easy-flash/firmware-ui.mjs",
+      "easy-flash/firmware-manifest.mjs",
+      "easy-flash/local-flash.mjs",
+      "easy-flash/firmware-manifest.json",
+      "easy-flash/artifacts/**/*",
+      "easy-flash/vendor/esptool-js/**/*",
+      "easy-flash/THIRD_PARTY_NOTICES.md",
+      "LICENSE",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "node_modules/electron/dist/LICENSE",
+        "to": "LICENSE.electron.txt"
+      },
+      {
+        "from": "node_modules/electron/dist/LICENSES.chromium.html",
+        "to": "LICENSES.chromium.html"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   },
   "repository": {
     "type": "git",
@@ -27,10 +92,14 @@
   "dependencies": {
     "clean-css": "^5.3.3",
     "html-minifier-terser": "^7.2.0",
-    "web-resource-inliner": "^7.0.0",
-    "nodemon": "^3.1.14"
+    "nodemon": "^3.1.14",
+    "web-resource-inliner": "^7.0.0"
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "electron": "43.4.0",
+    "electron-builder": "26.15.3"
   }
 }
