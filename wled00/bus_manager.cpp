@@ -14,6 +14,7 @@
 #include "core_esp8266_waveform.h"
 #endif
 #include "bus_manager.h"
+#include "bus_virtual_framebuffer_contract.h"
 #include "bus_wrapper.h"
 #include "wled.h"
 
@@ -1226,9 +1227,9 @@ size_t BusHub75Matrix::getPins(uint8_t* pinArray) const {
 // this file; unlike BusNetwork, this class deliberately has no transport.
 BusVirtualFramebuffer::BusVirtualFramebuffer(const BusConfig &bc)
 : Bus(TYPE_VIRTUAL_FRAMEBUFFER_RGB, bc.start, RGBW_MODE_MANUAL_ONLY, bc.count, bc.reversed, false)
-, _data(static_cast<uint32_t *>(d_calloc(bc.count, sizeof(uint32_t))))
+, _data(isVirtualFramebufferCountValid(bc.count) ? static_cast<uint32_t *>(d_calloc(bc.count, sizeof(uint32_t))) : nullptr)
 {
-  _valid = _data != nullptr;
+  _valid = isVirtualFramebufferCountValid(bc.count) && _data != nullptr;
 }
 
 BusVirtualFramebuffer::~BusVirtualFramebuffer() {
@@ -1298,6 +1299,11 @@ int BusManager::add(const BusConfig &bc, bool placeholder) {
   if (bc.type != TYPE_VIRTUAL_FRAMEBUFFER_RGB) {
     errorFlag = ERR_DENIED;
     DEBUGBUS_PRINTLN(F("Rejected non-framebuffer bus on logical-output target."));
+    return -1;
+  }
+  if (!isVirtualFramebufferCountValid(bc.count)) {
+    errorFlag = ERR_NORAM_PX;
+    DEBUGBUS_PRINTLN(F("Rejected zero-length virtual framebuffer bus."));
     return -1;
   }
   if (!busses.empty()) {

@@ -21,6 +21,10 @@
 #define PIXEL_COUNTS DEFAULT_LED_COUNT
 #endif
 
+#ifdef TUBES_NULL_OUTPUT
+static_assert(PIXEL_COUNTS > 0, "Tubes logical framebuffer requires PIXEL_COUNTS > 0");
+#endif
+
 #ifndef DATA_PINS
 #define DATA_PINS DEFAULT_LED_PIN
 #endif

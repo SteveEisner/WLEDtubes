@@ -15,6 +15,9 @@ test('Waveshare S3 alone enables a 60-pixel null logical output', () => {
   assert.doesNotMatch(s3, /(?:LEDPIN|DATA_PINS|TYPE_NET_)/);
   const dig2go = ini.match(/\[env:esp32_quinled_dig2go_tubes\]([\s\S]*?)(?=\n\[|$)/)[1];
   assert.doesNotMatch(dig2go, /TUBES_NULL_OUTPUT/);
+
+  const tubes = read('usermods/Tubes/Tubes.h');
+  assert.match(tubes, /#ifdef TUBES_NULL_OUTPUT\s+static_assert\(PIXEL_COUNTS > 0/);
 });
 
 test('S3 field shell is local and keeps Updater read-only', () => {
@@ -73,6 +76,8 @@ test('framebuffer taxonomy is unique and normal add semantics are mutation-safe'
   assert.ok(add, 'could not isolate BusManager::add');
   assert.doesNotMatch(add[1], /busses\.clear\(/);
   assert.match(add[1], /bc\.type != TYPE_VIRTUAL_FRAMEBUFFER_RGB[\s\S]*return -1/);
+  assert.match(add[1], /isVirtualFramebufferCountValid\(bc\.count\)[\s\S]*errorFlag = ERR_NORAM_PX[\s\S]*return -1/);
+  assert.ok(add[1].indexOf('isVirtualFramebufferCountValid(bc.count)') < add[1].indexOf('busses.push_back'), 'zero count must be rejected before insertion');
   assert.match(add[1], /make_unique<BusVirtualFramebuffer>[\s\S]*!framebuffer->isOk\(\)[\s\S]*errorFlag = ERR_(?:NORAM|LOW_MEM)[\s\S]*return -1[\s\S]*busses\.push_back/);
 });
 
