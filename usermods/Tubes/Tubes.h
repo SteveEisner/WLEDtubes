@@ -45,6 +45,22 @@ class TubesUsermod : public Usermod {
     bool isLegacy = false;
     bool checkedLedSegments = false;
 
+#ifdef TUBES_NULL_OUTPUT
+    bool hasExpectedLogicalOutput() const {
+      if (BusManager::getNumBusses() != 1) return false;
+      const Bus *bus = BusManager::getBus(0);
+      return bus != nullptr && bus->isOk() &&
+             bus->getType() == TYPE_VIRTUAL_FRAMEBUFFER_RGB &&
+             bus->getStart() == 0 && bus->getLength() == PIXEL_COUNTS;
+    }
+
+    bool hasExpectedLogicalOutputConfig() const {
+      return busConfigs.size() == 1 &&
+             busConfigs[0].type == TYPE_VIRTUAL_FRAMEBUFFER_RGB &&
+             busConfigs[0].start == 0 && busConfigs[0].count == PIXEL_COUNTS;
+    }
+#endif
+
     void randomize() {
       randomSeed(esp_random());
       random16_set_seed(random(0, 65535));
@@ -52,15 +68,32 @@ class TubesUsermod : public Usermod {
     }
 
     void recoverLedBussesIfNeeded() {
-      if (strip.getLengthTotal() > 0 || BusManager::getNumBusses() > 0 || !busConfigs.empty()) return;
-
 #ifdef TUBES_NULL_OUTPUT
+      // The S3 adapter owns one logical output. Preserve existing state, but
+      // fail closed instead of replacing persisted or unrelated bus config.
+      if (BusManager::getNumBusses() > 0) {
+        if (!hasExpectedLogicalOutput()) {
+          errorFlag = ERR_DENIED;
+          Serial.println(F("Tubes: rejected incompatible S3 output bus"));
+        }
+        return;
+      }
+      if (!busConfigs.empty()) {
+        if (!hasExpectedLogicalOutputConfig()) {
+          errorFlag = ERR_DENIED;
+          Serial.println(F("Tubes: rejected incompatible S3 output config"));
+        }
+        return;
+      }
+
       uint8_t noPins[OUTPUT_MAX_PINS] = {255, 255, 255, 255, 255};
-      busConfigs.emplace_back(TYPE_TUBES_NULL, noPins, 0, PIXEL_COUNTS, COL_ORDER_RGB);
+      busConfigs.emplace_back(TYPE_VIRTUAL_FRAMEBUFFER_RGB, noPins, 0, PIXEL_COUNTS, COL_ORDER_RGB);
       doInitBusses = true;
-      Serial.println(F("Tubes: created null logical output"));
+      Serial.println(F("Tubes: created logical framebuffer output"));
       return;
 #endif
+
+      if (strip.getLengthTotal() > 0 || BusManager::getNumBusses() > 0 || !busConfigs.empty()) return;
 
       constexpr unsigned defDataTypes[] = {LED_TYPES};
       constexpr unsigned defDataPins[] = {DATA_PINS};
@@ -112,6 +145,10 @@ class TubesUsermod : public Usermod {
     }
 
   public:
+    void copyReadOnlySnapshot(TubesReadOnlySnapshot& snapshot) const {
+      controller.copyReadOnlySnapshot(snapshot);
+    }
+
     void setup() {
       randomize();
 

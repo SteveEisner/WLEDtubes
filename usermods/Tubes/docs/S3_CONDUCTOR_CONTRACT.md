@@ -9,11 +9,12 @@ change the deployed wire protocol.
 
 `waveshare_s3_tubes_remote` defines `TUBES_NULL_OUTPUT` and renders 60 logical
 pixels through the normal WLED strip, segment, effect, and Tubes overlay paths.
-The final bus is `BusTubesNull`: an addressable packed-RGB framebuffer whose
-`show()` is intentionally empty. `BusManager::add()` replaces every requested
-bus under this flag, including a physical or network bus restored from flash,
-before any transport constructor can run. Future AMOLED preview code can read
-the rendered frame through the existing `BusManager::getBus()` and
+The final bus is `BusVirtualFramebuffer`: a generic addressable packed-RGB
+framebuffer whose `show()` is intentionally empty. The Tubes S3 adapter creates
+that output idempotently, and target-scoped `BusManager::add()` rejects physical,
+network, or additional framebuffer configuration before bus mutation or pin
+allocation. It never clears unrelated buses from generic add. AMOLED preview
+code can read the rendered frame through the existing `BusManager::getBus()` and
 `Bus::getPixelColor()` interfaces.
 
 IDs 24 and above still execute WLED's real effect engine and are cross-faded by

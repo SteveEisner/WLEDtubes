@@ -239,6 +239,24 @@ class PatternController : public MessageReceiver {
     AutoUpdater updater = AutoUpdater();
     Sounder sound = Sounder();
 
+    void copyReadOnlySnapshot(TubesReadOnlySnapshot& snapshot) const {
+      snapshot = TubesReadOnlySnapshot{};
+      snapshot.hardwareFamily = TUBES_HARDWARE_FAMILY;
+      snapshot.reportProtocolVersion = DEVICE_REPORT_PROTOCOL_VERSION;
+      snapshot.compatibilityClass = TubeCompatibilityUnknown;
+      snapshot.tubesRelease = RELEASE_VERSION;
+      strlcpy(snapshot.wledVersion, versionString, sizeof(snapshot.wledVersion));
+      snapshot.controllerRole = role;
+      if (node.status == LightNode::NODE_STATUS_STARTED)
+        snapshot.meshFlags |= DeviceReportMeshStarted;
+      if (node.isFollowing())
+        snapshot.meshFlags |= DeviceReportMeshFollowing;
+      if (isMasterRole())
+        snapshot.meshFlags |= DeviceReportMasterBehavior;
+      snapshot.nodeId = node.header.id;
+      snapshot.uplinkId = node.header.uplinkId;
+    }
+
     TubesTimer graphicsTimer;
     TubesTimer updateTimer;
     TubesTimer optionsBroadcastTimer;
@@ -1261,7 +1279,17 @@ class PatternController : public MessageReceiver {
     TubeScope scope = tubeOperationScope(operation);
     bool share = scope != LocalScope;
 
-    switch (tubeOperationCode(operation)) {
+    const TubeOperationCode operationCode = tubeOperationCode(operation);
+#ifdef TUBES_READ_ONLY_FIELD_SHELL
+    // The field shell is an inventory/control display, never an update authority.
+    if (operationCode == RebootOperation || operationCode == UpdateOperation
+        || operationCode == UpdateOfferOperation || operationCode == SelectOperation) {
+      Serial.println(F("Tubes: operation denied by read-only field-shell capability"));
+      return false;
+    }
+#endif
+
+    switch (operationCode) {
       case DebugOperation:
         setDebugging(argument, share);
         return true;
@@ -1727,10 +1755,15 @@ class PatternController : public MessageReceiver {
       }
 
       case COMMAND_UPGRADE:
+#ifdef TUBES_READ_ONLY_FIELD_SHELL
+        Serial.println(F("Tubes: upgrade offer denied by read-only field-shell capability"));
+        return false;
+#else
         // HOMELIGHT must relay upgrade offers without installing Tubes firmware.
         if (!isHomeLightRole())
           updater.start((AutoUpdateOffer*)data);
         return true;
+#endif
 
       case COMMAND_ACTION:
         if (((Action*)data)->key == DEVICE_REPORT_ACTION_KEY)

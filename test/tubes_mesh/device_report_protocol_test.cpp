@@ -1,5 +1,6 @@
 #include <array>
 #include <cstdint>
+#include <cstddef>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -46,12 +47,29 @@ void report_preserves_the_deployed_action_prefix() {
     expect(!isDeviceReportMessage(report), "invalid protocol magic was accepted");
 }
 
+// Lock the additive report extension to its deployed byte layout. This keeps
+// mixed-version relays and host tooling compatible when fields are appended.
+void report_layout_and_taxonomy_remain_stable() {
+    expect(sizeof(DeviceReportMessage) == 38, "device report wire size changed");
+    expect(offsetof(DeviceReportMessage, actionKey) == 0, "action key offset changed");
+    expect(offsetof(DeviceReportMessage, kind) == 1, "action argument offset changed");
+    expect(offsetof(DeviceReportMessage, magic) == 2, "report magic offset changed");
+    expect(offsetof(DeviceReportMessage, hardwareFamily) == 5, "hardware family offset changed");
+    expect(offsetof(DeviceReportMessage, tubesVersion) == 6, "Tubes version offset changed");
+    expect(offsetof(DeviceReportMessage, releaseHash) == 30, "release hash offset changed");
+    expect(offsetof(DeviceReportMessage, uptimeSeconds) == 34, "uptime offset changed");
+    expect(DEVICE_REPORT_PROTOCOL_VERSION == 1, "report protocol version changed");
+    expect(TubeHardwareDig2Go == 1, "Dig2Go family ID changed");
+    expect(TubeHardwareWaveshareS3 == 6, "Waveshare S3 family ID changed");
+}
+
 } // namespace
 
 int main() {
-    const std::array<std::pair<const char*, void (*)()>, 2> tests = {{
+    const std::array<std::pair<const char*, void (*)()>, 3> tests = {{
         {"normalized MAC selects only requested device", normalized_mac_selects_only_the_requested_device},
         {"report preserves deployed action prefix", report_preserves_the_deployed_action_prefix},
+        {"report layout and taxonomy remain stable", report_layout_and_taxonomy_remain_stable},
     }};
 
     for (const auto& test : tests) {

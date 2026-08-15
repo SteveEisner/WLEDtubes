@@ -364,16 +364,27 @@ static_assert(WLED_MAX_BUSSES <= 32, "WLED_MAX_BUSSES exceeds hard limit");
 #define TYPE_HUB75MATRIX_QS      66
 #define TYPE_HUB75MATRIX_MAX     71
 
-//Network types (master broadcast) (80-95)
+//Virtual output types (80-95). Network transports and logical outputs use
+//distinct concrete IDs so non-transport buses are never treated as UDP buses.
 #define TYPE_VIRTUAL_MIN         80
 #define TYPE_NET_DDP_RGB         80            //network DDP RGB bus (master broadcast bus)
 #define TYPE_NET_E131_RGB        81            //network E131 RGB bus (master broadcast bus, unused)
 #define TYPE_NET_ARTNET_RGB      82            //network ArtNet RGB bus (master broadcast bus, unused)
+#ifdef TUBES_NULL_OUTPUT
+#define TYPE_VIRTUAL_FRAMEBUFFER_RGB 83         //generic in-memory RGB output with side-effect-free show()
+#endif
 #define TYPE_NET_DDP_RGBW        88            //network DDP RGBW bus (master broadcast bus)
 #define TYPE_NET_ARTNET_RGBW     89            //network ArtNet RGB bus (master broadcast bus, unused)
 #define TYPE_VIRTUAL_MAX         95
 #ifdef TUBES_NULL_OUTPUT
-#define TYPE_TUBES_NULL          95            // internal RGB framebuffer, never a transport
+static_assert(TYPE_VIRTUAL_FRAMEBUFFER_RGB >= TYPE_VIRTUAL_MIN && TYPE_VIRTUAL_FRAMEBUFFER_RGB <= TYPE_VIRTUAL_MAX,
+              "Framebuffer bus must remain in the virtual bus range");
+static_assert(TYPE_VIRTUAL_FRAMEBUFFER_RGB != TYPE_NET_DDP_RGB &&
+              TYPE_VIRTUAL_FRAMEBUFFER_RGB != TYPE_NET_E131_RGB &&
+              TYPE_VIRTUAL_FRAMEBUFFER_RGB != TYPE_NET_ARTNET_RGB &&
+              TYPE_VIRTUAL_FRAMEBUFFER_RGB != TYPE_NET_DDP_RGBW &&
+              TYPE_VIRTUAL_FRAMEBUFFER_RGB != TYPE_NET_ARTNET_RGBW,
+              "Framebuffer bus type must be unique among virtual outputs");
 #endif
 
 //Color orders
