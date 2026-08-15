@@ -65,7 +65,11 @@ Newly updated devices do not independently broadcast update commands. Cross-targ
 
 The branch currently expresses those checks with `FirmwareTargetContract`, an
 internal, non-wire structure covering hardware family, chip family, flash mode,
-flash size, partition-table SHA-256, and OTA-slot geometry. Unknown or partial
+flash size, partition-table SHA-256, and OTA-slot geometry. The canonical
+projection contains static hardware geometry only and is deliberately
+receiver-incomplete. A receiver target becomes admissible only when runtime
+partition inspection supplies and validates an explicit inactive-slot index;
+hardware identity alone is never inactive-slot evidence. Unknown or partial
 contracts fail closed. This structure must not be serialized or assigned a mesh
 action key until Steve's canonical metadata transport defines that seam.
 
@@ -97,14 +101,19 @@ A sender may read and serve its running application partition. A receiver writes
 carries its own `FirmwareTargetContract`; the device storing or serving that
 artifact is only the carrier and its hardware identity is not used for receiver
 admission. Memory/file implementations provide the host-testable carrier seam.
-The ESP32 running-image adapter verifies the running application with
+The ESP32 running-image adapter is explicitly limited to the sole registered
+running artifact, Dig2Go v14. It verifies the running application with
 Espressif's image parser, uses its exact image length rather than partition
 capacity, computes SHA-256 across exactly those bytes, and permits only bounded
-partition reads. The host-tested HTTP response core provides exact GET, HEAD,
+partition reads. No generic running-image API silently maps other targets to
+that artifact. The host-tested HTTP response core provides exact GET, HEAD,
 and single bounded byte-range semantics over any verified image source;
 malformed, multipart, overflowing, and past-end ranges fail closed. It is not
-registered on the live WLED server yet: endpoint availability must be bounded
-by the selected update session/lease rather than exposing an always-on firmware
+registered on the live WLED server yet: these seams extend the existing Tubes
+update architecture without owning operational session or HTTP endpoint
+lifetime. That integration remains intentionally absent pending protocol
+authorization; endpoint availability must eventually be bounded by the
+selected update session/lease rather than exposing an always-on firmware
 download. No receiver write path is connected yet.
 
 ### Bootstrap boundary
@@ -231,16 +240,19 @@ Artifact source geometry is transport-specific. The USB merged image retains
 `writeOffset: 0` and absolute component offsets. The OTA application artifact
 records only its distinct build-time component offset (`buildOffset: 0x10000`):
 its canonical bytes are position-independent input to the platform Update API,
-not bytes bound to OTA slot 0. Session admission separately selects the
-receiver's explicit `inactiveOtaSlot` and requires the supplied destination
+not bytes bound to OTA slot 0. Session admission separately consumes an
+explicit `inactiveOtaSlot` verified from receiver runtime partition evidence
+and requires the supplied destination
 index, offset, and size to match that canonical slot exactly, with the image
 length no larger than the destination. The same OTA artifact ID, full SHA, and
 source bytes are therefore admissible to either canonical inactive slot; no
 per-slot artifact copies are created.
 
 The generated C++ projection is compile-time data. Firmware does not parse JSON
-at runtime. `FirmwareTargetContract` consumes only compact target and vocabulary
-constants, while `FirmwareUpdateSession` retains its existing sequential sender,
+at runtime. `firmwareStaticTargetFromCanonical()` projects compact target and
+vocabulary constants but cannot produce an admissible receiver target;
+`firmwareReceiverTargetFromStatic()` requires the separately verified runtime
+inactive-slot index. `FirmwareUpdateSession` retains its existing sequential sender,
 target, artifact, lease, transfer, health, and disabled-forwarding semantics.
 
 ### Centralized-contract TODO

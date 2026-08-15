@@ -17,16 +17,20 @@ void expect(bool condition, const std::string& message) {
 }
 
 FirmwareTargetContract exactTarget(uint8_t marker = 1) {
-  FirmwareTargetContract target = firmwareTargetFromCanonical(
+  const FirmwareTargetContract staticTarget = firmwareStaticTargetFromCanonical(
       CANONICAL_TARGET_QUINLED_DIG2GO, TubeHardwareDig2Go);
-  target.inactiveOtaSlot = 0;
+  FirmwareTargetContract target;
+  expect(firmwareReceiverTargetFromStatic(staticTarget, 0, target),
+      "verified inactive slot did not construct receiver target");
   if (marker != 1) target.partitionTableSha256[0] ^= marker;
   return target;
 }
 
 FirmwareImageArtifact exactArtifact() {
+  const FirmwareTargetContract staticTarget = firmwareStaticTargetFromCanonical(
+      CANONICAL_TARGET_QUINLED_DIG2GO, TubeHardwareDig2Go);
   return firmwareArtifactFromCanonical(
-      CANONICAL_ARTIFACT_DIG2GO_V14_OTA_APPLICATION, exactTarget(), 0x12345678);
+      CANONICAL_ARTIFACT_DIG2GO_V14_OTA_APPLICATION, staticTarget, 0x12345678);
 }
 
 FirmwareUpdateDestination destinationFor(const FirmwareTargetContract& target) {
@@ -36,7 +40,7 @@ FirmwareUpdateDestination destinationFor(const FirmwareTargetContract& target) {
 FirmwareUpdateHealthProof healthyProof() {
   const FirmwareImageArtifact artifact = exactArtifact();
   FirmwareUpdateHealthProof proof;
-  proof.target = artifact.target;
+  proof.target = exactTarget();
   proof.releaseHash = artifact.releaseHash;
   std::memcpy(proof.imageSha256, artifact.imageSha256, sizeof(proof.imageSha256));
   proof.runtimeConfigurationPreserved = true;
@@ -98,16 +102,21 @@ void arbitrary_current_artifact_fails_before_selection() {
   expect(!session.select(SENDER, TARGET, artifact, exactTarget(), destinationFor(exactTarget()), 0, 1000),
       "artifact with noncanonical full SHA was selected");
 
+  const FirmwareTargetContract staticTarget = firmwareStaticTargetFromCanonical(
+      CANONICAL_TARGET_QUINLED_DIG2GO, TubeHardwareDig2Go);
   artifact = firmwareArtifactFromCanonical(
-      CANONICAL_ARTIFACT_DIG2GO_V14_USB_MERGED, exactTarget(), 0x12345678);
+      CANONICAL_ARTIFACT_DIG2GO_V14_USB_MERGED, staticTarget, 0x12345678);
   expect(!session.select(SENDER, TARGET, artifact, exactTarget(), destinationFor(exactTarget()), 0, 1000),
       "USB merged artifact entered OTA session");
 }
 
 void canonical_application_admits_either_explicit_inactive_slot() {
   FirmwareUpdateSession session;
-  FirmwareTargetContract target = exactTarget();
-  target.inactiveOtaSlot = 1;
+  const FirmwareTargetContract staticTarget = firmwareStaticTargetFromCanonical(
+      CANONICAL_TARGET_QUINLED_DIG2GO, TubeHardwareDig2Go);
+  FirmwareTargetContract target;
+  expect(firmwareReceiverTargetFromStatic(staticTarget, 1, target),
+      "second inactive slot did not construct receiver target");
   FirmwareImageArtifact artifact = exactArtifact();
   const FirmwareUpdateDestination destination = destinationFor(target);
   expect(session.select(SENDER, TARGET, artifact, target, destination, 0, 1000),

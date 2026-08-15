@@ -36,10 +36,11 @@ struct FirmwareTargetContract {
   uint8_t partitionTableSha256[32] = {0};
 };
 
-// Builds the compact runtime contract from generated build-time constants.
+// Projects generated build-time constants without claiming runtime slot
+// evidence. The returned static target is intentionally receiver-incomplete.
 // Hardware family remains the existing device-report vocabulary until Steve's
 // additive identity packet defines a canonical Waveshare value on main.
-inline FirmwareTargetContract firmwareTargetFromCanonical(
+inline FirmwareTargetContract firmwareStaticTargetFromCanonical(
     const CanonicalTargetRecord& canonical,
     uint8_t hardwareFamily
 ) {
@@ -75,7 +76,7 @@ inline bool firmwareTargetHasPartitionIdentity(const FirmwareTargetContract& tar
   return false;
 }
 
-inline bool firmwareTargetIsKnown(const FirmwareTargetContract& target) {
+inline bool firmwareStaticTargetIsKnown(const FirmwareTargetContract& target) {
   return target.targetId != CanonicalTargetUnknown
       && target.hardwareFamily != TubeHardwareUnknown
       && target.chipFamily != FirmwareChipUnknown
@@ -83,6 +84,28 @@ inline bool firmwareTargetIsKnown(const FirmwareTargetContract& target) {
       && target.flashSizeBytes > 0
       && target.otaSlotCount > 0
       && target.otaSlotCount <= CANONICAL_MAX_OTA_SLOTS
+      && firmwareTargetHasPartitionIdentity(target);
+}
+
+// Applies verified receiver runtime evidence to a static target. Callers must
+// obtain inactiveOtaSlot from partition inspection; no slot is inferred.
+inline bool firmwareReceiverTargetFromStatic(
+    const FirmwareTargetContract& staticTarget,
+    uint8_t inactiveOtaSlot,
+    FirmwareTargetContract& receiverTarget
+) {
+  receiverTarget = FirmwareTargetContract();
+  if (!firmwareStaticTargetIsKnown(staticTarget)
+      || inactiveOtaSlot >= staticTarget.otaSlotCount
+      || staticTarget.otaSlots[inactiveOtaSlot].sizeBytes == 0)
+    return false;
+  receiverTarget = staticTarget;
+  receiverTarget.inactiveOtaSlot = inactiveOtaSlot;
+  return true;
+}
+
+inline bool firmwareTargetIsKnown(const FirmwareTargetContract& target) {
+  return firmwareStaticTargetIsKnown(target)
       && target.inactiveOtaSlot < target.otaSlotCount
       && target.otaSlots[target.inactiveOtaSlot].sizeBytes > 0
       && firmwareTargetHasPartitionIdentity(target);
@@ -92,7 +115,7 @@ inline FirmwareTargetMatch matchFirmwareArtifactTarget(
     const FirmwareTargetContract& artifactTarget,
     const FirmwareTargetContract& receiverTarget
 ) {
-  if (!firmwareTargetIsKnown(artifactTarget) || !firmwareTargetIsKnown(receiverTarget))
+  if (!firmwareStaticTargetIsKnown(artifactTarget) || !firmwareTargetIsKnown(receiverTarget))
     return FirmwareTargetUnknown;
   if (artifactTarget.targetId != receiverTarget.targetId)
     return FirmwareTargetHardwareMismatch;

@@ -32,13 +32,14 @@ bool readRunningImageChunk(
     size_t errorLength
 );
 
-// Adapts the verified running application partition to the same source
-// contract used by stored carrier artifacts. The supplied target describes
-// the running artifact; carrier hardware is intentionally not inferred here.
-class RunningFirmwareImageSource : public FirmwareImageSource {
+// Adapts only the canonical Dig2Go v14 running application to the source
+// contract used by stored carrier artifacts. No other canonical running
+// artifact is registered, so the supported target is explicit in this type.
+class Dig2GoV14RunningFirmwareImageSource : public FirmwareImageSource {
 public:
-  explicit RunningFirmwareImageSource(const FirmwareTargetContract& artifactTarget)
-      : _artifactTarget(artifactTarget) {}
+  Dig2GoV14RunningFirmwareImageSource()
+      : _artifactTarget(firmwareStaticTargetFromCanonical(
+          CANONICAL_TARGET_QUINLED_DIG2GO, TubeHardwareDig2Go)) {}
 
   bool inspect(FirmwareImageArtifact& artifact) override;
   bool read(size_t offset, uint8_t* destination, size_t length) override;

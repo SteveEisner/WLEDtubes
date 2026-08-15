@@ -16,22 +16,44 @@ void expect(bool condition, const std::string& message) {
 }
 
 FirmwareTargetContract dig2GoTarget() {
-  FirmwareTargetContract target = firmwareTargetFromCanonical(
+  const FirmwareTargetContract staticTarget = firmwareStaticTargetFromCanonical(
       CANONICAL_TARGET_QUINLED_DIG2GO, TubeHardwareDig2Go);
-  target.inactiveOtaSlot = 0;
+  FirmwareTargetContract target;
+  expect(firmwareReceiverTargetFromStatic(staticTarget, 0, target),
+      "verified inactive slot did not construct receiver target");
   return target;
 }
 
+void static_target_is_receiver_incomplete() {
+  const FirmwareTargetContract staticTarget = firmwareStaticTargetFromCanonical(
+      CANONICAL_TARGET_QUINLED_DIG2GO, TubeHardwareDig2Go);
+  expect(firmwareStaticTargetIsKnown(staticTarget), "static target projection was incomplete");
+  expect(!firmwareTargetIsKnown(staticTarget), "static target claimed receiver runtime evidence");
+  expect(firmwareInactiveSlotDestination(staticTarget).otaSlot == CANONICAL_MAX_OTA_SLOTS,
+      "static target produced a receiver destination");
+
+  FirmwareTargetContract receiver;
+  expect(!firmwareReceiverTargetFromStatic(staticTarget, CANONICAL_MAX_OTA_SLOTS, receiver),
+      "out-of-range inactive slot constructed receiver target");
+  expect(!firmwareTargetIsKnown(receiver), "failed receiver construction left admissible state");
+  expect(firmwareReceiverTargetFromStatic(staticTarget, 1, receiver),
+      "verified inactive slot did not construct receiver target");
+  expect(firmwareTargetIsKnown(receiver), "verified receiver target remained incomplete");
+}
+
 void exact_target_is_admitted() {
-  const auto artifactTarget = dig2GoTarget();
+  const auto artifactTarget = firmwareStaticTargetFromCanonical(
+      CANONICAL_TARGET_QUINLED_DIG2GO, TubeHardwareDig2Go);
   const auto receiverTarget = dig2GoTarget();
-  expect(firmwareTargetIsKnown(artifactTarget), "complete target was treated as unknown");
+  expect(firmwareStaticTargetIsKnown(artifactTarget), "static artifact target was unknown");
+  expect(!firmwareTargetIsKnown(artifactTarget), "artifact target claimed receiver evidence");
   expect(matchFirmwareArtifactTarget(artifactTarget, receiverTarget) == FirmwareTargetMatchExact,
       "identical targets did not match");
 }
 
 void unknown_target_fails_closed() {
-  const auto artifactTarget = dig2GoTarget();
+  const auto artifactTarget = firmwareStaticTargetFromCanonical(
+      CANONICAL_TARGET_QUINLED_DIG2GO, TubeHardwareDig2Go);
   FirmwareTargetContract receiver;
   receiver.targetId = CanonicalTargetQuinledDig2go;
   receiver.hardwareFamily = TubeHardwareDig2Go;
@@ -42,47 +64,51 @@ void unknown_target_fails_closed() {
 }
 
 void every_hardware_dimension_must_match() {
-  const auto artifactTarget = dig2GoTarget();
+  const auto artifactTarget = firmwareStaticTargetFromCanonical(
+      CANONICAL_TARGET_QUINLED_DIG2GO, TubeHardwareDig2Go);
 
-  auto receiver = artifactTarget;
+  auto receiver = dig2GoTarget();
   receiver.hardwareFamily = TubeHardwareAthomC3;
   expect(matchFirmwareArtifactTarget(artifactTarget, receiver) == FirmwareTargetHardwareMismatch,
       "wrong board family was admitted");
 
-  receiver = artifactTarget;
+  receiver = dig2GoTarget();
   receiver.chipFamily = FirmwareChipEsp32C3;
   expect(matchFirmwareArtifactTarget(artifactTarget, receiver) == FirmwareTargetChipMismatch,
       "wrong chip family was admitted");
 
-  receiver = artifactTarget;
+  receiver = dig2GoTarget();
   receiver.flashMode = FirmwareFlashModeQio;
   expect(matchFirmwareArtifactTarget(artifactTarget, receiver) == FirmwareTargetFlashModeMismatch,
       "wrong flash mode was admitted");
 
-  receiver = artifactTarget;
+  receiver = dig2GoTarget();
   receiver.flashSizeBytes *= 2;
   expect(matchFirmwareArtifactTarget(artifactTarget, receiver) == FirmwareTargetFlashSizeMismatch,
       "wrong flash size was admitted");
 
-  receiver = artifactTarget;
+  receiver = dig2GoTarget();
   receiver.partitionTableSha256[31] ^= 0xff;
   expect(matchFirmwareArtifactTarget(artifactTarget, receiver) == FirmwareTargetPartitionMismatch,
       "wrong partition table was admitted");
 
-  receiver = artifactTarget;
+  receiver = dig2GoTarget();
   receiver.otaSlots[1].sizeBytes -= 0x1000;
   expect(matchFirmwareArtifactTarget(artifactTarget, receiver) == FirmwareTargetOtaSlotMismatch,
       "wrong OTA slot was admitted");
 }
 
 void generated_targets_preserve_cross_target_rejection() {
-  FirmwareTargetContract dig2go = firmwareTargetFromCanonical(
+  const FirmwareTargetContract dig2goStatic = firmwareStaticTargetFromCanonical(
       CANONICAL_TARGET_QUINLED_DIG2GO, TubeHardwareDig2Go);
-  const FirmwareTargetContract s3 = firmwareTargetFromCanonical(
+  const FirmwareTargetContract s3Static = firmwareStaticTargetFromCanonical(
       CANONICAL_TARGET_WAVESHARE_S3_TUBES_REMOTE, TubeHardwareMatrixM1);
-  FirmwareTargetContract admittedS3 = s3;
-  dig2go.inactiveOtaSlot = 0;
-  admittedS3.inactiveOtaSlot = 1;
+  FirmwareTargetContract dig2go;
+  FirmwareTargetContract admittedS3;
+  expect(firmwareReceiverTargetFromStatic(dig2goStatic, 0, dig2go),
+      "Dig2Go receiver construction failed");
+  expect(firmwareReceiverTargetFromStatic(s3Static, 1, admittedS3),
+      "S3 receiver construction failed");
   expect(firmwareTargetIsKnown(dig2go), "generated Dig2Go target was incomplete");
   expect(firmwareTargetIsKnown(admittedS3), "generated S3 metadata target was incomplete");
   expect(matchFirmwareArtifactTarget(dig2go, admittedS3) == FirmwareTargetHardwareMismatch,
@@ -90,13 +116,19 @@ void generated_targets_preserve_cross_target_rejection() {
 }
 
 void inactive_slot_is_explicit_and_bounded() {
-  FirmwareTargetContract target = dig2GoTarget();
+  const FirmwareTargetContract staticTarget = firmwareStaticTargetFromCanonical(
+      CANONICAL_TARGET_QUINLED_DIG2GO, TubeHardwareDig2Go);
+  FirmwareTargetContract target;
+  expect(firmwareReceiverTargetFromStatic(staticTarget, 0, target),
+      "first inactive slot construction failed");
   expect(firmwareArtifactFitsInactiveSlot(target, firmwareInactiveSlotDestination(target), 0x1000),
       "declared inactive slot rejected bounded image");
-  target.inactiveOtaSlot = 1;
+  expect(firmwareReceiverTargetFromStatic(staticTarget, 1, target),
+      "second inactive slot construction failed");
   expect(firmwareArtifactFitsInactiveSlot(target, firmwareInactiveSlotDestination(target), 0x1000),
       "second inactive slot rejected bounded image");
-  target.inactiveOtaSlot = CANONICAL_MAX_OTA_SLOTS;
+  expect(!firmwareReceiverTargetFromStatic(staticTarget, CANONICAL_MAX_OTA_SLOTS, target),
+      "invalid inactive slot constructed receiver target");
   expect(!firmwareArtifactFitsInactiveSlot(target, firmwareInactiveSlotDestination(target), 0x1000),
       "missing inactive-slot evidence was admitted");
 }
@@ -104,7 +136,8 @@ void inactive_slot_is_explicit_and_bounded() {
 } // namespace
 
 int main() {
-  const std::array<std::pair<const char*, void (*)()>, 5> tests = {{
+  const std::array<std::pair<const char*, void (*)()>, 6> tests = {{
+    {"static target is receiver incomplete", static_target_is_receiver_incomplete},
     {"exact target is admitted", exact_target_is_admitted},
     {"unknown target fails closed", unknown_target_fails_closed},
     {"every hardware dimension must match", every_hardware_dimension_must_match},
