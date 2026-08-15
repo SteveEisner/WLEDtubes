@@ -13,6 +13,12 @@ test("test bench is collapsed and explains laptop-local USB flashing", async () 
 	assert.match(html, /secure local Web Serial support/);
 });
 
+test("portal opens with the participant product promise", async () => {
+	const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
+	assert.match(html, /Buy\. Build\.<br><em>Rave\.<\/em>/);
+	assert.match(html, /no developer tools required/);
+});
+
 test("catalog contains only the canonical Dig2Go hardware artifact", async () => {
 	const manifest = await loadFirmwareManifest();
 	const artifacts = getHardwareArtifacts(manifest);

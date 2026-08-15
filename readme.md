@@ -1,4 +1,13 @@
 # WLED-based LED Sticks
+
+## Buy. Build. Rave.
+
+1. **Buy:** Start with a **QuinLED Dig2Go**, the controller supported by [Easy Flash](easy-flash/README.md). The full strip, power, connector, and tube kit is still being pinned; use the detailed build notes below rather than treating provisional planner defaults as a certified shopping list.
+2. **Build:** Assemble the Tube, connect the known Dig2Go by USB, and use Easy Flash to install the verified Tubes firmware and review its setup. Official Mac and Windows download links will be added with a signed project release.
+3. **Rave:** Power it safely, bring it near the other Tubes, and enjoy the lights.
+
+Easy Flash currently supports the canonical QuinLED Dig2Go target only. Keep reading for the project, assembly, safety, troubleshooting, and developer reference.
+
 These portable LED light poles make pretty lights for a dance party - and better yet:
 
 They're **portable**! Convenient tripod bases keep them standing at attention, and a 10Ah USB battery (like the one you charge your phone with) will power them for about 8 hours.

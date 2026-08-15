@@ -1,29 +1,32 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { after, before } from "node:test";
 import { server } from "../server.mjs";
 
-test("serves the laptop USB prototype without an unverified local-build artifact API", async (context) => {
+let port;
+
+before(async () => {
 	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-	context.after(() => server.close());
-	const { port } = server.address();
+	port = server.address().port;
+});
+
+after(async () => {
+	server.closeAllConnections();
+	await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+});
+
+test("serves the laptop USB prototype without an unverified local-build artifact API", async () => {
 	const page = await fetch(`http://127.0.0.1:${port}/`);
 	assert.equal(page.status, 200);
 	assert.match(await page.text(), /LOCAL USB BETA/);
 	assert.equal((await fetch(`http://127.0.0.1:${port}/api/artifact`)).status, 404);
 });
 
-test("rejects path traversal", async (context) => {
-	if (!server.listening) await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-	context.after(() => server.close());
-	const { port } = server.address();
+test("rejects path traversal", async () => {
 	const response = await fetch(`http://127.0.0.1:${port}/%2e%2e/package.json`);
 	assert.notEqual(response.status, 200);
 });
 
-test("serves verified firmware manifest and transport-specific downloads", async (context) => {
-	if (!server.listening) await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-	context.after(() => server.close());
-	const { port } = server.address();
+test("serves verified firmware manifest and transport-specific downloads", async () => {
 	const manifestResponse = await fetch(`http://127.0.0.1:${port}/api/firmware-manifest`);
 	assert.equal(manifestResponse.status, 200);
 	const manifest = await manifestResponse.json();
@@ -37,10 +40,7 @@ test("serves verified firmware manifest and transport-specific downloads", async
 	}
 });
 
-test("firmware API rejects misuse and traversal", async (context) => {
-	if (!server.listening) await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-	context.after(() => server.close());
-	const { port } = server.address();
+test("firmware API rejects misuse and traversal", async () => {
 	for (const path of ["/api/firmware/previous-stable-control/serial", "/api/firmware/not-real/usb", "/api/firmware/%2e%2e/usb"]) {
 		assert.notEqual((await fetch(`http://127.0.0.1:${port}${path}`)).status, 200);
 	}
