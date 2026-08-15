@@ -122,11 +122,16 @@ bool RunningFirmwareImageSource::inspect(FirmwareImageArtifact& artifact) {
   _inspected = inspectRunningImage(_runningInfo, error, sizeof(error));
   if (!_inspected)
     return false;
-  artifact = FirmwareImageArtifact();
-  artifact.target = _artifactTarget;
-  artifact.imageLengthBytes = _runningInfo.imageLengthBytes;
-  artifact.releaseHash = _runningInfo.releaseHash;
-  memcpy(artifact.imageSha256, _runningInfo.imageSha256, sizeof(artifact.imageSha256));
+  const CanonicalArtifactRecord& canonical = CANONICAL_ARTIFACT_DIG2GO_V14_OTA_APPLICATION;
+  if (_artifactTarget.targetId != canonical.targetId
+      || _runningInfo.imageLengthBytes != canonical.lengthBytes
+      || memcmp(_runningInfo.imageSha256, canonical.sha256,
+          sizeof(_runningInfo.imageSha256)) != 0) {
+    _inspected = false;
+    return false;
+  }
+  artifact = firmwareArtifactFromCanonical(
+      canonical, _artifactTarget, _runningInfo.releaseHash);
   return true;
 }
 

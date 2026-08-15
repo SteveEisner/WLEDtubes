@@ -9,6 +9,9 @@ export const jsOutputPath = path.join(root, 'contracts/update/generated/update-c
 export const cppOutputPath = path.join(root, 'usermods/Tubes/generated/update_contract_generated.h');
 
 const hex64 = /^[0-9a-f]{64}$/;
+const identifier = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+const OTA_ALIGNMENT = 0x10000;
+const UINT8_MAX = 0xff;
 const requiredArtifactFields = [
   'id', 'targetId', 'releaseClass', 'tubesRelease', 'wledBaseVersion',
   'releaseIdentity', 'buildCommit', 'kind', 'transport', 'path', 'offset',
@@ -22,10 +25,88 @@ function fail(errors, condition, message) {
 function unique(errors, records, label) {
   const seen = new Set();
   for (const record of records) {
-    fail(errors, record && typeof record.id === 'string' && record.id.length > 0, `${label} has invalid id`);
+    fail(errors, record && typeof record.id === 'string' && identifier.test(record.id), `${label} has invalid id`);
     if (!record || typeof record.id !== 'string') continue;
     fail(errors, !seen.has(record.id), `duplicate ${label} id: ${record.id}`);
     seen.add(record.id);
+  }
+}
+
+function uniqueCppValues(errors, records, label, minimum = 0) {
+  const seen = new Set();
+  for (const record of records) {
+    const value = record?.cppValue;
+    fail(errors, Number.isSafeInteger(value) && value >= minimum && value <= UINT8_MAX,
+      `${record?.id || label} has invalid cppValue`);
+    if (!Number.isSafeInteger(value)) continue;
+    fail(errors, !seen.has(value), `duplicate ${label} cppValue: ${value}`);
+    seen.add(value);
+  }
+}
+
+function uniqueCppNames(errors, records, label) {
+  const seen = new Set();
+  for (const record of records) {
+    if (!record || typeof record.id !== 'string') continue;
+    const name = cppName(record.id);
+    fail(errors, !seen.has(name), `duplicate generated ${label} name: ${name}`);
+    seen.add(name);
+  }
+}
+
+function parseInteger(value) {
+  if (!/^(?:0[xX][0-9a-fA-F]+|[0-9]+)$/.test(value)) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
+export function parsePartitionCsv(text) {
+  const rows = [];
+  const names = new Set();
+  for (const [index, raw] of text.split(/\r?\n/).entries()) {
+    const trimmed = raw.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const fields = raw.split(',').map(field => field.trim());
+    if (fields.length !== 6) throw new Error(`partition CSV row ${index + 1} must have 6 columns`);
+    const [name, type, subtype, offsetText, sizeText, flags] = fields;
+    if (!name || !type || !subtype || !offsetText || !sizeText)
+      throw new Error(`partition CSV row ${index + 1} has an empty required field`);
+    if (names.has(name)) throw new Error(`partition CSV has duplicate name: ${name}`);
+    if (!identifier.test(name) || !['app', 'data'].includes(type)
+        || !identifier.test(subtype) || flags !== '')
+      throw new Error(`partition CSV row ${index + 1} has unsupported tokens`);
+    names.add(name);
+    const offset = parseInteger(offsetText);
+    const sizeBytes = parseInteger(sizeText);
+    if (offset === undefined || sizeBytes === undefined || sizeBytes <= 0)
+      throw new Error(`partition CSV row ${index + 1} has invalid offset or size`);
+    rows.push({name, type, subtype, offset, sizeBytes, flags});
+  }
+  if (rows.length === 0) throw new Error('partition CSV has no rows');
+  return rows;
+}
+
+export function validatePartitionRows(errors, target, rows) {
+  const sorted = [...rows].sort((a, b) => a.offset - b.offset);
+  for (let index = 0; index < sorted.length; index++) {
+    const row = sorted[index];
+    fail(errors, row.offset % 0x1000 === 0 && row.sizeBytes % 0x1000 === 0,
+      `${target.id}/${row.name} is not sector aligned`);
+    fail(errors, row.offset <= target.flashSizeBytes && row.sizeBytes <= target.flashSizeBytes - row.offset,
+      `${target.id}/${row.name} exceeds flash`);
+    if (index > 0) fail(errors, sorted[index - 1].offset + sorted[index - 1].sizeBytes <= row.offset,
+      `${target.id} partition CSV rows overlap`);
+  }
+  const actual = rows.filter(row => row.type === 'app' && /^ota_[0-9]+$/.test(row.subtype));
+  const actualById = new Map(actual.map(row => [row.subtype, row]));
+  fail(errors, actualById.size === actual.length, `${target.id} partition CSV has duplicate OTA subtype`);
+  const declared = target.partition.otaSlots || [];
+  fail(errors, actual.length === declared.length, `${target.id} OTA slot count does not match partition CSV`);
+  for (const slot of declared) {
+    const row = actualById.get(slot.id);
+    fail(errors, !!row, `${target.id}/${slot.id} is missing from partition CSV`);
+    if (row) fail(errors, row.offset === slot.offset && row.sizeBytes === slot.sizeBytes,
+      `${target.id}/${slot.id} geometry does not match partition CSV`);
   }
 }
 
@@ -44,11 +125,23 @@ export function validateContract(contract, {checkFiles = true} = {}) {
   unique(errors, contract.targets, 'target');
   unique(errors, contract.artifacts, 'artifact');
   unique(errors, contract.updateStates, 'update state');
+  uniqueCppValues(errors, contract.releaseClasses, 'release class');
+  uniqueCppValues(errors, contract.targets, 'target', 1);
+  uniqueCppValues(errors, contract.artifacts, 'artifact', 1);
+  uniqueCppValues(errors, contract.updateStates, 'update state');
+  uniqueCppNames(errors, contract.releaseClasses, 'release class');
+  uniqueCppNames(errors, contract.targets, 'target');
+  uniqueCppNames(errors, contract.artifacts, 'artifact');
+  uniqueCppNames(errors, contract.updateStates, 'update state');
   const classes = new Set(contract.releaseClasses.map(item => item.id));
   for (const expected of ['Legacy', 'Current', 'Next', 'Unknown'])
     fail(errors, classes.has(expected), `missing release class: ${expected}`);
   fail(errors, contract.releaseClasses.find(item => item.id === 'Unknown')?.cppValue === 0,
     'Unknown release class must be fail-closed value 0');
+  const expectedStates = {Idle: 0, TargetSelected: 1, Transferring: 2, AwaitingHealth: 3, Healthy: 4, Complete: 5, Failed: 6};
+  for (const [id, value] of Object.entries(expectedStates))
+    fail(errors, contract.updateStates.find(item => item.id === id)?.cppValue === value,
+      `${id} update state must preserve cppValue ${value}`);
   const targets = new Map(contract.targets.map(item => [item.id, item]));
 
   for (const target of contract.targets) {
@@ -56,18 +149,33 @@ export function validateContract(contract, {checkFiles = true} = {}) {
       fail(errors, typeof target[key] === 'string' && target[key].length > 0, `${target.id || 'target'} missing ${key}`);
     fail(errors, Number.isSafeInteger(target.cppValue) && target.cppValue > 0, `${target.id} has invalid cppValue`);
     fail(errors, Number.isSafeInteger(target.flashSizeBytes) && target.flashSizeBytes > 0, `${target.id} has invalid flashSizeBytes`);
+    fail(errors, !!target.partition, `${target.id} missing partition`);
     if (!target.partition) continue;
+    fail(errors, typeof target.partition.csvPath === 'string' && target.partition.csvPath.length > 0,
+      `${target.id} missing partition csvPath`);
     fail(errors, hex64.test(target.partition.sha256), `${target.id} has invalid partition sha256`);
     fail(errors, Array.isArray(target.partition.otaSlots) && target.partition.otaSlots.length > 0, `${target.id} has no OTA slots`);
-    for (const slot of target.partition.otaSlots || []) {
+    unique(errors, target.partition.otaSlots || [], `${target.id} OTA slot`);
+    fail(errors, (target.partition.otaSlots || []).length <= 2, `${target.id} exceeds two-slot firmware projection`);
+    const orderedSlots = [...(target.partition.otaSlots || [])].sort((a, b) => a.offset - b.offset);
+    for (let index = 0; index < orderedSlots.length; index++) {
+      const slot = orderedSlots[index];
       fail(errors, Number.isSafeInteger(slot.offset) && slot.offset >= 0, `${target.id} has invalid OTA offset`);
       fail(errors, Number.isSafeInteger(slot.sizeBytes) && slot.sizeBytes > 0, `${target.id} has invalid OTA size`);
-      fail(errors, slot.offset + slot.sizeBytes <= target.flashSizeBytes, `${target.id} OTA slot exceeds flash`);
+      fail(errors, slot.offset % OTA_ALIGNMENT === 0 && slot.sizeBytes % OTA_ALIGNMENT === 0, `${target.id}/${slot.id} is not OTA aligned`);
+      fail(errors, slot.offset <= target.flashSizeBytes && slot.sizeBytes <= target.flashSizeBytes - slot.offset, `${target.id} OTA slot exceeds flash`);
+      if (index > 0) fail(errors, orderedSlots[index - 1].offset + orderedSlots[index - 1].sizeBytes <= slot.offset,
+        `${target.id} OTA slots overlap`);
     }
     if (checkFiles && typeof target.partition.csvPath === 'string') {
       const file = path.join(root, target.partition.csvPath);
       fail(errors, fs.existsSync(file), `${target.id} partition CSV missing: ${target.partition.csvPath}`);
-      if (fs.existsSync(file)) fail(errors, sha256(fs.readFileSync(file)) === target.partition.sha256, `${target.id} partition CSV hash mismatch`);
+      if (fs.existsSync(file)) {
+        const bytes = fs.readFileSync(file);
+        fail(errors, sha256(bytes) === target.partition.sha256, `${target.id} partition CSV hash mismatch`);
+        try { validatePartitionRows(errors, target, parsePartitionCsv(bytes.toString('utf8'))); }
+        catch (error) { errors.push(`${target.id} ${error.message}`); }
+      }
     }
   }
 
@@ -80,9 +188,36 @@ export function validateContract(contract, {checkFiles = true} = {}) {
     fail(errors, Number.isSafeInteger(artifact.offset) && artifact.offset >= 0, `${artifact.id} has invalid offset`);
     fail(errors, Number.isSafeInteger(artifact.lengthBytes) && artifact.lengthBytes > 0, `${artifact.id} has invalid lengthBytes`);
     const target = targets.get(artifact.targetId);
+    fail(errors, ['complete-merged-image', 'application-image'].includes(artifact.kind), `${artifact.id} has unsupported kind`);
+    fail(errors, ['usb', 'recovery', 'ota'].includes(artifact.transport), `${artifact.id} has unsupported transport`);
+    fail(errors, artifact.offset <= (target?.flashSizeBytes ?? -1)
+      && artifact.lengthBytes <= (target?.flashSizeBytes ?? -1) - artifact.offset,
+      `${artifact.id} exceeds target flash`);
+    if (artifact.kind === 'application-image') {
+      fail(errors, artifact.transport === 'ota', `${artifact.id} application image must use OTA`);
+      fail(errors, artifact.components === undefined, `${artifact.id} application image must not have components`);
+    }
+    if (artifact.kind === 'complete-merged-image') {
+      fail(errors, artifact.transport === 'usb' || artifact.transport === 'recovery', `${artifact.id} merged image has unsupported transport`);
+      fail(errors, artifact.offset === 0, `${artifact.id} merged image offset must be 0`);
+      fail(errors, Array.isArray(artifact.components) && artifact.components.length > 0, `${artifact.id} merged image requires components`);
+    }
     if (artifact.transport === 'ota' && target?.partition) {
       const fits = target.partition.otaSlots.some(slot => artifact.offset === slot.offset && artifact.lengthBytes <= slot.sizeBytes);
       fail(errors, fits, `${artifact.id} does not fit a matching OTA slot`);
+    }
+    const components = [...(artifact.components || [])].sort((a, b) => a.offset - b.offset);
+    unique(errors, components, `${artifact.id} component`);
+    for (let index = 0; index < components.length; index++) {
+      const component = components[index];
+      fail(errors, Number.isSafeInteger(component.offset) && component.offset >= 0, `${artifact.id}/${component.id} has invalid offset`);
+      fail(errors, Number.isSafeInteger(component.lengthBytes) && component.lengthBytes > 0, `${artifact.id}/${component.id} has invalid lengthBytes`);
+      fail(errors, hex64.test(component.sha256), `${artifact.id}/${component.id} has invalid sha256`);
+      fail(errors, component.offset >= artifact.offset && component.offset <= artifact.offset + artifact.lengthBytes
+        && component.lengthBytes <= artifact.offset + artifact.lengthBytes - component.offset,
+        `${artifact.id}/${component.id} exceeds merged image`);
+      if (index > 0) fail(errors, components[index - 1].offset + components[index - 1].lengthBytes <= component.offset,
+        `${artifact.id} components overlap`);
     }
     if (!checkFiles || typeof artifact.path !== 'string') continue;
     const file = path.join(root, artifact.path);
@@ -91,13 +226,8 @@ export function validateContract(contract, {checkFiles = true} = {}) {
     const bytes = fs.readFileSync(file);
     fail(errors, bytes.length === artifact.lengthBytes, `${artifact.id} length mismatch`);
     fail(errors, sha256(bytes) === artifact.sha256, `${artifact.id} hash mismatch`);
-    const components = [...(artifact.components || [])].sort((a, b) => a.offset - b.offset);
     for (let index = 0; index < components.length; index++) {
       const component = components[index];
-      fail(errors, component.offset >= artifact.offset && component.offset + component.lengthBytes <= artifact.offset + bytes.length,
-        `${artifact.id}/${component.id} exceeds merged image`);
-      if (index > 0) fail(errors, components[index - 1].offset + components[index - 1].lengthBytes <= component.offset,
-        `${artifact.id} components overlap`);
       const start = component.offset - artifact.offset;
       fail(errors, sha256(bytes.subarray(start, start + component.lengthBytes)) === component.sha256,
         `${artifact.id}/${component.id} hash mismatch`);
@@ -144,17 +274,25 @@ export function renderCpp(contract) {
     .map(item => `  CanonicalRelease${cppName(item.id)} = ${item.cppValue},`).join('\n');
   const targetEnums = [...contract.targets].sort((a, b) => a.cppValue - b.cppValue)
     .map(item => `  CanonicalTarget${cppName(item.id)} = ${item.cppValue},`).join('\n');
+  const artifactEnums = [...contract.artifacts].sort((a, b) => a.cppValue - b.cppValue)
+    .map(item => `  CanonicalArtifact${cppName(item.id)} = ${item.cppValue},`).join('\n');
   const states = [...contract.updateStates].sort((a, b) => a.cppValue - b.cppValue)
     .map(item => `  CanonicalUpdate${cppName(item.id)} = ${item.cppValue},`).join('\n');
   const targets = [...contract.targets].sort((a, b) => a.cppValue - b.cppValue).map(item => {
     const partition = item.partition;
-    const slot = partition?.otaSlots?.[0];
+    const slots = [...(partition?.otaSlots || [])];
+    while (slots.length < 2) slots.push({offset: 0, sizeBytes: 0});
     const chip = item.chipFamily === 'ESP32' ? 1 : item.chipFamily === 'ESP32-S3' ? 3 : 0;
     const mode = item.flashMode === 'dio' ? 1 : item.flashMode === 'qio' ? 2 : item.flashMode === 'opi' ? 3 : 0;
     const hash = partition?.sha256 || '0'.repeat(64);
-    return `static constexpr CanonicalTargetRecord CANONICAL_TARGET_${item.id.replace(/[^A-Za-z0-9]/g, '_').toUpperCase()} = {\n  CanonicalTarget${cppName(item.id)}, ${chip}, ${mode}, ${item.flashSizeBytes}U, ${slot?.offset || 0}U, ${slot?.sizeBytes || 0}U,\n  {${hashBytes(hash)}}\n};`;
+    return `static constexpr CanonicalTargetRecord CANONICAL_TARGET_${item.id.replace(/[^A-Za-z0-9]/g, '_').toUpperCase()} = {\n  CanonicalTarget${cppName(item.id)}, ${chip}, ${mode}, ${item.flashSizeBytes}U, ${partition?.otaSlots?.length || 0},\n  {${slots.map(slot => `{${slot.offset}U, ${slot.sizeBytes}U}`).join(', ')}}, true,\n  {${hashBytes(hash)}}\n};`;
   }).join('\n\n');
-  return `#pragma once\n\n#include <stdint.h>\n\n// GENERATED FILE. DO NOT EDIT.\n// Source: contracts/update/update-contract.json (schema ${contract.schemaVersion})\n// AI: below section was generated by an AI\nenum CanonicalReleaseClass : uint8_t {\n${classes}\n};\n\nenum CanonicalTargetId : uint8_t {\n  CanonicalTargetUnknown = 0,\n${targetEnums}\n};\n\nenum CanonicalUpdateState : uint8_t {\n${states}\n};\n\nstruct CanonicalTargetRecord {\n  CanonicalTargetId targetId;\n  uint8_t chipFamily;\n  uint8_t flashMode;\n  uint32_t flashSizeBytes;\n  uint32_t otaSlotOffset;\n  uint32_t otaSlotSizeBytes;\n  uint8_t partitionTableSha256[32];\n};\n\n${targets}\n// AI: end\n`;
+  const artifacts = [...contract.artifacts].sort((a, b) => a.cppValue - b.cppValue).map(item => {
+    const kind = item.kind === 'complete-merged-image' ? 'CanonicalArtifactCompleteMergedImage' : 'CanonicalArtifactApplicationImage';
+    const transport = item.transport === 'usb' ? 'CanonicalTransportUsb' : item.transport === 'recovery' ? 'CanonicalTransportRecovery' : 'CanonicalTransportOta';
+    return `static constexpr CanonicalArtifactRecord CANONICAL_ARTIFACT_${item.id.replace(/[^A-Za-z0-9]/g, '_').toUpperCase()} = {\n  CanonicalArtifact${cppName(item.id)}, CanonicalTarget${cppName(item.targetId)}, CanonicalRelease${cppName(item.releaseClass)},\n  ${kind}, ${transport}, ${item.offset}U, ${item.lengthBytes}U,\n  {${hashBytes(item.sha256)}}\n};`;
+  }).join('\n\n');
+  return `#pragma once\n\n#include <stdint.h>\n\n// GENERATED FILE. DO NOT EDIT.\n// Source: contracts/update/update-contract.json (schema ${contract.schemaVersion})\n// Minimal firmware admission projection: host/UI-only names, board labels, paths,\n// release text, build commits, component lists, and acceptance notes are omitted.\n// Hardware-family/device-report evidence remains a separate fail-closed input.\n// AI: below section was generated by an AI\nstatic constexpr uint8_t CANONICAL_MAX_OTA_SLOTS = 2;\n\nenum CanonicalReleaseClass : uint8_t {\n${classes}\n};\n\nenum CanonicalTargetId : uint8_t {\n  CanonicalTargetUnknown = 0,\n${targetEnums}\n};\n\nenum CanonicalArtifactId : uint8_t {\n  CanonicalArtifactUnknown = 0,\n${artifactEnums}\n};\n\nenum CanonicalArtifactKind : uint8_t {\n  CanonicalArtifactKindUnknown = 0,\n  CanonicalArtifactCompleteMergedImage = 1,\n  CanonicalArtifactApplicationImage = 2,\n};\n\nenum CanonicalArtifactTransport : uint8_t {\n  CanonicalTransportUnknown = 0,\n  CanonicalTransportUsb = 1,\n  CanonicalTransportRecovery = 2,\n  CanonicalTransportOta = 3,\n};\n\nenum CanonicalUpdateState : uint8_t {\n${states}\n};\n\nstruct CanonicalOtaSlotRecord {\n  uint32_t offset;\n  uint32_t sizeBytes;\n};\n\nstruct CanonicalTargetRecord {\n  CanonicalTargetId targetId;\n  uint8_t chipFamily;\n  uint8_t flashMode;\n  uint32_t flashSizeBytes;\n  uint8_t otaSlotCount;\n  CanonicalOtaSlotRecord otaSlots[CANONICAL_MAX_OTA_SLOTS];\n  bool inactiveSlotAdmissible;\n  uint8_t partitionTableSha256[32];\n};\n\nstruct CanonicalArtifactRecord {\n  CanonicalArtifactId artifactId;\n  CanonicalTargetId targetId;\n  CanonicalReleaseClass releaseClass;\n  CanonicalArtifactKind kind;\n  CanonicalArtifactTransport transport;\n  uint32_t offset;\n  uint32_t lengthBytes;\n  uint8_t sha256[32];\n};\n\n${targets}\n\n${artifacts}\n// AI: end\n`;
 }
 
 export function generatedOutputs(contract) {

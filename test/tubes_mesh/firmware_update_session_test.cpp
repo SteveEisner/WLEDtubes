@@ -17,26 +17,16 @@ void expect(bool condition, const std::string& message) {
 }
 
 FirmwareTargetContract exactTarget(uint8_t marker = 1) {
-  FirmwareTargetContract target;
-  target.targetId = CanonicalTargetQuinledDig2go;
-  target.hardwareFamily = TubeHardwareDig2Go;
-  target.chipFamily = FirmwareChipEsp32;
-  target.flashMode = FirmwareFlashModeDio;
-  target.flashSizeBytes = 4 * 1024 * 1024;
-  target.otaSlotOffset = 0x210000;
-  target.otaSlotSizeBytes = 0x1E0000;
-  target.partitionTableSha256[0] = marker;
+  FirmwareTargetContract target = firmwareTargetFromCanonical(
+      CANONICAL_TARGET_QUINLED_DIG2GO, TubeHardwareDig2Go);
+  target.inactiveOtaSlot = 0;
+  if (marker != 1) target.partitionTableSha256[0] ^= marker;
   return target;
 }
 
 FirmwareImageArtifact exactArtifact() {
-  FirmwareImageArtifact artifact;
-  artifact.target = exactTarget();
-  artifact.releaseClass = CanonicalReleaseCurrent;
-  artifact.imageLengthBytes = 1024;
-  artifact.releaseHash = 0x12345678;
-  artifact.imageSha256[0] = 0xAB;
-  return artifact;
+  return firmwareArtifactFromCanonical(
+      CANONICAL_ARTIFACT_DIG2GO_V14_OTA_APPLICATION, exactTarget(), 0x12345678);
 }
 
 FirmwareUpdateHealthProof healthyProof() {
@@ -64,8 +54,8 @@ void exact_target_completes_only_after_health_proof() {
   expect(session.state() == FirmwareUpdateTargetSelected, "selection state changed");
   expect(!session.forwardingEnabled(), "forwarding enabled during selection");
   expect(session.startTransfer(TARGET, 200), "selected target could not start transfer");
-  expect(session.recordProgress(TARGET, 512, 300), "valid progress was rejected");
-  expect(session.recordProgress(TARGET, 1024, 400), "complete progress was rejected");
+  expect(session.recordProgress(TARGET, artifact.imageLengthBytes / 2, 300), "valid progress was rejected");
+  expect(session.recordProgress(TARGET, artifact.imageLengthBytes, 400), "complete progress was rejected");
   expect(session.verifyTransfer(TARGET, artifact.imageSha256, 500),
       "matching completed image was not verified");
   expect(session.state() == FirmwareUpdateAwaitingHealth, "health gate was skipped");
@@ -90,6 +80,34 @@ void unknown_or_mismatched_identity_fails_before_selection() {
   expect(!session.select(SENDER, TARGET, artifact, mismatch, 0, 1000),
       "partition mismatch was selected");
   expect(session.state() == FirmwareUpdateIdle, "mismatch changed state");
+}
+
+void arbitrary_current_artifact_fails_before_selection() {
+  FirmwareUpdateSession session;
+  FirmwareImageArtifact artifact = exactArtifact();
+  artifact.artifactId = CanonicalArtifactUnknown;
+  expect(!session.select(SENDER, TARGET, artifact, exactTarget(), 0, 1000),
+      "manual Current artifact was selected");
+
+  artifact = exactArtifact();
+  artifact.imageSha256[31] ^= 0xff;
+  expect(!session.select(SENDER, TARGET, artifact, exactTarget(), 0, 1000),
+      "artifact with noncanonical full SHA was selected");
+
+  artifact = firmwareArtifactFromCanonical(
+      CANONICAL_ARTIFACT_DIG2GO_V14_USB_MERGED, exactTarget(), 0x12345678);
+  expect(!session.select(SENDER, TARGET, artifact, exactTarget(), 0, 1000),
+      "USB merged artifact entered OTA session");
+}
+
+void canonical_application_admits_either_explicit_inactive_slot() {
+  FirmwareUpdateSession session;
+  FirmwareTargetContract target = exactTarget();
+  target.inactiveOtaSlot = 1;
+  FirmwareImageArtifact artifact = exactArtifact();
+  artifact.target = target;
+  expect(session.select(SENDER, TARGET, artifact, target, 0, 1000),
+      "canonical application was not admitted for second inactive slot");
 }
 
 void one_target_and_mac_continuity_are_enforced() {
@@ -145,9 +163,11 @@ void wrong_hash_or_release_cannot_pass_gates() {
 } // namespace
 
 int main() {
-  const std::array<std::pair<const char*, void (*)()>, 5> tests = {{
+  const std::array<std::pair<const char*, void (*)()>, 7> tests = {{
     {"exact target completes only after health proof", exact_target_completes_only_after_health_proof},
     {"unknown or mismatched identity fails before selection", unknown_or_mismatched_identity_fails_before_selection},
+    {"arbitrary Current artifact fails before selection", arbitrary_current_artifact_fails_before_selection},
+    {"canonical application admits either explicit inactive slot", canonical_application_admits_either_explicit_inactive_slot},
     {"one target and MAC continuity are enforced", one_target_and_mac_continuity_are_enforced},
     {"lease expiry fails closed", lease_expiry_fails_closed},
     {"wrong hash or release cannot pass gates", wrong_hash_or_release_cannot_pass_gates},

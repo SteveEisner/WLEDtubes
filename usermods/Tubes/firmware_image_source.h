@@ -13,11 +13,59 @@
 // hardware identity of the carrier serving these bytes.
 struct FirmwareImageArtifact {
   FirmwareTargetContract target;
+  CanonicalArtifactId artifactId = CanonicalArtifactUnknown;
   CanonicalReleaseClass releaseClass = CanonicalReleaseUnknown;
+  CanonicalArtifactKind kind = CanonicalArtifactKindUnknown;
+  CanonicalArtifactTransport transport = CanonicalTransportUnknown;
+  uint32_t imageOffset = 0;
   size_t imageLengthBytes = 0;
+  // Compatibility evidence from the legacy device report. This is not full
+  // release or artifact identity and never substitutes for the canonical SHA.
   uint32_t releaseHash = 0;
   uint8_t imageSha256[32] = {0};
 };
+
+inline FirmwareImageArtifact firmwareArtifactFromCanonical(
+    const CanonicalArtifactRecord& canonical,
+    const FirmwareTargetContract& target,
+    uint32_t legacyReleaseHash = 0
+) {
+  FirmwareImageArtifact artifact;
+  artifact.target = target;
+  artifact.artifactId = canonical.artifactId;
+  artifact.releaseClass = canonical.releaseClass;
+  artifact.kind = canonical.kind;
+  artifact.transport = canonical.transport;
+  artifact.imageOffset = canonical.offset;
+  artifact.imageLengthBytes = canonical.lengthBytes;
+  artifact.releaseHash = legacyReleaseHash;
+  memcpy(artifact.imageSha256, canonical.sha256, sizeof(artifact.imageSha256));
+  return artifact;
+}
+
+inline const CanonicalArtifactRecord* canonicalArtifactById(CanonicalArtifactId artifactId) {
+  switch (artifactId) {
+    case CanonicalArtifactDig2goV14UsbMerged:
+      return &CANONICAL_ARTIFACT_DIG2GO_V14_USB_MERGED;
+    case CanonicalArtifactDig2goV14OtaApplication:
+      return &CANONICAL_ARTIFACT_DIG2GO_V14_OTA_APPLICATION;
+    default:
+      return nullptr;
+  }
+}
+
+inline bool firmwareArtifactMatchesCanonical(const FirmwareImageArtifact& artifact) {
+  const CanonicalArtifactRecord* canonical = canonicalArtifactById(artifact.artifactId);
+  return canonical
+      && artifact.target.targetId == canonical->targetId
+      && artifact.releaseClass == canonical->releaseClass
+      && artifact.kind == canonical->kind
+      && artifact.transport == canonical->transport
+      && artifact.imageOffset == canonical->offset
+      && artifact.imageLengthBytes == canonical->lengthBytes
+      && memcmp(artifact.imageSha256, canonical->sha256,
+          sizeof(artifact.imageSha256)) == 0;
+}
 
 inline bool firmwareImageRangeIsValid(size_t imageLength, size_t offset, size_t length) {
   return imageLength > 0

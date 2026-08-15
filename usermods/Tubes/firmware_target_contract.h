@@ -30,8 +30,9 @@ struct FirmwareTargetContract {
   uint8_t chipFamily = FirmwareChipUnknown;
   uint8_t flashMode = FirmwareFlashModeUnknown;
   uint32_t flashSizeBytes = 0;
-  uint32_t otaSlotOffset = 0;
-  uint32_t otaSlotSizeBytes = 0;
+  uint8_t otaSlotCount = 0;
+  CanonicalOtaSlotRecord otaSlots[CANONICAL_MAX_OTA_SLOTS] = {};
+  uint8_t inactiveOtaSlot = CANONICAL_MAX_OTA_SLOTS;
   uint8_t partitionTableSha256[32] = {0};
 };
 
@@ -48,8 +49,8 @@ inline FirmwareTargetContract firmwareTargetFromCanonical(
   target.chipFamily = canonical.chipFamily;
   target.flashMode = canonical.flashMode;
   target.flashSizeBytes = canonical.flashSizeBytes;
-  target.otaSlotOffset = canonical.otaSlotOffset;
-  target.otaSlotSizeBytes = canonical.otaSlotSizeBytes;
+  target.otaSlotCount = canonical.otaSlotCount;
+  memcpy(target.otaSlots, canonical.otaSlots, sizeof(target.otaSlots));
   memcpy(target.partitionTableSha256, canonical.partitionTableSha256,
       sizeof(target.partitionTableSha256));
   return target;
@@ -80,7 +81,10 @@ inline bool firmwareTargetIsKnown(const FirmwareTargetContract& target) {
       && target.chipFamily != FirmwareChipUnknown
       && target.flashMode != FirmwareFlashModeUnknown
       && target.flashSizeBytes > 0
-      && target.otaSlotSizeBytes > 0
+      && target.otaSlotCount > 0
+      && target.otaSlotCount <= CANONICAL_MAX_OTA_SLOTS
+      && target.inactiveOtaSlot < target.otaSlotCount
+      && target.otaSlots[target.inactiveOtaSlot].sizeBytes > 0
       && firmwareTargetHasPartitionIdentity(target);
 }
 
@@ -103,9 +107,20 @@ inline FirmwareTargetMatch matchFirmwareArtifactTarget(
   if (memcmp(artifactTarget.partitionTableSha256, receiverTarget.partitionTableSha256,
       sizeof(artifactTarget.partitionTableSha256)) != 0)
     return FirmwareTargetPartitionMismatch;
-  if (artifactTarget.otaSlotOffset != receiverTarget.otaSlotOffset
-      || artifactTarget.otaSlotSizeBytes != receiverTarget.otaSlotSizeBytes)
+  if (artifactTarget.otaSlotCount != receiverTarget.otaSlotCount
+      || memcmp(artifactTarget.otaSlots, receiverTarget.otaSlots,
+          sizeof(artifactTarget.otaSlots)) != 0)
     return FirmwareTargetOtaSlotMismatch;
   return FirmwareTargetMatchExact;
+}
+
+inline bool firmwareArtifactFitsInactiveSlot(
+    const FirmwareTargetContract& target,
+    uint32_t length
+) {
+  if (!firmwareTargetIsKnown(target) || length == 0)
+    return false;
+  const CanonicalOtaSlotRecord& slot = target.otaSlots[target.inactiveOtaSlot];
+  return length <= slot.sizeBytes;
 }
 // AI: end

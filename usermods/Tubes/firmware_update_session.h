@@ -52,11 +52,10 @@ public:
         || memcmp(senderMac, targetMac, 6) == 0
         || leaseDuration == 0
         || leaseDuration > 0x7FFFFFFFU
-        || artifact.imageLengthBytes == 0
-        || artifact.imageLengthBytes > receiverTarget.otaSlotSizeBytes
-        || artifact.releaseClass == CanonicalReleaseUnknown
-        || artifact.releaseHash == 0
-        || !hashIsKnown(artifact.imageSha256)
+        || !firmwareArtifactMatchesCanonical(artifact)
+        || artifact.kind != CanonicalArtifactApplicationImage
+        || artifact.transport != CanonicalTransportOta
+        || !firmwareArtifactFitsInactiveSlot(receiverTarget, artifact.imageLengthBytes)
         || matchFirmwareArtifactTarget(artifact.target, receiverTarget)
             != FirmwareTargetMatchExact)
       return false;

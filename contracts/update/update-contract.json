@@ -46,6 +46,7 @@
   "artifacts": [
     {
       "id": "dig2go-v14-usb-merged",
+      "cppValue": 1,
       "targetId": "quinled-dig2go",
       "releaseClass": "Current",
       "tubesRelease": "14",
@@ -67,6 +68,7 @@
     },
     {
       "id": "dig2go-v14-ota-application",
+      "cppValue": 2,
       "targetId": "quinled-dig2go",
       "releaseClass": "Current",
       "tubesRelease": "14",

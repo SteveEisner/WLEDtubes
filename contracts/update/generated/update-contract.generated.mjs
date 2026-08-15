@@ -4,6 +4,7 @@ export const updateContract = Object.freeze({
   "artifacts": [
     {
       "buildCommit": "c6522acef3e954b14aad30d6f687cdb99bd1624e",
+      "cppValue": 2,
       "id": "dig2go-v14-ota-application",
       "kind": "application-image",
       "lengthBytes": 1259392,
@@ -45,6 +46,7 @@ export const updateContract = Object.freeze({
           "sha256": "bf6dc2feedb1669361471e9cc2224b1b2b1ba0e15602e58258dfde4e41569f2d"
         }
       ],
+      "cppValue": 1,
       "id": "dig2go-v14-usb-merged",
       "kind": "complete-merged-image",
       "lengthBytes": 1324928,

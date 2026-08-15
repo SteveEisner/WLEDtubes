@@ -16,16 +16,9 @@ void expect(bool condition, const std::string& message) {
 }
 
 FirmwareTargetContract dig2GoTarget() {
-  FirmwareTargetContract target;
-  target.targetId = CanonicalTargetQuinledDig2go;
-  target.hardwareFamily = TubeHardwareDig2Go;
-  target.chipFamily = FirmwareChipEsp32;
-  target.flashMode = FirmwareFlashModeDio;
-  target.flashSizeBytes = 4 * 1024 * 1024;
-  target.otaSlotOffset = 0x10000;
-  target.otaSlotSizeBytes = 0x180000;
-  for (uint8_t index = 0; index < sizeof(target.partitionTableSha256); index++)
-    target.partitionTableSha256[index] = index + 1;
+  FirmwareTargetContract target = firmwareTargetFromCanonical(
+      CANONICAL_TARGET_QUINLED_DIG2GO, TubeHardwareDig2Go);
+  target.inactiveOtaSlot = 0;
   return target;
 }
 
@@ -77,30 +70,46 @@ void every_hardware_dimension_must_match() {
       "wrong partition table was admitted");
 
   receiver = artifactTarget;
-  receiver.otaSlotSizeBytes -= 0x1000;
+  receiver.otaSlots[1].sizeBytes -= 0x1000;
   expect(matchFirmwareArtifactTarget(artifactTarget, receiver) == FirmwareTargetOtaSlotMismatch,
       "wrong OTA slot was admitted");
 }
 
 void generated_targets_preserve_cross_target_rejection() {
-  const FirmwareTargetContract dig2go = firmwareTargetFromCanonical(
+  FirmwareTargetContract dig2go = firmwareTargetFromCanonical(
       CANONICAL_TARGET_QUINLED_DIG2GO, TubeHardwareDig2Go);
   const FirmwareTargetContract s3 = firmwareTargetFromCanonical(
       CANONICAL_TARGET_WAVESHARE_S3_TUBES_REMOTE, TubeHardwareMatrixM1);
+  FirmwareTargetContract admittedS3 = s3;
+  dig2go.inactiveOtaSlot = 0;
+  admittedS3.inactiveOtaSlot = 1;
   expect(firmwareTargetIsKnown(dig2go), "generated Dig2Go target was incomplete");
-  expect(firmwareTargetIsKnown(s3), "generated S3 metadata target was incomplete");
-  expect(matchFirmwareArtifactTarget(dig2go, s3) == FirmwareTargetHardwareMismatch,
+  expect(firmwareTargetIsKnown(admittedS3), "generated S3 metadata target was incomplete");
+  expect(matchFirmwareArtifactTarget(dig2go, admittedS3) == FirmwareTargetHardwareMismatch,
       "S3 admitted a Dig2Go artifact");
+}
+
+void inactive_slot_is_explicit_and_bounded() {
+  FirmwareTargetContract target = dig2GoTarget();
+  expect(firmwareArtifactFitsInactiveSlot(target, 0x1000),
+      "declared inactive slot rejected bounded image");
+  target.inactiveOtaSlot = 1;
+  expect(firmwareArtifactFitsInactiveSlot(target, 0x1000),
+      "second inactive slot rejected bounded image");
+  target.inactiveOtaSlot = CANONICAL_MAX_OTA_SLOTS;
+  expect(!firmwareArtifactFitsInactiveSlot(target, 0x1000),
+      "missing inactive-slot evidence was admitted");
 }
 
 } // namespace
 
 int main() {
-  const std::array<std::pair<const char*, void (*)()>, 4> tests = {{
+  const std::array<std::pair<const char*, void (*)()>, 5> tests = {{
     {"exact target is admitted", exact_target_is_admitted},
     {"unknown target fails closed", unknown_target_fails_closed},
     {"every hardware dimension must match", every_hardware_dimension_must_match},
     {"generated targets preserve cross-target rejection", generated_targets_preserve_cross_target_rejection},
+    {"inactive slot is explicit and bounded", inactive_slot_is_explicit_and_bounded},
   }};
 
   for (const auto& test : tests) {
