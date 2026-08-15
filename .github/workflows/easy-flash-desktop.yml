@@ -31,11 +31,11 @@ jobs:
           - name: macOS
             os: macos-14
             target: mac
-            artifactPath: dist/easy-flash-desktop/*.{dmg,zip}
+            artifactPath: dist/easy-flash-desktop/
           - name: Windows x64
             os: windows-2022
             target: win
-            artifactPath: dist/easy-flash-desktop/*.{exe,zip}
+            artifactPath: dist/easy-flash-desktop/
     runs-on: ${{ matrix.os }}
     steps:
       - name: Check out source
