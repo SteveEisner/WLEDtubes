@@ -372,6 +372,9 @@ static_assert(WLED_MAX_BUSSES <= 32, "WLED_MAX_BUSSES exceeds hard limit");
 #define TYPE_NET_DDP_RGBW        88            //network DDP RGBW bus (master broadcast bus)
 #define TYPE_NET_ARTNET_RGBW     89            //network ArtNet RGB bus (master broadcast bus, unused)
 #define TYPE_VIRTUAL_MAX         95
+#ifdef TUBES_NULL_OUTPUT
+#define TYPE_TUBES_NULL          95            // internal RGB framebuffer, never a transport
+#endif
 
 //Color orders
 #define COL_ORDER_GRB             0           //GRB(w),defaut

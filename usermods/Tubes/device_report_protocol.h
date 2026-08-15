@@ -25,6 +25,7 @@ enum TubeHardwareFamily : uint8_t {
     TubeHardwareAthomC3 = 3,
     TubeHardwareGledopto = 4,
     TubeHardwareHomeLight = 5,
+    TubeHardwareWaveshareS3 = 6,
 };
 
 enum TubeFirmwareVariant : uint8_t {

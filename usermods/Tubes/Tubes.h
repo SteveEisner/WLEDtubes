@@ -54,6 +54,14 @@ class TubesUsermod : public Usermod {
     void recoverLedBussesIfNeeded() {
       if (strip.getLengthTotal() > 0 || BusManager::getNumBusses() > 0 || !busConfigs.empty()) return;
 
+#ifdef TUBES_NULL_OUTPUT
+      uint8_t noPins[OUTPUT_MAX_PINS] = {255, 255, 255, 255, 255};
+      busConfigs.emplace_back(TYPE_TUBES_NULL, noPins, 0, PIXEL_COUNTS, COL_ORDER_RGB);
+      doInitBusses = true;
+      Serial.println(F("Tubes: created null logical output"));
+      return;
+#endif
+
       constexpr unsigned defDataTypes[] = {LED_TYPES};
       constexpr unsigned defDataPins[] = {DATA_PINS};
       constexpr unsigned defCounts[] = {PIXEL_COUNTS};
