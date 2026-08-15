@@ -27,10 +27,10 @@ export const server = createServer(async (request, response) => {
 		if (!match) { response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" }).end("Not found"); return; }
 		try {
 			const expectedTarget = request.headers["x-easy-flash-hardware-family"] ? { hardwareFamily: request.headers["x-easy-flash-hardware-family"], chip: request.headers["x-easy-flash-chip"], flashSizeBytes: Number(request.headers["x-easy-flash-flash-bytes"]), partitionTableSha256: request.headers["x-easy-flash-partition-sha256"] } : null;
-			const { variant, artifact, absolutePath } = await resolveFirmwareArtifact(match[1], match[2], undefined, expectedTarget);
+			const { variant, artifact, bytes } = await resolveFirmwareArtifact(match[1], match[2], undefined, expectedTarget);
 			const filename = `${variant.id}-${artifact.transport === "usb" ? "usb-merged" : "http-ota-app"}.bin`;
 			response.writeHead(200, { "Content-Type": "application/octet-stream", "Content-Length": artifact.sizeBytes, "Content-Disposition": `attachment; filename="${filename}"`, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "X-Easy-Flash-Hardware-Family": variant.target.hardwareFamily, "X-Easy-Flash-Chip": variant.target.chip, "X-Easy-Flash-Flash-Bytes": String(variant.target.flashSizeBytes), "X-Easy-Flash-Partition-Sha256": variant.partition.tableSha256 });
-			createReadStream(absolutePath).pipe(response);
+			response.end(bytes);
 		} catch {
 			response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" }).end("Firmware artifact unavailable or failed integrity verification");
 		}

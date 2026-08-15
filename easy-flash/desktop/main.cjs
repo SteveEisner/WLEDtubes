@@ -31,8 +31,7 @@ async function handleFirmwareApi(request, pathname) {
 		flashSizeBytes: Number(request.headers.get("x-easy-flash-flash-bytes")),
 		partitionTableSha256: request.headers.get("x-easy-flash-partition-sha256"),
 	};
-	const { variant, artifact, absolutePath } = await resolveFirmwareArtifact(match[1], match[2], undefined, expected.hardwareFamily ? expected : null);
-	const bytes = await readFile(absolutePath);
+	const { variant, artifact, bytes } = await resolveFirmwareArtifact(match[1], match[2], undefined, expected.hardwareFamily ? expected : null);
 	const filename = `${variant.id}-${artifact.transport === "usb" ? "usb-merged" : "http-ota-app"}.bin`;
 	return response(bytes, 200, "application/octet-stream", { "Cache-Control": "no-store", "Content-Disposition": `attachment; filename=\"${filename}\"`, "X-Content-SHA256": artifact.sha256 });
 }

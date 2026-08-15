@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test, { after, before } from "node:test";
 import { server } from "../server.mjs";
 
@@ -37,6 +38,8 @@ test("serves verified firmware manifest and transport-specific downloads", async
 		assert.equal(response.status, 200);
 		assert.equal(response.headers.get("content-type"), "application/octet-stream");
 		assert.match(response.headers.get("content-disposition"), transport === "usb" ? /previous-stable-control-usb-merged\.bin/ : /previous-stable-control-http-ota-app\.bin/);
+		const artifact = manifest.variants[0].artifacts.find((item) => item.transport === transport);
+		assert.equal(createHash("sha256").update(Buffer.from(await response.arrayBuffer())).digest("hex"), artifact.sha256);
 	}
 });
 
