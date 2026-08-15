@@ -209,3 +209,36 @@ When Steve's split palette/tempo/pattern/spatial/capability packets land:
 5. Prove interruption leaves the active receiver image bootable.
 6. Prove reboot, health reporting, and explicit baton handoff.
 7. Trial on one authorized Dig2Go sender and one expendable matching receiver before any fleet propagation.
+
+## Centralized update contract progress
+
+PR #67 now owns the hand-edited machine-readable source at
+`contracts/update/update-contract.json`. It is internal/build data, not a mesh
+packet. Deterministic tooling under `tools/update-contract/` validates the
+source and produces:
+
+- `contracts/update/generated/update-contract.generated.mjs` for Easy Flash;
+- `usermods/Tubes/generated/update_contract_generated.h` for firmware and the
+  S3 adapter.
+
+The first bounded contract pins the proven Dig2Go target, USB merged image, OTA
+application image, release identity, and byte hashes. It also records proven
+Waveshare S3 target and partition geometry but deliberately provides no S3
+artifact or hardware-acceptance claim. Missing target, artifact, or release
+class identity fails closed; silence is `Unknown`, never `Legacy`.
+
+The generated C++ projection is compile-time data. Firmware does not parse JSON
+at runtime. `FirmwareTargetContract` consumes only compact target and vocabulary
+constants, while `FirmwareUpdateSession` retains its existing sequential sender,
+target, artifact, lease, transfer, health, and disabled-forwarding semantics.
+
+### Centralized-contract TODO
+
+- [ ] Adapt PR #65 Easy Flash to consume the generated JavaScript projection,
+  then retire its independent firmware manifest only after migration tests pass.
+- [ ] Adapt PR #66 Waveshare S3 target/UI code to consume generated constants;
+  keep Updater read-only and omit artifacts until a release image is proven.
+- [ ] Replace the temporary device-report hardware-family seam only when Steve's
+  additive v15 identity/capability contract lands on `main`.
+- [ ] Add receiver writes, lease-scoped serving, and device health evidence only
+  in later explicitly authorized slices.

@@ -17,6 +17,7 @@ void expect(bool condition, const std::string& message) {
 
 FirmwareTargetContract dig2GoTarget() {
   FirmwareTargetContract target;
+  target.targetId = CanonicalTargetQuinledDig2go;
   target.hardwareFamily = TubeHardwareDig2Go;
   target.chipFamily = FirmwareChipEsp32;
   target.flashMode = FirmwareFlashModeDio;
@@ -39,6 +40,7 @@ void exact_target_is_admitted() {
 void unknown_target_fails_closed() {
   const auto artifactTarget = dig2GoTarget();
   FirmwareTargetContract receiver;
+  receiver.targetId = CanonicalTargetQuinledDig2go;
   receiver.hardwareFamily = TubeHardwareDig2Go;
   receiver.chipFamily = FirmwareChipEsp32;
   expect(!firmwareTargetIsKnown(receiver), "partial target was treated as known");
@@ -80,13 +82,25 @@ void every_hardware_dimension_must_match() {
       "wrong OTA slot was admitted");
 }
 
+void generated_targets_preserve_cross_target_rejection() {
+  const FirmwareTargetContract dig2go = firmwareTargetFromCanonical(
+      CANONICAL_TARGET_QUINLED_DIG2GO, TubeHardwareDig2Go);
+  const FirmwareTargetContract s3 = firmwareTargetFromCanonical(
+      CANONICAL_TARGET_WAVESHARE_S3_TUBES_REMOTE, TubeHardwareMatrixM1);
+  expect(firmwareTargetIsKnown(dig2go), "generated Dig2Go target was incomplete");
+  expect(firmwareTargetIsKnown(s3), "generated S3 metadata target was incomplete");
+  expect(matchFirmwareArtifactTarget(dig2go, s3) == FirmwareTargetHardwareMismatch,
+      "S3 admitted a Dig2Go artifact");
+}
+
 } // namespace
 
 int main() {
-  const std::array<std::pair<const char*, void (*)()>, 3> tests = {{
+  const std::array<std::pair<const char*, void (*)()>, 4> tests = {{
     {"exact target is admitted", exact_target_is_admitted},
     {"unknown target fails closed", unknown_target_fails_closed},
     {"every hardware dimension must match", every_hardware_dimension_must_match},
+    {"generated targets preserve cross-target rejection", generated_targets_preserve_cross_target_rejection},
   }};
 
   for (const auto& test : tests) {

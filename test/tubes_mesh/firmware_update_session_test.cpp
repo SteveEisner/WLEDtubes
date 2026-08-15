@@ -18,6 +18,7 @@ void expect(bool condition, const std::string& message) {
 
 FirmwareTargetContract exactTarget(uint8_t marker = 1) {
   FirmwareTargetContract target;
+  target.targetId = CanonicalTargetQuinledDig2go;
   target.hardwareFamily = TubeHardwareDig2Go;
   target.chipFamily = FirmwareChipEsp32;
   target.flashMode = FirmwareFlashModeDio;
@@ -31,6 +32,7 @@ FirmwareTargetContract exactTarget(uint8_t marker = 1) {
 FirmwareImageArtifact exactArtifact() {
   FirmwareImageArtifact artifact;
   artifact.target = exactTarget();
+  artifact.releaseClass = CanonicalReleaseCurrent;
   artifact.imageLengthBytes = 1024;
   artifact.releaseHash = 0x12345678;
   artifact.imageSha256[0] = 0xAB;

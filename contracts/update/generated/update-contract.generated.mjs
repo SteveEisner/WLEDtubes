@@ -1,0 +1,209 @@
+// GENERATED FILE. DO NOT EDIT.
+// Source: contracts/update/update-contract.json (schema 1)
+export const updateContract = Object.freeze({
+  "artifacts": [
+    {
+      "buildCommit": "c6522acef3e954b14aad30d6f687cdb99bd1624e",
+      "id": "dig2go-v14-ota-application",
+      "kind": "application-image",
+      "lengthBytes": 1259392,
+      "offset": 65536,
+      "path": "contracts/update/artifacts/dig2go-v14/ota/firmware.bin",
+      "releaseClass": "Current",
+      "releaseIdentity": "DIG2GO_TUBES",
+      "sha256": "bf6dc2feedb1669361471e9cc2224b1b2b1ba0e15602e58258dfde4e41569f2d",
+      "targetId": "quinled-dig2go",
+      "transport": "ota",
+      "tubesRelease": "14",
+      "wledBaseVersion": "16.0.1"
+    },
+    {
+      "buildCommit": "c6522acef3e954b14aad30d6f687cdb99bd1624e",
+      "components": [
+        {
+          "id": "bootloader",
+          "lengthBytes": 15936,
+          "offset": 4096,
+          "sha256": "5b6c865321f53124d9ec9467b72daa0572b4387f725051f785771447d3dab095"
+        },
+        {
+          "id": "partitions",
+          "lengthBytes": 3072,
+          "offset": 32768,
+          "sha256": "ab7a19ebb0ea19e684687802f2d8f199225a270c6b7dd72d73e8a8876f382e73"
+        },
+        {
+          "id": "boot-app0",
+          "lengthBytes": 8192,
+          "offset": 57344,
+          "sha256": "f94c5d786a7a8fab06ac5d10e33bf37711a6697636dc037559ea19cc410a17f0"
+        },
+        {
+          "id": "application",
+          "lengthBytes": 1259392,
+          "offset": 65536,
+          "sha256": "bf6dc2feedb1669361471e9cc2224b1b2b1ba0e15602e58258dfde4e41569f2d"
+        }
+      ],
+      "id": "dig2go-v14-usb-merged",
+      "kind": "complete-merged-image",
+      "lengthBytes": 1324928,
+      "offset": 0,
+      "path": "contracts/update/artifacts/dig2go-v14/usb/merged.bin",
+      "releaseClass": "Current",
+      "releaseIdentity": "DIG2GO_TUBES",
+      "sha256": "4608ebbe3fbaa8406214e85c5e116f35d06c46ad9e703d38a797e13dc0214b91",
+      "targetId": "quinled-dig2go",
+      "transport": "usb",
+      "tubesRelease": "14",
+      "wledBaseVersion": "16.0.1"
+    }
+  ],
+  "receiptVocabulary": {
+    "adapters": [
+      "easy-flash",
+      "p2p",
+      "s3"
+    ],
+    "failureValues": [
+      "lease-expired",
+      "transfer-hash-mismatch",
+      "health-mismatch"
+    ],
+    "fields": [
+      "sessionId",
+      "adapter",
+      "targetId",
+      "artifactId",
+      "releaseClass",
+      "state",
+      "startedAt",
+      "completedAt",
+      "transferredBytes",
+      "expectedSha256",
+      "observedSha256",
+      "runtimeConfigurationPreserved",
+      "meshRejoined",
+      "stable",
+      "failure"
+    ],
+    "healthValues": [
+      "unproven",
+      "booted-and-reported"
+    ],
+    "schemaVersion": 1
+  },
+  "releaseClasses": [
+    {
+      "cppValue": 1,
+      "id": "Legacy",
+      "meaning": "Positively identified pre-v14 Tubes firmware."
+    },
+    {
+      "cppValue": 2,
+      "id": "Current",
+      "meaning": "Positively identified Tubes v14 on the WLED 16 generation."
+    },
+    {
+      "cppValue": 3,
+      "id": "Next",
+      "meaning": "Positively identified Tubes v15 through Steve's future additive identity contract."
+    },
+    {
+      "cppValue": 0,
+      "id": "Unknown",
+      "meaning": "Identity is missing, incomplete, conflicting, or silent; never infer Legacy."
+    }
+  ],
+  "schemaVersion": 1,
+  "targets": [
+    {
+      "board": "QuinLED Dig2Go",
+      "chipFamily": "ESP32",
+      "cppValue": 1,
+      "flashMode": "dio",
+      "flashSizeBytes": 4194304,
+      "hardwareFamily": "quinled-dig2go",
+      "id": "quinled-dig2go",
+      "partition": {
+        "csvPath": "tools/WLED_ESP32_4MB_1MB_FS.csv",
+        "otaSlots": [
+          {
+            "id": "ota_0",
+            "offset": 65536,
+            "sizeBytes": 1572864
+          },
+          {
+            "id": "ota_1",
+            "offset": 1638400,
+            "sizeBytes": 1572864
+          }
+        ],
+        "sha256": "d99fde46aaccb19761d16c2b1470f9b5c8293592eb05fade81cf47384a071f44"
+      }
+    },
+    {
+      "board": "esp32-s3-devkitc-1",
+      "chipFamily": "ESP32-S3",
+      "cppValue": 2,
+      "flashMode": "qio",
+      "flashSizeBytes": 16777216,
+      "hardwareAcceptance": "unproven",
+      "hardwareFamily": "waveshare-s3-touch-amoled-2.16",
+      "id": "waveshare-s3-tubes-remote",
+      "partition": {
+        "csvPath": "contracts/update/partitions/WLED_ESP32S3_WAVESHARE_16MB.csv",
+        "otaSlots": [
+          {
+            "id": "ota_0",
+            "offset": 65536,
+            "sizeBytes": 6291456
+          },
+          {
+            "id": "ota_1",
+            "offset": 6356992,
+            "sizeBytes": 6291456
+          }
+        ],
+        "sha256": "afcd596b982397fc252d1fd869085d49e5fe28eea870d7fc7ad15deb8f353e46"
+      }
+    }
+  ],
+  "updateStates": [
+    {
+      "cppValue": 0,
+      "id": "Idle",
+      "terminal": false
+    },
+    {
+      "cppValue": 1,
+      "id": "TargetSelected",
+      "terminal": false
+    },
+    {
+      "cppValue": 2,
+      "id": "Transferring",
+      "terminal": false
+    },
+    {
+      "cppValue": 3,
+      "id": "AwaitingHealth",
+      "terminal": false
+    },
+    {
+      "cppValue": 4,
+      "id": "Healthy",
+      "terminal": false
+    },
+    {
+      "cppValue": 5,
+      "id": "Complete",
+      "terminal": true
+    },
+    {
+      "cppValue": 6,
+      "id": "Failed",
+      "terminal": true
+    }
+  ]
+});

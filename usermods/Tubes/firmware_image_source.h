@@ -13,6 +13,7 @@
 // hardware identity of the carrier serving these bytes.
 struct FirmwareImageArtifact {
   FirmwareTargetContract target;
+  CanonicalReleaseClass releaseClass = CanonicalReleaseUnknown;
   size_t imageLengthBytes = 0;
   uint32_t releaseHash = 0;
   uint8_t imageSha256[32] = {0};
