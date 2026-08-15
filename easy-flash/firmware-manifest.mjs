@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { lstat, open, readFile, realpath } from "node:fs/promises";
-import path, { dirname, join, resolve } from "node:path";
+import { open, readFile, realpath, stat } from "node:fs/promises";
+import path, { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("./", import.meta.url));
@@ -34,12 +34,21 @@ export function isPathInside(rootPath, candidatePath, pathApi = path) {
 	return relativePath !== "" && relativePath !== ".." && !relativePath.startsWith(`..${pathApi.sep}`) && !pathApi.isAbsolute(relativePath);
 }
 
+// Compares canonical roots using the case and separator rules of the active platform.
+export function pathsHaveSameIdentity(leftPath, rightPath, pathApi = path, caseInsensitive = process.platform === "win32") {
+	const normalize = (value) => {
+		const normalized = pathApi.normalize(pathApi.resolve(value));
+		return caseInsensitive ? normalized.toLowerCase() : normalized;
+	};
+	return normalize(leftPath) === normalize(rightPath);
+}
+
 export async function loadFirmwareManifest(manifestPath = defaultManifestPath) {
 	return validateManifest(JSON.parse(await readFile(manifestPath, "utf8")));
 }
 
 // Resolves exclusively through validated manifest records and returns the bytes verified from one open file handle.
-export async function resolveFirmwareArtifact(variantId, transport, manifestPath = defaultManifestPath, expectedTarget = null) {
+export async function resolveFirmwareArtifact(variantId, transport, manifestPath = defaultManifestPath, expectedTarget = null, options = {}) {
 	if (!/^[a-z0-9-]+$/.test(variantId)) throw new Error("Invalid variant ID");
 	if (!new Set(["usb", "ota"]).has(transport)) throw new Error("Invalid transport");
 	const manifest = await loadFirmwareManifest(manifestPath);
@@ -50,15 +59,24 @@ export async function resolveFirmwareArtifact(variantId, transport, manifestPath
 	const expectedKind = transport === "usb" ? "complete-merged-image" : "application-image";
 	if (!artifact || artifact.kind !== expectedKind || (transport === "usb" && (artifact.offset !== 0 || (artifact.flashSizeBytes && (artifact.flashSizeBytes !== variant.target.flashSizeBytes || artifact.sizeBytes !== artifact.flashSizeBytes)))) || (transport === "ota" && (artifact.offset !== variant.partition.otaSlot.offset || artifact.sizeBytes > variant.partition.otaSlot.sizeBytes || (artifact.headroomBytes != null && artifact.sizeBytes + artifact.headroomBytes !== variant.partition.otaSlot.sizeBytes)))) throw new Error("Artifact transport contract mismatch");
 	const artifactRootPath = resolve(dirname(manifestPath), "artifacts");
+	const canonicalize = options.canonicalize || realpath;
+	let expectedArtifactRoot;
+	try { expectedArtifactRoot = resolve(await canonicalize(dirname(artifactRootPath)), basename(artifactRootPath)); } catch { throw new Error("Firmware artifact root unavailable"); }
+	let artifactRoot;
+	try { artifactRoot = await canonicalize(artifactRootPath); } catch { throw new Error("Firmware artifact root unavailable"); }
+	if (!pathsHaveSameIdentity(expectedArtifactRoot, artifactRoot)) throw new Error("Firmware artifact root must be a real directory");
 	let rootInfo;
-	try { rootInfo = await lstat(artifactRootPath); } catch { throw new Error("Firmware artifact root unavailable"); }
-	if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new Error("Firmware artifact root must be a real directory");
-	const artifactRoot = await realpath(artifactRootPath);
+	try { rootInfo = await stat(artifactRoot); } catch { throw new Error("Firmware artifact root unavailable"); }
+	if (!rootInfo.isDirectory()) throw new Error("Firmware artifact root must be a real directory");
 	let absolutePath;
-	try { absolutePath = await realpath(resolve(dirname(manifestPath), artifact.path)); } catch { throw new Error("Firmware artifact unavailable"); }
+	try { absolutePath = await canonicalize(resolve(dirname(manifestPath), artifact.path)); } catch { throw new Error("Firmware artifact unavailable"); }
 	if (!isPathInside(artifactRoot, absolutePath)) throw new Error("Artifact path escapes bundle");
 	const handle = await open(absolutePath, "r");
 	try {
+		// A later root-path replacement cannot change the already-open, size/hash-pinned bytes returned below.
+		let revalidatedRoot;
+		try { revalidatedRoot = await canonicalize(artifactRootPath); } catch { throw new Error("Firmware artifact root changed during verification"); }
+		if (!pathsHaveSameIdentity(expectedArtifactRoot, revalidatedRoot) || !pathsHaveSameIdentity(artifactRoot, revalidatedRoot)) throw new Error("Firmware artifact root changed during verification");
 		const info = await handle.stat();
 		if (!info.isFile()) throw new Error("Firmware artifact is not a file");
 		const bytes = await handle.readFile();

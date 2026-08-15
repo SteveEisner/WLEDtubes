@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { cp, mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import path, { join } from "node:path";
 import { win32 } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 
-import { isPathInside, loadFirmwareManifest, resolveFirmwareArtifact } from "../firmware-manifest.mjs";
+import { isPathInside, loadFirmwareManifest, pathsHaveSameIdentity, resolveFirmwareArtifact } from "../firmware-manifest.mjs";
 
 const variantId = "previous-stable-control";
 
@@ -72,6 +72,31 @@ test("containment applies Windows separators and drive boundaries", () => {
 	assert.equal(isPathInside("C:\\bundle\\artifacts", "C:\\bundle\\artifacts-evil\\firmware.bin", win32), false);
 	assert.equal(isPathInside("C:\\bundle\\artifacts", "C:\\bundle\\outside.bin", win32), false);
 	assert.equal(isPathInside("C:\\bundle\\artifacts", "D:\\bundle\\artifacts\\firmware.bin", win32), false);
+});
+
+test("root identity normalization follows native macOS and Windows path rules", () => {
+	assert.equal(pathsHaveSameIdentity("/bundle/artifacts", "/bundle/artifacts", path.posix, false), true);
+	assert.equal(pathsHaveSameIdentity("/bundle/artifacts", "/bundle/ARTIFACTS", path.posix, false), false);
+	assert.equal(pathsHaveSameIdentity("C:\\Bundle\\artifacts", "c:/bundle/artifacts\\", win32, true), true);
+	assert.equal(pathsHaveSameIdentity("C:\\Bundle\\artifacts", "D:\\Bundle\\artifacts", win32, true), false);
+});
+
+test("resolver rejects canonical root mismatch and replacement deterministically", async () => {
+	for (const replaceOnSecondRootRead of [false, true]) {
+		const { fixtureRoot, manifestPath } = await fixture();
+		try {
+			const rootPath = join(fixtureRoot, "artifacts");
+			let rootReads = 0;
+			const canonicalize = async (value) => {
+				if (value === rootPath && ++rootReads > (replaceOnSecondRootRead ? 1 : 0)) return join(fixtureRoot, "attacker-artifacts");
+				return realpath(value);
+			};
+			await assert.rejects(() => resolveFirmwareArtifact(variantId, "usb", manifestPath, null, { canonicalize }), /artifact root.*changed|real directory/i);
+			assert.equal(rootReads, replaceOnSecondRootRead ? 2 : 1);
+		} finally {
+			await rm(fixtureRoot, { recursive: true, force: true });
+		}
+	}
 });
 
 test("resolver rejects traversal, separator-prefix collisions, and invalid artifact roots", async () => {
