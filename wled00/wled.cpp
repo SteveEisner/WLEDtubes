@@ -89,22 +89,47 @@ static void diagnoseBootButtons()
 #else
   constexpr unsigned long stuckButtonInterval = 10000UL;
   static unsigned long activeSince[WLED_MAX_BUTTONS] = {0};
+  static bool activeInitialized[WLED_MAX_BUTTONS] = {false};
   static bool reportedStuck[WLED_MAX_BUTTONS] = {false};
+  static int diagnosticPin[WLED_MAX_BUTTONS] = {0};
+  static uint8_t diagnosticType[WLED_MAX_BUTTONS] = {0};
+  static bool diagnosticIdentityInitialized[WLED_MAX_BUTTONS] = {false};
   bool available = false;
   bool stuck = false;
   const unsigned long now = millis();
-  for (size_t b = 0; b < buttons.size() && b < WLED_MAX_BUTTONS; b++) {
+  for (size_t b = 0; b < WLED_MAX_BUTTONS; b++) {
+    if (b >= buttons.size()) {
+      activeSince[b] = 0;
+      activeInitialized[b] = false;
+      reportedStuck[b] = false;
+      diagnosticIdentityInitialized[b] = false;
+      continue;
+    }
     const auto &button = buttons[b];
-    if (button.pin < 0 || (button.type != BTN_TYPE_PUSH && button.type != BTN_TYPE_PUSH_ACT_HIGH)) continue;
+    const int pin = button.pin;
+    const uint8_t type = (uint8_t)button.type;
+    if (!diagnosticIdentityInitialized[b] || diagnosticPin[b] != pin || diagnosticType[b] != type) {
+      diagnosticPin[b] = pin;
+      diagnosticType[b] = type;
+      diagnosticIdentityInitialized[b] = true;
+      activeSince[b] = 0;
+      activeInitialized[b] = false;
+      reportedStuck[b] = false;
+    }
+    if (pin < 0 || (button.type != BTN_TYPE_PUSH && button.type != BTN_TYPE_PUSH_ACT_HIGH)) continue;
     available = true;
     const bool active = (button.type == BTN_TYPE_PUSH_ACT_HIGH) ?
                         (digitalRead(button.pin) == HIGH) : (digitalRead(button.pin) == LOW);
     if (!active) {
       activeSince[b] = 0;
+      activeInitialized[b] = false;
       reportedStuck[b] = false;
       continue;
     }
-    if (activeSince[b] == 0) activeSince[b] = now;
+    if (!activeInitialized[b]) {
+      activeSince[b] = now;
+      activeInitialized[b] = true;
+    }
     if (now - activeSince[b] >= stuckButtonInterval) {
       stuck = true;
       if (!reportedStuck[b]) {
@@ -126,7 +151,7 @@ static void diagnoseBootButtons()
   }
   reportedStatus = false;
   if (available && !reportedHealthy) {
-    Serial.println(F("WLED button diagnostics: HEALTHY/AVAILABLE"));
+    Serial.println(F("WLED button diagnostics: AVAILABLE/INACTIVE"));
     reportedHealthy = true;
     reportedUnavailable = false;
   } else if (!available && !reportedUnavailable) {
