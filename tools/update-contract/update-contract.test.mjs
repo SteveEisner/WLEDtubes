@@ -24,6 +24,35 @@ test('canonical update contract and pinned files validate', () => {
   assert.deepEqual(validateContract(loadContract()), []);
 });
 
+test('Athom C3 target preserves Steve main exact compiled hardware contract', () => {
+  const contract = loadContract();
+  const target = contract.targets.find(item => item.id === 'athom-c3-tubes');
+  assert.ok(target);
+  assert.deepEqual(target.compiledProfile, {
+    environment: 'esp32-c3-athom_tubes',
+    releaseIdentity: 'ESP32-C3_ATHOM_TUBES',
+    ledPin: 10,
+    buttonPin: 9,
+    ledCount: 150
+  });
+  assert.equal(target.chipFamily, 'ESP32-C3');
+  assert.equal(target.board, 'esp32-c3-devkitm-1');
+  assert.equal(target.flashMode, 'dio');
+  assert.equal(target.flashSizeBytes, 4194304);
+  assert.deepEqual(target.partition.otaSlots, [
+    {id: 'ota_0', offset: 65536, sizeBytes: 1572864},
+    {id: 'ota_1', offset: 1638400, sizeBytes: 1572864}
+  ]);
+
+  const artifacts = contract.artifacts.filter(item => item.targetId === target.id);
+  assert.deepEqual(artifacts.map(item => item.transport).sort(), ['ota', 'usb']);
+  assert.ok(artifacts.every(item => item.releaseIdentity === target.compiledProfile.releaseIdentity));
+  assert.ok(artifacts.every(item => item.buildSourceState.includes('generated C3 contract projection')));
+  assert.ok(artifacts.every(item => item.lengthBytes <= target.flashSizeBytes));
+  const header = fs.readFileSync(cppOutputPath, 'utf8');
+  assert.match(header, /CANONICAL_TARGET_ATHOM_C3_TUBES[\s\S]*CanonicalTargetAthomC3Tubes, 2, 1,/);
+});
+
 test('duplicate and unknown identities fail closed', () => {
   const canonical = loadContract();
   const duplicateTarget = clone(canonical);
@@ -141,7 +170,7 @@ test('JS and minimal C++ admission fields have parity for two slots and artifact
   assert.match(header, /Minimal firmware admission projection/);
   const headerCode = header.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
   for (const omittedField of [
-    'hardwareFamily', 'board', 'csvPath', 'hardwareAcceptance', 'tubesRelease',
+    'hardwareFamily', 'board', 'csvPath', 'hardwareAcceptance', 'compiledProfile', 'buildSourceState', 'tubesRelease',
     'wledBaseVersion', 'releaseIdentity', 'buildCommit', 'path', 'components',
     'writeOffset', 'buildOffset'
   ])

@@ -48,6 +48,10 @@ inline const CanonicalArtifactRecord* canonicalArtifactById(CanonicalArtifactId 
       return &CANONICAL_ARTIFACT_DIG2GO_V14_USB_MERGED;
     case CanonicalArtifactDig2goV14OtaApplication:
       return &CANONICAL_ARTIFACT_DIG2GO_V14_OTA_APPLICATION;
+    case CanonicalArtifactAthomC3V14UsbMerged:
+      return &CANONICAL_ARTIFACT_ATHOM_C3_V14_USB_MERGED;
+    case CanonicalArtifactAthomC3V14OtaApplication:
+      return &CANONICAL_ARTIFACT_ATHOM_C3_V14_OTA_APPLICATION;
     default:
       return nullptr;
   }
