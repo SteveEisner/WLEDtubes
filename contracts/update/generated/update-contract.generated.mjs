@@ -4,6 +4,66 @@
 export const updateContract = Object.freeze({
   "artifacts": [
     {
+      "buildCommit": "0987e2665e144312f982a2363312e7f847a427eb",
+      "buildOffset": 65536,
+      "buildSourceState": "commit 0987e266 plus this commit's generated C3 contract projection",
+      "cppValue": 4,
+      "id": "athom-c3-v14-ota-application",
+      "kind": "application-image",
+      "lengthBytes": 1198128,
+      "path": "contracts/update/artifacts/athom-c3-v14/ota/firmware.bin",
+      "releaseClass": "Current",
+      "releaseIdentity": "ESP32-C3_ATHOM_TUBES",
+      "sha256": "ba953abd7f4131f5a9bc1ffed6c999a878f9070f0282c00f945328cefd1f10dc",
+      "targetId": "athom-c3-tubes",
+      "transport": "ota",
+      "tubesRelease": "14",
+      "wledBaseVersion": "16.0.1"
+    },
+    {
+      "buildCommit": "0987e2665e144312f982a2363312e7f847a427eb",
+      "buildSourceState": "commit 0987e266 plus this commit's generated C3 contract projection",
+      "components": [
+        {
+          "id": "bootloader",
+          "lengthBytes": 10608,
+          "offset": 0,
+          "sha256": "3ad906095ba135b40d0bda12e113e630cc6d3c0abef3c6347e94dcaaa6670791"
+        },
+        {
+          "id": "partitions",
+          "lengthBytes": 3072,
+          "offset": 32768,
+          "sha256": "ab7a19ebb0ea19e684687802f2d8f199225a270c6b7dd72d73e8a8876f382e73"
+        },
+        {
+          "id": "boot-app0",
+          "lengthBytes": 8192,
+          "offset": 57344,
+          "sha256": "f94c5d786a7a8fab06ac5d10e33bf37711a6697636dc037559ea19cc410a17f0"
+        },
+        {
+          "id": "application",
+          "lengthBytes": 1198128,
+          "offset": 65536,
+          "sha256": "ba953abd7f4131f5a9bc1ffed6c999a878f9070f0282c00f945328cefd1f10dc"
+        }
+      ],
+      "cppValue": 3,
+      "id": "athom-c3-v14-usb-merged",
+      "kind": "complete-merged-image",
+      "lengthBytes": 1263664,
+      "path": "contracts/update/artifacts/athom-c3-v14/usb/merged.bin",
+      "releaseClass": "Current",
+      "releaseIdentity": "ESP32-C3_ATHOM_TUBES",
+      "sha256": "81a377c27696487991613c1a062264be3e4eeafed933d890bebcd63c9f1d2e93",
+      "targetId": "athom-c3-tubes",
+      "transport": "usb",
+      "tubesRelease": "14",
+      "wledBaseVersion": "16.0.1",
+      "writeOffset": 0
+    },
+    {
       "buildCommit": "c6522acef3e954b14aad30d6f687cdb99bd1624e",
       "buildOffset": 65536,
       "cppValue": 2,
@@ -120,6 +180,38 @@ export const updateContract = Object.freeze({
   ],
   "schemaVersion": 1,
   "targets": [
+    {
+      "board": "esp32-c3-devkitm-1",
+      "chipFamily": "ESP32-C3",
+      "compiledProfile": {
+        "buttonPin": 9,
+        "environment": "esp32-c3-athom_tubes",
+        "ledCount": 150,
+        "ledPin": 10,
+        "releaseIdentity": "ESP32-C3_ATHOM_TUBES"
+      },
+      "cppValue": 3,
+      "flashMode": "dio",
+      "flashSizeBytes": 4194304,
+      "hardwareFamily": "athom-esp32-c3",
+      "id": "athom-c3-tubes",
+      "partition": {
+        "csvPath": "tools/WLED_ESP32_4MB_1MB_FS.csv",
+        "otaSlots": [
+          {
+            "id": "ota_0",
+            "offset": 65536,
+            "sizeBytes": 1572864
+          },
+          {
+            "id": "ota_1",
+            "offset": 1638400,
+            "sizeBytes": 1572864
+          }
+        ],
+        "sha256": "d99fde46aaccb19761d16c2b1470f9b5c8293592eb05fade81cf47384a071f44"
+      }
+    },
     {
       "board": "QuinLED Dig2Go",
       "chipFamily": "ESP32",

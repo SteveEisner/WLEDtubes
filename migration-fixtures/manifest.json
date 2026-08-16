@@ -119,6 +119,26 @@
         "sizeBytes": 1259392,
         "sha256": "bf6dc2feedb1669361471e9cc2224b1b2b1ba0e15602e58258dfde4e41569f2d"
       }
+    },
+    {
+      "id": "tubes-v14-athom-c3",
+      "lineage": "tubes",
+      "major": 14,
+      "version": "14",
+      "source": {
+        "repository": "SteveEisner/WLEDtubes",
+        "baseCommit": "0987e2665e144312f982a2363312e7f847a427eb",
+        "buildSourceState": "base commit plus commit 2 generated C3 contract projection",
+        "environment": "esp32-c3-athom_tubes",
+        "releaseIdentity": "ESP32-C3_ATHOM_TUBES"
+      },
+      "hardwareEvidence": "exact-athom-c3-compiled-target-contract",
+      "installPolicy": "migration-destination",
+      "artifact": {
+        "path": "migration-fixtures/firmware/tubes-v14/tubes-v14-athom-c3.bin",
+        "sizeBytes": 1198128,
+        "sha256": "ba953abd7f4131f5a9bc1ffed6c999a878f9070f0282c00f945328cefd1f10dc"
+      }
     }
   ],
   "legacyOverrides": [

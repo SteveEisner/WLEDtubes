@@ -282,7 +282,7 @@ export function renderCpp(contract) {
     const partition = item.partition;
     const slots = [...(partition?.otaSlots || [])];
     while (slots.length < 2) slots.push({offset: 0, sizeBytes: 0});
-    const chip = item.chipFamily === 'ESP32' ? 1 : item.chipFamily === 'ESP32-S3' ? 3 : 0;
+    const chip = item.chipFamily === 'ESP32' ? 1 : item.chipFamily === 'ESP32-C3' ? 2 : item.chipFamily === 'ESP32-S3' ? 3 : 0;
     const mode = item.flashMode === 'dio' ? 1 : item.flashMode === 'qio' ? 2 : item.flashMode === 'opi' ? 3 : 0;
     const hash = partition?.sha256 || '0'.repeat(64);
     return `static constexpr CanonicalTargetRecord CANONICAL_TARGET_${item.id.replace(/[^A-Za-z0-9]/g, '_').toUpperCase()} = {\n  CanonicalTarget${cppName(item.id)}, ${chip}, ${mode}, ${item.flashSizeBytes}U, ${partition?.otaSlots?.length || 0},\n  {${slots.map(slot => `{${slot.offset}U, ${slot.sizeBytes}U}`).join(', ')}}, true,\n  {${hashBytes(hash)}}\n};`;
