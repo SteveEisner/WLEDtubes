@@ -38,6 +38,13 @@ palette selection, fades, effect/transient overlays, node election/following,
 and command routing retain their legacy semantics. It must not claim conductor
 authority or drive LED buses.
 
+The S3 Conductor surface is an independent local instrument. Incoming options,
+state, actions, and beat declarations do not replace its virtual-strip state;
+device-report probes remain observable. Previous and Next use the normal Tubes
+pattern loader for native and WLED-backed patterns. Follower and Master are
+volatile labels for whether this S3 publishes its local state: they do not write
+the persisted controller role, schedule a reboot, or unlock other authority.
+
 Current/next state is predictive continuity, not a queue to simplify or collapse. Fades, palettes, and transients retain their existing ordering and timing. Node and conductor behavior remains the existing mesh model: a conductor is a high-role node, not a separate protocol authority.
 
 ## Stack and fleet limits

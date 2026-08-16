@@ -34,6 +34,41 @@ test('S3 field shell is local and keeps Updater read-only', () => {
   assert.match(report, /TubeHardwareWaveshareS3 = 6/);
 });
 
+test('S3 Conductor is a local instrument with independent navigation and broadcast control', () => {
+  const source = read('usermods/WaveshareS3CompileCanary/WaveshareS3CompileCanary.cpp');
+  assert.match(source, /Previous/);
+  assert.match(source, /Next/);
+  assert.match(source, /Follower/);
+  assert.match(source, /Master/);
+  assert.match(source, /tubesS3ForcePrevious\(\)/);
+  assert.match(source, /tubesS3ForceNext\(\)/);
+  assert.match(source, /tubesS3SetBroadcastEnabled/);
+
+  const tubes = read('usermods/Tubes/Tubes.h');
+  assert.match(tubes, /bool s3ForcePrevious\(\)/);
+  assert.match(tubes, /bool s3ForceNext\(\)/);
+  assert.match(tubes, /setS3BroadcastEnabled/);
+
+  const controller = read('usermods/Tubes/controller.h');
+  const options = controller.match(/case COMMAND_OPTIONS:([\s\S]*?)case COMMAND_STATE:/)[1];
+  const state = controller.match(/case COMMAND_STATE:([\s\S]*?)case COMMAND_UPGRADE:/)[1];
+  const action = controller.match(/case COMMAND_ACTION:([\s\S]*?)case COMMAND_BEATS:/)[1];
+  const beats = controller.match(/case COMMAND_BEATS:([\s\S]*?)\n    }/)[1];
+  for (const guarded of [options, state, action, beats]) {
+    assert.match(guarded, /#ifdef TUBES_READ_ONLY_FIELD_SHELL[\s\S]*return true/);
+  }
+  assert.match(action, /DEVICE_REPORT_ACTION_KEY/);
+  assert.match(controller, /void force_previous_pattern\(\)/);
+  assert.match(controller, /force_next_pattern\(\)[\s\S]*load_pattern\(selected\)/);
+  assert.match(controller, /force_previous_pattern\(\)[\s\S]*load_pattern\(selected\)/);
+  assert.match(controller, /void setS3BroadcastEnabled\(bool enabled\)/);
+  assert.match(controller, /void broadcast_state\(\)[\s\S]*TUBES_READ_ONLY_FIELD_SHELL[\s\S]*s3BroadcastEnabled/);
+  assert.doesNotMatch(source, /setRole\(|RoleOperation|MasterRole/);
+  const contract = read('usermods/Tubes/docs/S3_CONDUCTOR_CONTRACT.md');
+  assert.match(contract, /independent local instrument/);
+  assert.match(contract, /do not write[\s\S]*persisted controller role/);
+});
+
 test('S3 I2C probing has one owner and preview repaint is dirty-cell bounded', () => {
   const source = read('usermods/WaveshareS3CompileCanary/WaveshareS3CompileCanary.cpp');
   assert.equal((source.match(/Wire\.begin\(/g) || []).length, 1);

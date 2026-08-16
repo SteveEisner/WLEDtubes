@@ -153,6 +153,27 @@ class TubesUsermod : public Usermod {
       controller.copyReadOnlySnapshot(snapshot);
     }
 
+#ifdef TUBES_READ_ONLY_FIELD_SHELL
+    bool s3ForcePrevious() {
+      controller.force_previous_pattern();
+      return true;
+    }
+
+    bool s3ForceNext() {
+      controller.force_next_pattern();
+      return true;
+    }
+
+    bool setS3BroadcastEnabled(bool enabled) {
+      controller.setS3BroadcastEnabled(enabled);
+      return true;
+    }
+
+    bool isS3BroadcastEnabled() const {
+      return controller.isS3BroadcastEnabled();
+    }
+#endif
+
     void setup() {
       randomize();
 

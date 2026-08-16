@@ -48,6 +48,21 @@ test('S3 authority mutation is denied at the shared controller boundary', () => 
 	assert.doesNotMatch(shell, /Update\.begin|Update\.write|esp_ota_begin|ESP\.restart/);
 });
 
+test('S3 local-instrument guards remain target-scoped', () => {
+	const controller = read('usermods/Tubes/controller.h');
+	const incoming = controller.match(/virtual bool onCommand\(CommandId command, void \*data\) override([\s\S]*?)\n  void onAction/);
+	assert.ok(incoming, 'could not isolate incoming command handler');
+	assert.match(incoming[1], /#ifdef TUBES_READ_ONLY_FIELD_SHELL/);
+	assert.match(incoming[1], /case COMMAND_STATE:[\s\S]*TUBES_READ_ONLY_FIELD_SHELL[\s\S]*return true/);
+	assert.match(incoming[1], /case COMMAND_BEATS:[\s\S]*TUBES_READ_ONLY_FIELD_SHELL[\s\S]*return true/);
+
+	const ini = read('platformio_tubes.ini');
+	const s3 = environment(ini, 'waveshare_s3_tubes_remote');
+	const dig2go = environment(ini, 'esp32_quinled_dig2go_tubes');
+	assert.match(s3, /TUBES_READ_ONLY_FIELD_SHELL/);
+	assert.doesNotMatch(dig2go, /TUBES_READ_ONLY_FIELD_SHELL/);
+});
+
 test('legacy packet IDs, action layout, and operation bindings remain unchanged', () => {
 	const state = read('usermods/Tubes/global_state.h');
 	for (const [name, value] of Object.entries({

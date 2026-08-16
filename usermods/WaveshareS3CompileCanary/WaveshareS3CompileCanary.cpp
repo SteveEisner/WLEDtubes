@@ -37,6 +37,7 @@ constexpr int16_t DISPLAY_WIDTH = 480;
 constexpr int16_t DISPLAY_HEIGHT = 480;
 constexpr uint16_t PREVIEW_PIXELS = 60;
 constexpr uint16_t PREVIEW_REFRESH_MS = 100;
+constexpr uint16_t TOUCH_ACTION_DEBOUNCE_MS = 300;
 
 enum class FieldScreen : uint8_t { Home, Conductor, Surveyor, Updater };
 
@@ -75,6 +76,7 @@ class WaveshareS3TubesPrototype : public Usermod {
     bool displayReady = false;
     bool touchReady = false;
     uint32_t lastPreviewMs = 0;
+    uint32_t lastTouchActionMs = 0;
     int16_t lastTouchX = -1;
     int16_t lastTouchY = -1;
     FieldScreen screen = FieldScreen::Home;
@@ -94,6 +96,23 @@ class WaveshareS3TubesPrototype : public Usermod {
       if (compatibility == TubeCompatibilityCurrent) return F("Current");
       if (compatibility == TubeCompatibilityNext) return F("Next");
       return F("Unknown");
+    }
+
+    void drawConductorButton(int16_t x, int16_t y, int16_t width, const __FlashStringHelper* label, bool active = false) {
+      display.fillRoundRect(x, y, width, 36, 6, active ? RGB565_CYAN : RGB565_DARKGREY);
+      display.setTextColor(active ? RGB565_BLACK : RGB565_WHITE);
+      display.setTextSize(1);
+      display.setCursor(x + 12, y + 13);
+      display.print(label);
+    }
+
+    void drawConductorControls() {
+      const bool broadcasting = tubesS3BroadcastEnabled();
+      drawConductorButton(24, 342, 208, F("Follower"), !broadcasting);
+      drawConductorButton(248, 342, 208, F("Master"), broadcasting);
+      drawConductorButton(24, 394, 208, F("Previous"));
+      drawConductorButton(248, 394, 208, F("Next"));
+      display.setTextColor(RGB565_WHITE);
     }
 
     void drawNavigation() {
@@ -128,7 +147,9 @@ class WaveshareS3TubesPrototype : public Usermod {
           imuPresent ? "observed" : "not found", WiFi.status() == WL_CONNECTED ? "connected" : "idle",
           static_cast<unsigned>(WiFi.channel()));
       } else if (screen == FieldScreen::Conductor) {
-        display.print(F("Local control shell\n\nAuthority changes disabled.\nThe 60-pixel virtual strip\ncontinues rendering below."));
+        display.setTextSize(1);
+        display.print(F("Local virtual strip; incoming mesh control is ignored."));
+        drawConductorControls();
       } else if (screen == FieldScreen::Surveyor) {
         TubesReadOnlySnapshot snapshot;
         const bool snapshotReady = tubesCopyReadOnlySnapshot(snapshot);
@@ -192,6 +213,8 @@ class WaveshareS3TubesPrototype : public Usermod {
 
       lastTouchX = x[0];
       lastTouchY = y[0];
+      const uint32_t now = millis();
+      if (now - lastTouchActionMs < TOUCH_ACTION_DEBOUNCE_MS) return;
       if (lastTouchY < 72) {
         if (lastTouchX < 105) screen = FieldScreen::Home;
         else if (lastTouchX < 245) screen = FieldScreen::Conductor;
@@ -199,6 +222,17 @@ class WaveshareS3TubesPrototype : public Usermod {
         else screen = FieldScreen::Updater;
         previewInvalid = true;
         drawFieldScreen();
+        lastTouchActionMs = now;
+      } else if (screen == FieldScreen::Conductor && lastTouchY >= 342 && lastTouchY < 378) {
+        tubesS3SetBroadcastEnabled(lastTouchX >= 240);
+        drawConductorControls();
+        lastTouchActionMs = now;
+      } else if (screen == FieldScreen::Conductor && lastTouchY >= 394 && lastTouchY < 440) {
+        if (lastTouchX < 240) tubesS3ForcePrevious();
+        else tubesS3ForceNext();
+        previewInvalid = true;
+        drawPreview();
+        lastTouchActionMs = now;
       }
     }
 

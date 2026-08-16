@@ -58,6 +58,14 @@ struct TubesReadOnlySnapshot {
 // Board adapters consume a copy rather than reaching into the Tubes controller.
 bool tubesCopyReadOnlySnapshot(TubesReadOnlySnapshot& snapshot);
 
+#ifdef TUBES_READ_ONLY_FIELD_SHELL
+// Local S3 instrument controls do not grant role or updater authority.
+bool tubesS3ForcePrevious();
+bool tubesS3ForceNext();
+bool tubesS3SetBroadcastEnabled(bool enabled);
+bool tubesS3BroadcastEnabled();
+#endif
+
 #ifndef TUBES_HARDWARE_FAMILY
 #define TUBES_HARDWARE_FAMILY TubeHardwareUnknown
 #endif

@@ -235,6 +235,9 @@ class PatternController : public MessageReceiver {
     ControllerRole role;
     bool power_save = false;  // Default to power save mode OFF but 3 sec press turns it on
     uint8_t flashColor = 0;
+#ifdef TUBES_READ_ONLY_FIELD_SHELL
+    bool s3BroadcastEnabled = false;
+#endif
 
     AutoUpdater updater = AutoUpdater();
     Sounder sound = Sounder();
@@ -308,6 +311,16 @@ class PatternController : public MessageReceiver {
   bool isHomeLightRole() const {
     return role == HomeLightRole;
   }
+
+#ifdef TUBES_READ_ONLY_FIELD_SHELL
+  void setS3BroadcastEnabled(bool enabled) {
+    s3BroadcastEnabled = enabled;
+  }
+
+  bool isS3BroadcastEnabled() const {
+    return s3BroadcastEnabled;
+  }
+#endif
 
   bool shouldRenderTubes() const {
 #ifdef HOMELIGHT
@@ -1607,6 +1620,9 @@ class PatternController : public MessageReceiver {
   }
 
   void broadcast_state() {
+#ifdef TUBES_READ_ONLY_FIELD_SHELL
+    if (!s3BroadcastEnabled) return;
+#endif
     // Publishing this device's state would reveal the new BPM before its phrase boundary.
     if (deferredBpmBroadcast.active())
       return;
@@ -1727,6 +1743,10 @@ class PatternController : public MessageReceiver {
         return true;
 
       case COMMAND_OPTIONS:
+#ifdef TUBES_READ_ONLY_FIELD_SHELL
+        // Remote options must not alter the self-running local instrument.
+        return true;
+#else
         memcpy(&options, data, sizeof(options));
         load_options(options);
         Serial.printf("[debug=%d  bri=%d]",
@@ -1734,8 +1754,14 @@ class PatternController : public MessageReceiver {
           options.brightness
         );
         return true;
+#endif
 
       case COMMAND_STATE: {
+#ifdef TUBES_READ_ONLY_FIELD_SHELL
+        // The node layer may observe this packet, but it never replaces the
+        // S3's independently rendered virtual strip.
+        return true;
+#else
         auto update_data = (TubeStates*)data;
 
         TubeState state;
@@ -1753,6 +1779,7 @@ class PatternController : public MessageReceiver {
         if (!deferredBpmBroadcast.active())
           beats.sync(state.bpm, state.beat_frame);
         return true;
+#endif
       }
 
       case COMMAND_UPGRADE:
@@ -1769,15 +1796,24 @@ class PatternController : public MessageReceiver {
       case COMMAND_ACTION:
         if (((Action*)data)->key == DEVICE_REPORT_ACTION_KEY)
           onDeviceReportMessage(*(DeviceReportMessage*)data);
+#ifdef TUBES_READ_ONLY_FIELD_SHELL
+        else
+          return true;
+#else
         else
           onAction((Action*)data);
+#endif
         return true;
 
       case COMMAND_BEATS:
+#ifdef TUBES_READ_ONLY_FIELD_SHELL
+        return true;
+#else
         // A declared BPM supersedes any local change that has not reached its boundary.
         deferredBpmBroadcast.cancel();
         apply_bpm(*(accum88*)data);
         return true;
+#endif
     }
 
     Serial.printf("UNKNOWN COMMAND %02X", command);
@@ -1806,11 +1842,32 @@ class PatternController : public MessageReceiver {
 #define WIZMOTE_BUTTON_BRIGHT_DOWN 8
 
   void force_next_pattern() {
+#ifdef TUBES_READ_ONLY_FIELD_SHELL
+    const uint8_t id = static_cast<uint8_t>((current_state.pattern_id + 1) % gPatternCount);
+    TubeState selected = current_state;
+    selected.pattern_id = id;
+    load_pattern(selected);
+    next_state.pattern_id = id;
+    broadcast_state();
+#else
     next_state.pattern_phrase = current_state.beat_frame >> 12;
     if (next_state.palette_phrase == next_state.pattern_phrase)
       next_state.palette_phrase += random8(0, 5);
     force_next();
+#endif
   }
+
+#ifdef TUBES_READ_ONLY_FIELD_SHELL
+  // Moves the local virtual-strip instrument immediately without changing roles.
+  void force_previous_pattern() {
+    const uint8_t id = current_state.pattern_id == 0 ? gPatternCount - 1 : current_state.pattern_id - 1;
+    TubeState selected = current_state;
+    selected.pattern_id = id;
+    load_pattern(selected);
+    next_state.pattern_id = id;
+    broadcast_state();
+  }
+#endif
 
   void force_next_effect() {
     next_state.effect_phrase = current_state.beat_frame >> 12;
