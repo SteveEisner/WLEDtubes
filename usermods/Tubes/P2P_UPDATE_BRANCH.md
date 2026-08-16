@@ -209,6 +209,28 @@ When Steve's split palette/tempo/pattern/spatial/capability packets land:
 - no autonomous update broadcast by every newly updated device;
 - no physical writes without Greg's explicit authorization.
 
+## Two-stage migration boundary
+
+Legacy force migration remains the laptop-assisted `COMMAND_UPGRADE` broadcast
+workflow documented in `REMOTE_UPGRADE.md`. It is intentionally not modeled as
+an exact-target peer transfer: the laptop drains each selected update AP,
+performs the HTTP upload, and verifies only devices for which it obtains
+positive evidence. Missing devices remain unknown.
+
+`FirmwarePropagationBaton` is the post-migration, non-wire state seam. It fixes
+the approved artifact, admits one targetable receiver with a nonzero session
+nonce, expires after 60 idle seconds, permits one retry from byte zero, and
+hands off only after an opaque completion proof for that exact session and
+artifact. `FirmwareUpdatedBootLatch` models the durable artifact-bound one-shot
+marker that the eventual receiver integration must persist before reboot.
+
+The live integration remains blocked on Steve's canonical targetable update
+message and route semantics. Canonical `main` has only the mesh-wide legacy
+`COMMAND_UPGRADE` offer plus the additive report sidecar; neither authorizes an
+update request/response/action ID. Until that contract lands, the baton is not
+called from firmware, the boot marker is not persisted, and no peer receiver
+write or automatic propagation is enabled.
+
 ## First implementation sequence
 
 1. Freeze a hardware-target/update-manifest contract around existing v14 metadata.

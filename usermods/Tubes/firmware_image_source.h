@@ -65,6 +65,16 @@ inline bool firmwareArtifactMatchesCanonical(const FirmwareImageArtifact& artifa
           sizeof(artifact.imageSha256)) == 0;
 }
 
+inline bool firmwareArtifactsHaveSameIdentity(
+    const FirmwareImageArtifact& left,
+    const FirmwareImageArtifact& right
+) {
+  return left.artifactId == right.artifactId
+      && left.imageLengthBytes == right.imageLengthBytes
+      && left.releaseHash == right.releaseHash
+      && memcmp(left.imageSha256, right.imageSha256, sizeof(left.imageSha256)) == 0;
+}
+
 inline bool firmwareImageRangeIsValid(size_t imageLength, size_t offset, size_t length) {
   return imageLength > 0
       && length > 0

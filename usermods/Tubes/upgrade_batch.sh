@@ -14,6 +14,7 @@ mesh_settle_delay="${TUBES_MESH_SETTLE_DELAY:-30}"
 max_rounds="${TUBES_BATCH_ROUNDS:-5}"
 wifi_device="${TUBES_WIFI_DEVICE:-}"
 fleet_hardware_set="${TUBES_FLEET_HARDWARE_SET:-}"
+batch_profiles="${TUBES_BATCH_PROFILES:-dig2go,christmas,golden,athom-c3}"
 serial_device=""
 batch_dir=""
 expected_tubes_version=""
@@ -54,6 +55,7 @@ validate_batch_images() {
   local candidate_profile image_identity image_release
   device_arch="esp32"
   for candidate_profile in dig2go christmas golden athom-c3; do
+    profile_is_enabled "$candidate_profile" || continue
     select_profile "$candidate_profile"
     [[ -s "$firmware_dir/$profile_firmware" ]] \
       || fail "firmware image not found: $firmware_dir/$profile_firmware"
@@ -62,6 +64,10 @@ validate_batch_images() {
     [[ "$image_release" == "$profile_release" ]] \
       || fail "firmware release '$image_release' does not match '$profile_release'"
   done
+}
+
+profile_is_enabled() {
+  [[ ",$batch_profiles," == *",$1,"* ]]
 }
 
 connect_to_next_device() {
@@ -201,6 +207,14 @@ process_connected_device() {
   local selected_variant="$profile_variant"
   local selected_release="$profile_release"
   local selected_led_count
+  if ! profile_is_enabled "$selected_profile"; then
+    archive_observation "skipped-profile-outside-batch"
+    touch "$batch_dir/$selected_mac/completed"
+    skipped_count=$((skipped_count + 1))
+    echo "SKIPPED mac=$selected_mac: profile $selected_profile is outside this batch."
+    dismiss_selected_device
+    return 0
+  fi
   echo "Selected $selected_mac as $profile_name via $profile_source."
 
   if [[ "$batch_phase" == "canary" ]]; then

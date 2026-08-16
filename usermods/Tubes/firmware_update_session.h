@@ -33,6 +33,26 @@ struct FirmwareUpdateHealthProof {
   bool stable = false;
 };
 
+// Typed, artifact-bound evidence emitted only after this session reaches its
+// terminal healthy state. Consumers still validate every field fail closed.
+class FirmwareUpdateCompletionProof {
+public:
+  FirmwareUpdateCompletionProof() = default;
+  bool isComplete() const { return _complete; }
+  bool targetIs(const uint8_t mac[6]) const {
+    return mac && memcmp(mac, _targetMac, sizeof(_targetMac)) == 0;
+  }
+  const FirmwareImageArtifact& artifact() const { return _artifact; }
+  uint32_t sessionNonce() const { return _sessionNonce; }
+
+private:
+  friend class FirmwareUpdateSession;
+  uint8_t _targetMac[6] = {0};
+  FirmwareImageArtifact _artifact;
+  uint32_t _sessionNonce = 0;
+  bool _complete = false;
+};
+
 // Coordinates one sender, one exact target, and one immutable application
 // artifact. This is an internal state machine only: it deliberately defines no
 // packet layout and never enables autonomous forwarding.
@@ -45,7 +65,8 @@ public:
       const FirmwareTargetContract& receiverTarget,
       const FirmwareUpdateDestination& destination,
       uint32_t now,
-      uint32_t leaseDuration
+      uint32_t leaseDuration,
+      uint32_t sessionNonce = 0
   ) {
     if (_state != FirmwareUpdateIdle
         || !macIsKnown(senderMac)
@@ -66,6 +87,7 @@ public:
     memcpy(_targetMac, targetMac, sizeof(_targetMac));
     _artifact = artifact;
     _leaseDeadline = now + leaseDuration;
+    _sessionNonce = sessionNonce;
     _transferredBytes = 0;
     _failure = FirmwareUpdateNoFailure;
     _state = FirmwareUpdateTargetSelected;
@@ -139,6 +161,7 @@ public:
     memset(_targetMac, 0, sizeof(_targetMac));
     _artifact = FirmwareImageArtifact();
     _leaseDeadline = 0;
+    _sessionNonce = 0;
     _transferredBytes = 0;
     _failure = FirmwareUpdateNoFailure;
     _state = FirmwareUpdateIdle;
@@ -148,6 +171,18 @@ public:
   FirmwareUpdateFailure failure() const { return _failure; }
   size_t transferredBytes() const { return _transferredBytes; }
   bool batonReady() const { return _state == FirmwareUpdateComplete; }
+  bool completedTargetIs(const uint8_t targetMac[6]) const {
+    return batonReady() && isTarget(targetMac);
+  }
+  bool completionProof(FirmwareUpdateCompletionProof& proof) const {
+    proof = FirmwareUpdateCompletionProof();
+    if (!batonReady() || _sessionNonce == 0) return false;
+    memcpy(proof._targetMac, _targetMac, sizeof(proof._targetMac));
+    proof._artifact = _artifact;
+    proof._sessionNonce = _sessionNonce;
+    proof._complete = true;
+    return true;
+  }
   bool forwardingEnabled() const { return false; }
 
 private:
@@ -185,6 +220,7 @@ private:
   uint8_t _targetMac[6] = {0};
   FirmwareImageArtifact _artifact;
   uint32_t _leaseDeadline = 0;
+  uint32_t _sessionNonce = 0;
   size_t _transferredBytes = 0;
   FirmwareUpdateFailure _failure = FirmwareUpdateNoFailure;
   FirmwareUpdateState _state = FirmwareUpdateIdle;
