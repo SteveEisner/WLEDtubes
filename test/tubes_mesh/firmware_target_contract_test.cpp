@@ -136,6 +136,34 @@ void athom_c3_uses_exact_compiled_target_and_artifact() {
       == FirmwareTargetHardwareMismatch, "Dig2Go artifact crossed into Athom C3");
 }
 
+void waveshare_s3_artifact_preserves_runtime_boundary() {
+  const FirmwareTargetContract staticTarget = firmwareStaticTargetFromCanonical(
+      CANONICAL_TARGET_WAVESHARE_S3_TUBES_REMOTE, TubeHardwareUnknown);
+  expect(staticTarget.targetId == CanonicalTargetWaveshareS3TubesRemote,
+      "Waveshare target lost exact target ID");
+  expect(staticTarget.chipFamily == FirmwareChipEsp32S3,
+      "Waveshare target lost S3 chip identity");
+  expect(staticTarget.flashMode == FirmwareFlashModeQio,
+      "Waveshare target lost QIO flash mode");
+  expect(staticTarget.flashSizeBytes == 16777216U,
+      "Waveshare target lost 16 MB flash size");
+  expect(staticTarget.otaSlots[0].offset == 65536U
+      && staticTarget.otaSlots[0].sizeBytes == 6291456U,
+      "Waveshare target lost first OTA geometry");
+  expect(staticTarget.otaSlots[1].offset == 6356992U
+      && staticTarget.otaSlots[1].sizeBytes == 6291456U,
+      "Waveshare target lost second OTA geometry");
+  const FirmwareImageArtifact artifact = firmwareArtifactFromCanonical(
+      CANONICAL_ARTIFACT_WAVESHARE_S3_V14_OTA_APPLICATION, staticTarget);
+  expect(firmwareArtifactMatchesCanonical(artifact),
+      "Waveshare OTA artifact was not canonical");
+  FirmwareTargetContract receiver;
+  expect(!firmwareReceiverTargetFromStatic(staticTarget, 1, receiver),
+      "target-only build invented receiver runtime hardware evidence");
+  expect(matchFirmwareArtifactTarget(staticTarget, receiver) == FirmwareTargetUnknown,
+      "missing Waveshare runtime evidence did not fail closed");
+}
+
 void inactive_slot_is_explicit_and_bounded() {
   const FirmwareTargetContract staticTarget = firmwareStaticTargetFromCanonical(
       CANONICAL_TARGET_QUINLED_DIG2GO, TubeHardwareDig2Go);
@@ -157,13 +185,14 @@ void inactive_slot_is_explicit_and_bounded() {
 } // namespace
 
 int main() {
-  const std::array<std::pair<const char*, void (*)()>, 7> tests = {{
+  const std::array<std::pair<const char*, void (*)()>, 8> tests = {{
     {"static target is receiver incomplete", static_target_is_receiver_incomplete},
     {"exact target is admitted", exact_target_is_admitted},
     {"unknown target fails closed", unknown_target_fails_closed},
     {"every hardware dimension must match", every_hardware_dimension_must_match},
     {"generated targets preserve cross-target rejection", generated_targets_preserve_cross_target_rejection},
     {"Athom C3 exact target and artifact", athom_c3_uses_exact_compiled_target_and_artifact},
+    {"Waveshare S3 artifact and runtime boundary", waveshare_s3_artifact_preserves_runtime_boundary},
     {"inactive slot is explicit and bounded", inactive_slot_is_explicit_and_bounded},
   }};
 

@@ -52,6 +52,10 @@ inline const CanonicalArtifactRecord* canonicalArtifactById(CanonicalArtifactId 
       return &CANONICAL_ARTIFACT_ATHOM_C3_V14_USB_MERGED;
     case CanonicalArtifactAthomC3V14OtaApplication:
       return &CANONICAL_ARTIFACT_ATHOM_C3_V14_OTA_APPLICATION;
+    case CanonicalArtifactWaveshareS3V14UsbMerged:
+      return &CANONICAL_ARTIFACT_WAVESHARE_S3_V14_USB_MERGED;
+    case CanonicalArtifactWaveshareS3V14OtaApplication:
+      return &CANONICAL_ARTIFACT_WAVESHARE_S3_V14_OTA_APPLICATION;
     default:
       return nullptr;
   }

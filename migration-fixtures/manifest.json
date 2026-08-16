@@ -139,6 +139,26 @@
         "sizeBytes": 1198128,
         "sha256": "ba953abd7f4131f5a9bc1ffed6c999a878f9070f0282c00f945328cefd1f10dc"
       }
+    },
+    {
+      "id": "tubes-v14-waveshare-s3-target",
+      "lineage": "tubes",
+      "major": 14,
+      "version": "14",
+      "source": {
+        "repository": "SteveEisner/WLEDtubes",
+        "baseCommit": "02abdd5d",
+        "buildSourceState": "base commit plus commit 3 S3 target-only contract projection",
+        "environment": "waveshare_s3_tubes_target",
+        "releaseIdentity": "WAVESHARE_S3_TUBES_TARGET"
+      },
+      "hardwareEvidence": "exact-waveshare-s3-compiled-target-contract",
+      "installPolicy": "migration-destination",
+      "artifact": {
+        "path": "migration-fixtures/firmware/tubes-v14/tubes-v14-waveshare-s3-target.bin",
+        "sizeBytes": 1219728,
+        "sha256": "4a061ad84b95e1a5a5cde951748a2b4c0f358255a5ebe813f9c3d6d9fdea706e"
+      }
     }
   ],
   "legacyOverrides": [

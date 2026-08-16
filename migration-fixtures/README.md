@@ -8,10 +8,12 @@ This directory pins firmware inputs and behavior fixtures used to test migration
   release assets from `intermittech/QuinLED-Firmware`, built from the matching
   upstream `wled/WLED` release.
 - Tubes v13 is a reconstructed Dig2Go build from source commit `69f1bd8b` using the earliest recoverable Dig2Go Tubes build configuration at `9e7d3c70`.
-- Tubes v14 includes canonical Dig2Go and exact compiled Athom ESP32-C3 OTA
-  artifacts used as migration destinations. The Athom profile is the existing
-  Steve-main `esp32-c3-athom_tubes` target (LED GPIO 10, button GPIO 9); it is
-  not a generic ESP32-C3 image.
+- Tubes v14 includes canonical Dig2Go, exact compiled Athom ESP32-C3, and exact
+  compiled Waveshare ESP32-S3 OTA artifacts used as migration destinations.
+  The Athom profile is the existing Steve-main `esp32-c3-athom_tubes` target
+  (LED GPIO 10, button GPIO 9); it is not a generic ESP32-C3 image.
+  The Waveshare artifact is target-only; display, touch, Home, Conductor,
+  Surveyor, and other product behavior remain independent work.
 
 The stock binaries are **source fixtures only** even though they carry exact
 published Dig2Go build defaults. They model devices being migrated into Tubes;

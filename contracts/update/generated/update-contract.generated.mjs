@@ -120,6 +120,66 @@ export const updateContract = Object.freeze({
       "tubesRelease": "14",
       "wledBaseVersion": "16.0.1",
       "writeOffset": 0
+    },
+    {
+      "buildCommit": "02abdd5d",
+      "buildOffset": 65536,
+      "buildSourceState": "commit 02abdd5d plus this commit's S3 target-only contract projection",
+      "cppValue": 6,
+      "id": "waveshare-s3-v14-ota-application",
+      "kind": "application-image",
+      "lengthBytes": 1219248,
+      "path": "contracts/update/artifacts/waveshare-s3-v14/ota/firmware.bin",
+      "releaseClass": "Current",
+      "releaseIdentity": "WAVESHARE_S3_TUBES_TARGET",
+      "sha256": "4a061ad84b95e1a5a5cde951748a2b4c0f358255a5ebe813f9c3d6d9fdea706e",
+      "targetId": "waveshare-s3-tubes-remote",
+      "transport": "ota",
+      "tubesRelease": "14",
+      "wledBaseVersion": "16.0.1"
+    },
+    {
+      "buildCommit": "02abdd5d",
+      "buildSourceState": "commit 02abdd5d plus this commit's S3 target-only contract projection",
+      "components": [
+        {
+          "id": "bootloader",
+          "lengthBytes": 13792,
+          "offset": 0,
+          "sha256": "ffbbe2db78e8b5ff04ec1bfba9684acb7707c8fbbac4e8cbddabd4a881bbbfc0"
+        },
+        {
+          "id": "partitions",
+          "lengthBytes": 3072,
+          "offset": 32768,
+          "sha256": "bd52d72f689f42be90a1c1a229f35071684b92453ee9a5c9640daf39087b07d0"
+        },
+        {
+          "id": "boot-app0",
+          "lengthBytes": 8192,
+          "offset": 57344,
+          "sha256": "f94c5d786a7a8fab06ac5d10e33bf37711a6697636dc037559ea19cc410a17f0"
+        },
+        {
+          "id": "application",
+          "lengthBytes": 1219728,
+          "offset": 65536,
+          "sha256": "247c26185d61d75e372dc3cf91299f82f2749f85c5a4857ffbc2818a08d94ba2"
+        }
+      ],
+      "cppValue": 5,
+      "id": "waveshare-s3-v14-usb-merged",
+      "kind": "complete-merged-image",
+      "lengthBytes": 1285264,
+      "path": "contracts/update/artifacts/waveshare-s3-v14/usb/merged.bin",
+      "releaseClass": "Current",
+      "releaseIdentity": "WAVESHARE_S3_TUBES_TARGET",
+      "sha256": "60cf631bd048c2dd6fda74fa583c2ecc3da3654a0ac2a381e51d7f4e208f3b62",
+      "targetId": "waveshare-s3-tubes-remote",
+      "transport": "usb",
+      "tubesRelease": "14",
+      "wledBaseVersion": "16.0.1",
+      "writeOffset": 0
     }
   ],
   "receiptVocabulary": {
@@ -240,6 +300,10 @@ export const updateContract = Object.freeze({
     {
       "board": "esp32-s3-devkitc-1",
       "chipFamily": "ESP32-S3",
+      "compiledProfile": {
+        "environment": "waveshare_s3_tubes_target",
+        "releaseIdentity": "WAVESHARE_S3_TUBES_TARGET"
+      },
       "cppValue": 2,
       "flashMode": "qio",
       "flashSizeBytes": 16777216,

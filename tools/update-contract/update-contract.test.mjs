@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
@@ -51,6 +52,54 @@ test('Athom C3 target preserves Steve main exact compiled hardware contract', ()
   assert.ok(artifacts.every(item => item.lengthBytes <= target.flashSizeBytes));
   const header = fs.readFileSync(cppOutputPath, 'utf8');
   assert.match(header, /CANONICAL_TARGET_ATHOM_C3_TUBES[\s\S]*CanonicalTargetAthomC3Tubes, 2, 1,/);
+});
+
+test('Waveshare S3 target is a flash-only compiled hardware contract', () => {
+  const contract = loadContract();
+  const target = contract.targets.find(item => item.id === 'waveshare-s3-tubes-remote');
+  assert.ok(target);
+  assert.deepEqual(target.compiledProfile, {
+    environment: 'waveshare_s3_tubes_target',
+    releaseIdentity: 'WAVESHARE_S3_TUBES_TARGET'
+  });
+  assert.equal(target.chipFamily, 'ESP32-S3');
+  assert.equal(target.board, 'esp32-s3-devkitc-1');
+  assert.equal(target.flashMode, 'qio');
+  assert.equal(target.flashSizeBytes, 16777216);
+  assert.deepEqual(target.partition.otaSlots, [
+    {id: 'ota_0', offset: 65536, sizeBytes: 6291456},
+    {id: 'ota_1', offset: 6356992, sizeBytes: 6291456}
+  ]);
+
+  const artifacts = contract.artifacts.filter(item => item.targetId === target.id);
+  assert.deepEqual(artifacts.map(item => item.transport).sort(), ['ota', 'usb']);
+  assert.ok(artifacts.every(item => item.releaseIdentity === target.compiledProfile.releaseIdentity));
+  assert.ok(artifacts.every(item => item.lengthBytes <= target.flashSizeBytes));
+  assert.ok(artifacts.find(item => item.transport === 'ota').lengthBytes <= target.partition.otaSlots[0].sizeBytes);
+  const header = fs.readFileSync(cppOutputPath, 'utf8');
+  assert.match(header, /CANONICAL_TARGET_WAVESHARE_S3_TUBES_REMOTE[\s\S]*CanonicalTargetWaveshareS3TubesRemote, 3, 2,/);
+});
+
+test('Waveshare S3 effective build preserves exact flash and USB identity', () => {
+  const output = execFileSync('pio', ['project', 'config', '--json-output'], {
+    cwd: root,
+    encoding: 'utf8',
+    env: {...process.env, PLATFORMIO_PROJECT_CONFIG: 'platformio_tubes.ini'}
+  });
+  const sections = new Map(JSON.parse(output).map(([name, options]) => [name, Object.fromEntries(options)]));
+  const environment = sections.get('env:waveshare_s3_tubes_target');
+  assert.ok(environment);
+  assert.equal(environment.board, 'esp32-s3-devkitc-1');
+  assert.equal(environment['board_build.flash_mode'], 'qio');
+  assert.equal(environment['board_upload.flash_size'], '16MB');
+  assert.equal(environment['board_upload.maximum_size'], '16777216');
+  assert.equal(environment['board_build.arduino.memory_type'], 'qio_opi');
+  assert.equal(environment['board_build.partitions'], 'contracts/update/partitions/WLED_ESP32S3_WAVESHARE_16MB.csv');
+  const flags = [].concat(environment.build_flags).join(' ');
+  assert.match(flags, /WLED_RELEASE_NAME=\\\"WAVESHARE_S3_TUBES_TARGET\\\"/);
+  assert.equal((flags.match(/ARDUINO_USB_CDC_ON_BOOT=1/g) || []).length, 1);
+  for (const excluded of ['WaveshareS3CompileCanary', 'TUBES_NULL_OUTPUT', 'TUBES_READ_ONLY_FIELD_SHELL'])
+    assert.doesNotMatch(flags + ' ' + environment.custom_usermods, new RegExp(excluded));
 });
 
 test('duplicate and unknown identities fail closed', () => {
