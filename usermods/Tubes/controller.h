@@ -74,6 +74,7 @@ typedef struct {
   char key;
   uint8_t arg;
 } Action;
+static_assert(sizeof(Action) == 2, "Action wire size changed");
 
 enum TubeScope : uint8_t {
   LocalScope = 0,
