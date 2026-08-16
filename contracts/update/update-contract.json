@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "releaseClasses": [
+    { "id": "Legacy", "cppValue": 1, "meaning": "Positively identified pre-v14 Tubes firmware." },
+    { "id": "Current", "cppValue": 2, "meaning": "Positively identified Tubes v14 on the WLED 16 generation." },
+    { "id": "Next", "cppValue": 3, "meaning": "Positively identified Tubes v15 through Steve's future additive identity contract." },
+    { "id": "Unknown", "cppValue": 0, "meaning": "Identity is missing, incomplete, conflicting, or silent; never infer Legacy." }
+  ],
+  "targets": [
+    {
+      "id": "quinled-dig2go",
+      "cppValue": 1,
+      "hardwareFamily": "quinled-dig2go",
+      "chipFamily": "ESP32",
+      "board": "QuinLED Dig2Go",
+      "flashMode": "dio",
+      "flashSizeBytes": 4194304,
+      "partition": {
+        "csvPath": "tools/WLED_ESP32_4MB_1MB_FS.csv",
+        "sha256": "d99fde46aaccb19761d16c2b1470f9b5c8293592eb05fade81cf47384a071f44",
+        "otaSlots": [
+          { "id": "ota_0", "offset": 65536, "sizeBytes": 1572864 },
+          { "id": "ota_1", "offset": 1638400, "sizeBytes": 1572864 }
+        ]
+      }
+    },
+    {
+      "id": "waveshare-s3-tubes-remote",
+      "cppValue": 2,
+      "hardwareFamily": "waveshare-s3-touch-amoled-2.16",
+      "chipFamily": "ESP32-S3",
+      "board": "esp32-s3-devkitc-1",
+      "flashMode": "qio",
+      "flashSizeBytes": 16777216,
+      "partition": {
+        "csvPath": "contracts/update/partitions/WLED_ESP32S3_WAVESHARE_16MB.csv",
+        "sha256": "afcd596b982397fc252d1fd869085d49e5fe28eea870d7fc7ad15deb8f353e46",
+        "otaSlots": [
+          { "id": "ota_0", "offset": 65536, "sizeBytes": 6291456 },
+          { "id": "ota_1", "offset": 6356992, "sizeBytes": 6291456 }
+        ]
+      },
+      "hardwareAcceptance": "unproven"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "dig2go-v14-usb-merged",
+      "cppValue": 1,
+      "targetId": "quinled-dig2go",
+      "releaseClass": "Current",
+      "tubesRelease": "14",
+      "wledBaseVersion": "16.0.1",
+      "releaseIdentity": "DIG2GO_TUBES",
+      "buildCommit": "c6522acef3e954b14aad30d6f687cdb99bd1624e",
+      "kind": "complete-merged-image",
+      "transport": "usb",
+      "path": "contracts/update/artifacts/dig2go-v14/usb/merged.bin",
+      "writeOffset": 0,
+      "lengthBytes": 1324928,
+      "sha256": "4608ebbe3fbaa8406214e85c5e116f35d06c46ad9e703d38a797e13dc0214b91",
+      "components": [
+        { "id": "bootloader", "offset": 4096, "lengthBytes": 15936, "sha256": "5b6c865321f53124d9ec9467b72daa0572b4387f725051f785771447d3dab095" },
+        { "id": "partitions", "offset": 32768, "lengthBytes": 3072, "sha256": "ab7a19ebb0ea19e684687802f2d8f199225a270c6b7dd72d73e8a8876f382e73" },
+        { "id": "boot-app0", "offset": 57344, "lengthBytes": 8192, "sha256": "f94c5d786a7a8fab06ac5d10e33bf37711a6697636dc037559ea19cc410a17f0" },
+        { "id": "application", "offset": 65536, "lengthBytes": 1259392, "sha256": "bf6dc2feedb1669361471e9cc2224b1b2b1ba0e15602e58258dfde4e41569f2d" }
+      ]
+    },
+    {
+      "id": "dig2go-v14-ota-application",
+      "cppValue": 2,
+      "targetId": "quinled-dig2go",
+      "releaseClass": "Current",
+      "tubesRelease": "14",
+      "wledBaseVersion": "16.0.1",
+      "releaseIdentity": "DIG2GO_TUBES",
+      "buildCommit": "c6522acef3e954b14aad30d6f687cdb99bd1624e",
+      "kind": "application-image",
+      "transport": "ota",
+      "path": "contracts/update/artifacts/dig2go-v14/ota/firmware.bin",
+      "buildOffset": 65536,
+      "lengthBytes": 1259392,
+      "sha256": "bf6dc2feedb1669361471e9cc2224b1b2b1ba0e15602e58258dfde4e41569f2d"
+    }
+  ],
+  "updateStates": [
+    { "id": "Idle", "cppValue": 0, "terminal": false },
+    { "id": "TargetSelected", "cppValue": 1, "terminal": false },
+    { "id": "Transferring", "cppValue": 2, "terminal": false },
+    { "id": "AwaitingHealth", "cppValue": 3, "terminal": false },
+    { "id": "Healthy", "cppValue": 4, "terminal": false },
+    { "id": "Complete", "cppValue": 5, "terminal": true },
+    { "id": "Failed", "cppValue": 6, "terminal": true }
+  ],
+  "receiptVocabulary": {
+    "schemaVersion": 1,
+    "fields": [
+      "sessionId", "adapter", "targetId", "artifactId", "releaseClass", "state",
+      "startedAt", "completedAt", "transferredBytes", "expectedSha256", "observedSha256",
+      "runtimeConfigurationPreserved", "meshRejoined", "stable", "failure"
+    ],
+    "adapters": ["easy-flash", "p2p", "s3"],
+    "healthValues": ["unproven", "booted-and-reported"],
+    "failureValues": ["lease-expired", "transfer-hash-mismatch", "health-mismatch"]
+  }
+}

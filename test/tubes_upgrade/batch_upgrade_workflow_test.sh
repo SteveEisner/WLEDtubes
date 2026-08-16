@@ -74,7 +74,7 @@ if [[ "$is_upload" == "true" ]]; then
   printf '%s' "$((device + 1))" > "$TUBES_FAKE_STATE/device"
   exit 0
 fi
-if (( device > 2 )); then
+if (( device > ${TUBES_FAKE_DEVICE_COUNT:-2} )); then
   exit 22
 fi
 case "$url" in
@@ -142,3 +142,35 @@ jq -s -e 'map(select(.mac == "111111111111" and .result == "skipped-ambiguous-id
   "$backup_dir"/batch-*/results.jsonl >/dev/null
 
 echo "PASS: unattended batch skips ambiguous identity and verifies enrolled devices"
+
+printf '1' > "$fake_state/device"
+: > "$fake_state/writes.log"
+jq '.info.mac = "333333333333" | .info.name = "Christmas Tube" | .info.release = "CHRISTMAS_TUBES"' \
+  "$test_dir/fixtures/dig2go_info.json" > "$fake_state/info-1.json"
+restricted_firmware_dir="$temporary_test_dir/restricted-firmware"
+restricted_backup_dir="$temporary_test_dir/restricted-backups"
+mkdir -p "$restricted_firmware_dir" "$restricted_backup_dir"
+printf 'canonical dig2go bytes' > "$restricted_firmware_dir/esp32_quinled_dig2go_tubes.bin"
+restricted_output="$temporary_test_dir/restricted.out"
+PATH="$fake_bin:$PATH" \
+TUBES_CURL_BIN="$fake_bin/curl" \
+TUBES_METADATA_READER="$temporary_test_dir/fake_metadata.py" \
+TUBES_MESH_REPORTER="$temporary_test_dir/fake_mesh_reporter.py" \
+TUBES_FIRMWARE_DIR="$restricted_firmware_dir" \
+TUBES_BACKUP_DIR="$restricted_backup_dir" \
+TUBES_DEVICE_INVENTORY="$restricted_backup_dir/device-inventory.json" \
+TUBES_BATCH_PROFILES="dig2go" \
+TUBES_WIFI_DEVICE="en1" \
+TUBES_BATCH_CONNECT_TIMEOUT=1 \
+TUBES_BATCH_ROUNDS=1 \
+TUBES_FAKE_DEVICE_COUNT=1 \
+TUBES_FAKE_STATE="$fake_state" \
+TUBES_FAKE_MESH_LOG="$fake_state/mesh.log" \
+  "$repo_dir/usermods/Tubes/upgrade_batch.sh" "$temporary_test_dir/usbserial" > "$restricted_output"
+
+grep -q 'SKIPPED mac=333333333333: profile christmas is outside this batch' "$restricted_output"
+grep -q 'BATCH_COMPLETE upgraded=0 migrated=0 skipped=1 failed=0' "$restricted_output"
+grep -qx 'dismiss 1' "$fake_state/writes.log"
+! grep -q '^upload ' "$fake_state/writes.log"
+
+echo "PASS: Dig2Go-only batch skips other profiles before upload"

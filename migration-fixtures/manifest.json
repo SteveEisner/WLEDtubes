@@ -1,0 +1,179 @@
+{
+  "schemaVersion": 1,
+  "target": {
+    "hardwareTargetId": "dig2go-classic-esp32-4mb-dio",
+    "destinationFixtureId": "tubes-v14-dig2go",
+    "configurationSchema": 2,
+    "ordering": [
+      "backup-configuration",
+      "normalize-explicit-led-bus-if-required",
+      "install-firmware-if-needed",
+      "verify-firmware",
+      "apply-configuration",
+      "verify-configuration"
+    ],
+    "preflashTransformPolicy": "explicit-led-bus-only; never apply runtime profile before destination firmware verification"
+  },
+  "fixtures": [
+    {
+      "id": "stock-wled-14-esp32",
+      "lineage": "stock-wled",
+      "major": 14,
+      "version": "0.14.3",
+      "source": {
+        "repository": "wled/WLED",
+        "releaseTag": "v0.14.3",
+        "commit": "00f5471270757e435753d7bbce46870ba1144cca",
+        "buildConfigurationRepository": "intermittech/QuinLED-Firmware",
+        "buildConfigurationCommit": "0215be3547aca52b61228ff81039cd43520c82c2",
+        "asset": "WLED_0.14.3_dig2go.bin"
+      },
+      "hardwareEvidence": "exact-published-quinled-dig2go-build",
+      "installPolicy": "migration-source-only",
+      "artifact": {
+        "path": "migration-fixtures/firmware/stock-wled/WLED_0.14.3_dig2go.bin",
+        "sizeBytes": 1457008,
+        "sha256": "b06f96d47c764e4c0771b53ef23cb5b218f4feed61cc59e51649a0a8d2ee7a5c"
+      }
+    },
+    {
+      "id": "stock-wled-15-esp32",
+      "lineage": "stock-wled",
+      "major": 15,
+      "version": "0.15.4",
+      "source": {
+        "repository": "wled/WLED",
+        "releaseTag": "v0.15.4",
+        "commit": "9af566ff877fe2f478ec5e4ba3b0940e5a83cd77",
+        "buildConfigurationRepository": "intermittech/QuinLED-Firmware",
+        "buildConfigurationCommit": "a814028e2ceb3d03adff453ee192c0e7f2118dee",
+        "asset": "WLED_0.15.4_Dig2Go-Audioreactive.bin"
+      },
+      "hardwareEvidence": "exact-published-quinled-dig2go-build",
+      "installPolicy": "migration-source-only",
+      "artifact": {
+        "path": "migration-fixtures/firmware/stock-wled/WLED_0.15.4_Dig2Go-Audioreactive.bin",
+        "sizeBytes": 1510176,
+        "sha256": "2067f3ec8d4a5422e85bbed566d222995b23acf5766da17d00565a3ccbca4849"
+      }
+    },
+    {
+      "id": "stock-wled-16-esp32",
+      "lineage": "stock-wled",
+      "major": 16,
+      "version": "16.0.1",
+      "source": {
+        "repository": "wled/WLED",
+        "releaseTag": "v16.0.1",
+        "commit": "29b389df1c1aaec6ff53aea742d17063b985906c",
+        "buildConfigurationRepository": "intermittech/QuinLED-Firmware",
+        "buildConfigurationCommit": "e6617edb95db9f085231337d7b8a722cdc8463bd",
+        "asset": "WLED_16.0.1_Dig2Go-Audioreactive.bin"
+      },
+      "hardwareEvidence": "exact-published-quinled-dig2go-build",
+      "installPolicy": "migration-source-only",
+      "artifact": {
+        "path": "migration-fixtures/firmware/stock-wled/WLED_16.0.1_Dig2Go-Audioreactive.bin",
+        "sizeBytes": 1312480,
+        "sha256": "055e3900fbc942522724964d26226f0570438a7a41f817602509ba397cfbad51"
+      }
+    },
+    {
+      "id": "tubes-v13-dig2go-reconstructed",
+      "lineage": "tubes",
+      "major": 13,
+      "version": "13",
+      "source": {
+        "repository": "SteveEisner/WLEDtubes",
+        "commit": "69f1bd8be708438bd4efe9711301c63604f26303",
+        "buildConfigurationCommit": "9e7d3c70",
+        "provenance": "reconstructed-build-not-historical-byte-exact",
+        "dependencyRepairs": [
+          "ESPAsyncWebServer pinned to upstream v2.2.1 tag",
+          "duplicate legacy arduinoFFT dependency removed; Tubes-pinned 419d7b0 retained"
+        ]
+      },
+      "hardwareEvidence": "reconstructed-dig2go-build-target",
+      "installPolicy": "migration-source-only",
+      "artifact": {
+        "path": "migration-fixtures/firmware/tubes-v13/tubes-v13-dig2go-reconstructed.bin",
+        "sizeBytes": 1300816,
+        "sha256": "d63f9ce9b4ad28e45bce888d290315129e2392aa444ad2d233a23e233abfdad9"
+      }
+    },
+    {
+      "id": "tubes-v14-dig2go",
+      "lineage": "tubes",
+      "major": 14,
+      "version": "14",
+      "source": {
+        "repository": "SteveEisner/WLEDtubes",
+        "commit": "c6522acef3e954b14aad30d6f687cdb99bd1624e",
+        "environment": "esp32_quinled_dig2go_tubes",
+        "releaseIdentity": "DIG2GO_TUBES"
+      },
+      "hardwareEvidence": "exact-dig2go-target-contract",
+      "installPolicy": "migration-destination",
+      "artifact": {
+        "path": "migration-fixtures/firmware/tubes-v14/tubes-v14-dig2go.bin",
+        "sizeBytes": 1259392,
+        "sha256": "bf6dc2feedb1669361471e9cc2224b1b2b1ba0e15602e58258dfde4e41569f2d"
+      }
+    }
+  ],
+  "legacyOverrides": [
+    {
+      "id": "golden",
+      "compileDefine": "GOLDEN",
+      "legacyReleaseIdentity": "GOLDEN_TUBES",
+      "migrationDisposition": "runtime-profile",
+      "requiresExplicitIdentity": true,
+      "runtimeProfileId": "golden",
+      "sourceFixtureId": "tubes-v14-golden-dig2go"
+    },
+    {
+      "id": "christmas",
+      "compileDefine": "CHRISTMAS",
+      "legacyReleaseIdentity": "CHRISTMAS_TUBES",
+      "migrationDisposition": "runtime-profile",
+      "requiresExplicitIdentity": true,
+      "runtimeProfileId": "christmas",
+      "sourceFixtureId": "tubes-v14-christmas-dig2go"
+    },
+    {
+      "id": "ruby",
+      "compileDefine": "RUBY",
+      "legacyReleaseIdentity": null,
+      "migrationDisposition": "runtime-profile",
+      "requiresExplicitIdentity": true,
+      "runtimeProfileId": "ruby",
+      "sourceFixtureId": "tubes-v14-ruby-dig2go-source"
+    },
+    {
+      "id": "mauve",
+      "compileDefine": "MAUVE",
+      "legacyReleaseIdentity": null,
+      "migrationDisposition": "runtime-profile",
+      "requiresExplicitIdentity": true,
+      "runtimeProfileId": "mauve",
+      "sourceFixtureId": "tubes-v14-mauve-dig2go"
+    },
+    {
+      "id": "master",
+      "compileDefine": "MASTER",
+      "legacyReleaseIdentity": null,
+      "migrationDisposition": "runtime-profile",
+      "requiresExplicitIdentity": true,
+      "runtimeProfileId": "master",
+      "sourceFixtureId": "tubes-v14-master-dig2go"
+    },
+    {
+      "id": "homelight",
+      "compileDefine": "HOMELIGHT",
+      "legacyReleaseIdentity": "ESP32_HOMELIGHT",
+      "migrationDisposition": "distinct-hardware-target",
+      "requiresExplicitIdentity": true,
+      "sourceFixtureId": "tubes-v14-homelight"
+    }
+  ]
+}
