@@ -25,6 +25,7 @@ enum TubeHardwareFamily : uint8_t {
     TubeHardwareAthomC3 = 3,
     TubeHardwareGledopto = 4,
     TubeHardwareHomeLight = 5,
+    TubeHardwareWaveshareS3 = 6,
 };
 
 enum TubeFirmwareVariant : uint8_t {
@@ -32,6 +33,38 @@ enum TubeFirmwareVariant : uint8_t {
     TubeVariantChristmas = 1,
     TubeVariantGolden = 2,
 };
+
+enum TubeCompatibilityClass : uint8_t {
+    TubeCompatibilityUnknown = 0,
+    TubeCompatibilityLegacy = 1,
+    TubeCompatibilityCurrent = 2,
+    TubeCompatibilityNext = 3,
+};
+
+// A bounded, read-only copy of canonical local Tubes report state for board adapters.
+// Compatibility remains Unknown until a version-policy adapter proves otherwise.
+struct TubesReadOnlySnapshot {
+    uint8_t hardwareFamily = TubeHardwareUnknown;
+    uint8_t reportProtocolVersion = DEVICE_REPORT_PROTOCOL_VERSION;
+    uint8_t compatibilityClass = TubeCompatibilityUnknown;
+    uint16_t tubesRelease = 0;
+    char wledVersion[16] = {0};
+    uint8_t controllerRole = 0;
+    uint8_t meshFlags = 0;
+    uint16_t nodeId = 0;
+    uint16_t uplinkId = 0;
+};
+
+// Board adapters consume a copy rather than reaching into the Tubes controller.
+bool tubesCopyReadOnlySnapshot(TubesReadOnlySnapshot& snapshot);
+
+#ifdef TUBES_READ_ONLY_FIELD_SHELL
+// Local S3 instrument controls do not grant role or updater authority.
+bool tubesS3ForcePrevious();
+bool tubesS3ForceNext();
+bool tubesS3SetBroadcastEnabled(bool enabled);
+bool tubesS3BroadcastEnabled();
+#endif
 
 #ifndef TUBES_HARDWARE_FAMILY
 #define TUBES_HARDWARE_FAMILY TubeHardwareUnknown
