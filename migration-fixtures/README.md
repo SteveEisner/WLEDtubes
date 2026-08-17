@@ -13,7 +13,8 @@ This directory pins firmware inputs and behavior fixtures used to test migration
   The Athom profile is the existing Steve-main `esp32-c3-athom_tubes` target
   (LED GPIO 10, button GPIO 9); it is not a generic ESP32-C3 image.
   The Waveshare artifact is target-only; display, touch, Home, Conductor,
-  Surveyor, and other product behavior remain independent work.
+  Surveyor, and other product behavior remain independent work. Its compiled
+  bytes are exact, but physical-hardware acceptance remains unproven.
 
 The stock binaries are **source fixtures only** even though they carry exact
 published Dig2Go build defaults. They model devices being migrated into Tubes;

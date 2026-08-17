@@ -238,7 +238,7 @@
       "tubesRelease": "14",
       "wledBaseVersion": "16.0.1",
       "releaseIdentity": "WAVESHARE_S3_TUBES_TARGET",
-      "buildCommit": "02abdd5d",
+      "buildCommit": "02abdd5d53aeabbcb8eed1bc36b29a1c340afa44",
       "buildSourceState": "commit 02abdd5d plus this commit's S3 target-only contract projection",
       "kind": "complete-merged-image",
       "transport": "usb",
@@ -281,14 +281,14 @@
       "tubesRelease": "14",
       "wledBaseVersion": "16.0.1",
       "releaseIdentity": "WAVESHARE_S3_TUBES_TARGET",
-      "buildCommit": "02abdd5d",
+      "buildCommit": "02abdd5d53aeabbcb8eed1bc36b29a1c340afa44",
       "buildSourceState": "commit 02abdd5d plus this commit's S3 target-only contract projection",
       "kind": "application-image",
       "transport": "ota",
       "path": "contracts/update/artifacts/waveshare-s3-v14/ota/firmware.bin",
       "buildOffset": 65536,
-      "lengthBytes": 1219248,
-      "sha256": "4a061ad84b95e1a5a5cde951748a2b4c0f358255a5ebe813f9c3d6d9fdea706e"
+      "lengthBytes": 1219728,
+      "sha256": "247c26185d61d75e372dc3cf91299f82f2749f85c5a4857ffbc2818a08d94ba2"
     }
   ],
   "updateStates": [

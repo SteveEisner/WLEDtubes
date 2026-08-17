@@ -122,24 +122,24 @@ export const updateContract = Object.freeze({
       "writeOffset": 0
     },
     {
-      "buildCommit": "02abdd5d",
+      "buildCommit": "02abdd5d53aeabbcb8eed1bc36b29a1c340afa44",
       "buildOffset": 65536,
       "buildSourceState": "commit 02abdd5d plus this commit's S3 target-only contract projection",
       "cppValue": 6,
       "id": "waveshare-s3-v14-ota-application",
       "kind": "application-image",
-      "lengthBytes": 1219248,
+      "lengthBytes": 1219728,
       "path": "contracts/update/artifacts/waveshare-s3-v14/ota/firmware.bin",
       "releaseClass": "Current",
       "releaseIdentity": "WAVESHARE_S3_TUBES_TARGET",
-      "sha256": "4a061ad84b95e1a5a5cde951748a2b4c0f358255a5ebe813f9c3d6d9fdea706e",
+      "sha256": "247c26185d61d75e372dc3cf91299f82f2749f85c5a4857ffbc2818a08d94ba2",
       "targetId": "waveshare-s3-tubes-remote",
       "transport": "ota",
       "tubesRelease": "14",
       "wledBaseVersion": "16.0.1"
     },
     {
-      "buildCommit": "02abdd5d",
+      "buildCommit": "02abdd5d53aeabbcb8eed1bc36b29a1c340afa44",
       "buildSourceState": "commit 02abdd5d plus this commit's S3 target-only contract projection",
       "components": [
         {

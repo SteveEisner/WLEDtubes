@@ -10,6 +10,7 @@ export const jsOutputPath = path.join(root, 'contracts/update/generated/update-c
 export const cppOutputPath = path.join(root, 'usermods/Tubes/generated/update_contract_generated.h');
 
 const hex64 = /^[0-9a-f]{64}$/;
+const commitSha = /^[0-9a-f]{40}$/;
 const identifier = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 const OTA_ALIGNMENT = 0x10000;
 const UINT8_MAX = 0xff;
@@ -53,6 +54,16 @@ function uniqueCppNames(errors, records, label) {
     fail(errors, !seen.has(name), `duplicate generated ${label} name: ${name}`);
     seen.add(name);
   }
+}
+
+function artifactsShareBuild(left, right) {
+  return left.targetId === right.targetId
+      && left.releaseClass === right.releaseClass
+      && left.tubesRelease === right.tubesRelease
+      && left.wledBaseVersion === right.wledBaseVersion
+      && left.releaseIdentity === right.releaseIdentity
+      && left.buildCommit === right.buildCommit
+      && left.buildSourceState === right.buildSourceState;
 }
 
 function parseInteger(value) {
@@ -185,9 +196,13 @@ export function validateContract(contract, {checkFiles = true} = {}) {
       fail(errors, artifact[key] !== undefined && artifact[key] !== '', `${artifact.id || 'artifact'} missing ${key}`);
     fail(errors, targets.has(artifact.targetId), `${artifact.id} has unknown targetId: ${artifact.targetId}`);
     fail(errors, classes.has(artifact.releaseClass) && artifact.releaseClass !== 'Unknown', `${artifact.id} has unknown releaseClass`);
+    fail(errors, commitSha.test(artifact.buildCommit), `${artifact.id} has invalid buildCommit`);
     fail(errors, hex64.test(artifact.sha256), `${artifact.id} has invalid sha256`);
     fail(errors, Number.isSafeInteger(artifact.lengthBytes) && artifact.lengthBytes > 0, `${artifact.id} has invalid lengthBytes`);
     const target = targets.get(artifact.targetId);
+    if (target?.compiledProfile?.releaseIdentity)
+      fail(errors, artifact.releaseIdentity === target.compiledProfile.releaseIdentity,
+        `${artifact.id} releaseIdentity does not match compiled target`);
     fail(errors, ['complete-merged-image', 'application-image'].includes(artifact.kind), `${artifact.id} has unsupported kind`);
     fail(errors, ['usb', 'recovery', 'ota'].includes(artifact.transport), `${artifact.id} has unsupported transport`);
     if (artifact.kind === 'application-image') {
@@ -232,6 +247,18 @@ export function validateContract(contract, {checkFiles = true} = {}) {
       fail(errors, sha256(bytes.subarray(start, start + component.lengthBytes)) === component.sha256,
         `${artifact.id}/${component.id} hash mismatch`);
     }
+  }
+
+  for (const merged of contract.artifacts.filter(item => item.kind === 'complete-merged-image')) {
+    const application = merged.components?.find(component => component.id === 'application');
+    fail(errors, !!application, `${merged.id} is missing application component`);
+    if (!application) continue;
+    const ota = contract.artifacts.find(item => item.kind === 'application-image'
+      && artifactsShareBuild(merged, item));
+    fail(errors, !!ota, `${merged.id} is missing matching OTA application`);
+    if (ota) fail(errors,
+      application.lengthBytes === ota.lengthBytes && application.sha256 === ota.sha256,
+      `${merged.id}/application does not match ${ota.id}`);
   }
   return errors;
 }

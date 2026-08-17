@@ -253,11 +253,12 @@ source and produces:
 - `usermods/Tubes/generated/update_contract_generated.h` for firmware-side
   admission.
 
-The first bounded contract pins the proven Dig2Go target, USB merged image, OTA
-application image, release identity, and byte hashes. It also records proven
-Waveshare S3 target and partition geometry but deliberately provides no S3
-artifact or hardware-acceptance claim. Missing target, artifact, or release
-class identity fails closed; silence is `Unknown`, never `Legacy`.
+The bounded contract pins exact Dig2Go, Athom C3, and Waveshare S3 compiled
+targets with USB merged images, OTA application images, release identities, and
+byte hashes. Waveshare physical-hardware acceptance remains `unproven`, and its
+missing runtime hardware-family evidence prevents peer OTA admission. Missing
+target, artifact, or release-class identity fails closed; silence is `Unknown`,
+never `Legacy`.
 
 Artifact source geometry is transport-specific. The USB merged image retains
 `writeOffset: 0` and absolute component offsets. The OTA application artifact
@@ -283,7 +284,8 @@ target, artifact, lease, transfer, health, and disabled-forwarding semantics.
 - [ ] Adapt PR #65 Easy Flash to consume the generated JavaScript projection,
   then retire its independent firmware manifest only after migration tests pass.
 - [ ] Adapt PR #66 Waveshare S3 target/UI code to consume generated constants;
-  keep Updater read-only and omit artifacts until a release image is proven.
+  keep Updater read-only until the pinned image passes physical-hardware
+  acceptance.
 - [ ] Replace the temporary device-report hardware-family seam only when Steve's
   additive v15 identity/capability contract lands on `main`.
 - [ ] Add receiver writes, lease-scoped serving, and device health evidence only

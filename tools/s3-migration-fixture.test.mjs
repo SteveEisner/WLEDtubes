@@ -14,6 +14,8 @@ function sha256(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
+// The migration fixture and OTA contract must identify the same exact image
+// while retaining the target-only, physically unproven hardware boundary.
 test('Waveshare S3 migration fixture is target-only and byte-exact', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'migration-fixtures/manifest.json'), 'utf8'));
   const fixture = manifest.fixtures.find(item => item.id === 'tubes-v14-waveshare-s3-target');
@@ -31,6 +33,7 @@ test('Waveshare S3 migration fixture is target-only and byte-exact', () => {
   const ota = contract.artifacts.find(item => item.id === 'waveshare-s3-v14-ota-application');
   assert.ok(target && ota);
   assert.equal(ota.targetId, target.id);
+  assert.equal(ota.lengthBytes, fixture.artifact.sizeBytes);
   assert.equal(ota.sha256, fixture.artifact.sha256);
   assert.ok(target.partition.otaSlots.every(slot => ota.lengthBytes <= slot.sizeBytes));
   assert.equal(target.hardwareAcceptance, 'unproven');
