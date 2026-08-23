@@ -22,7 +22,7 @@ class MeshTestDevice {
     std::vector<NodeMessage> commandAttempts;
     std::vector<NodeMessage> appliedMessages;
 
-    MeshTestDevice(MeshTestNetwork& network, MeshId id, MeshId uplinkId, bool leading);
+    MeshTestDevice(MeshTestNetwork& network, DeviceId id, DeviceId uplinkId, bool leading);
 
     bool isFollowing() const {
         return header.uplinkId != 0;
@@ -38,18 +38,18 @@ class MeshTestDevice {
 class MeshTestNetwork {
   public:
     struct Transmission {
-        MeshId senderId;
+        DeviceId senderId;
         NodeMessage message;
     };
 
-    MeshTestDevice& addDevice(MeshId id, MeshId uplinkId, bool leading) {
+    MeshTestDevice& addDevice(DeviceId id, DeviceId uplinkId, bool leading) {
         auto result = devices.try_emplace(id, *this, id, uplinkId, leading);
         if (!result.second)
             throw std::runtime_error("duplicate mesh device ID");
         return result.first->second;
     }
 
-    void connect(MeshId first, MeshId second) {
+    void connect(DeviceId first, DeviceId second) {
         neighbors[first].push_back(second);
         neighbors[second].push_back(first);
     }
@@ -70,7 +70,7 @@ class MeshTestNetwork {
             pending.pop_front();
             transmissions.push_back(transmission);
 
-            for (MeshId neighborId : neighbors.at(transmission.senderId))
+            for (DeviceId neighborId : neighbors.at(transmission.senderId))
                 devices.at(neighborId).receive(transmission.message);
         }
     }
@@ -79,15 +79,15 @@ class MeshTestNetwork {
 
   private:
     // Ordered maps keep device references stable as a scenario adds more nodes.
-    std::map<MeshId, MeshTestDevice> devices;
-    std::map<MeshId, std::vector<MeshId>> neighbors;
+    std::map<DeviceId, MeshTestDevice> devices;
+    std::map<DeviceId, std::vector<DeviceId>> neighbors;
     std::deque<Transmission> pending;
 };
 
 inline MeshTestDevice::MeshTestDevice(
     MeshTestNetwork& network,
-    MeshId id,
-    MeshId uplinkId,
+    DeviceId id,
+    DeviceId uplinkId,
     bool leading
 ) : leading(leading), network(network) {
     header.id = id;

@@ -15,6 +15,7 @@
 #include "node.h"
 #include "deferred_bpm_broadcast.h"
 #include "device_report_protocol.h"
+#include "v3_runtime.h"
 
 #define EEPSIZE 2560
 
@@ -24,11 +25,12 @@ const static uint8_t DEFAULT_TANK_BRIGHTNESS = 240;
 #define DEFAULT_WLED_FX FX_MODE_RAINBOW_CYCLE
 
 #define STATUS_UPDATE_PERIOD 2000
-#define OPTIONS_BROADCAST_PERIOD 500
-#define OPTIONS_BROADCAST_RETRIES 8
+#define V3_HEARTBEAT_PERIOD 10000
+#define V3_PRESENCE_PERIOD 10000
 
 static_assert(GRADIENT_PALETTE_COUNT <= UINT8_MAX, "Tubes palette IDs must fit in one byte");
 static constexpr uint8_t gGradientPaletteCount = GRADIENT_PALETTE_COUNT;
+static const char tubesV3PaletteName[] PROGMEM = "Tubes v3";
 
 #define MIN_COLOR_CHANGE_PHRASES 4
 #define MAX_COLOR_CHANGE_PHRASES 10
@@ -50,6 +52,9 @@ typedef struct {
   TubeState current;
   TubeState next;
 } TubeStates;
+
+static_assert(sizeof(TubeStates) == V3_PROJECTION_TRAILER_OFFSET,
+              "V2 TubeStates must end where the gen1 projection marker begins");
 
 typedef enum ControllerRole : uint8_t {
   UnknownRole = 0,
@@ -107,6 +112,9 @@ enum TubeOperationCode : uint8_t {
   CancelOverrideOperation,
   SoundOverlayOperation,
   TubesModeOperation,
+  BeatChannelIdOperation,
+  PatternChannelIdOperation,
+  PaletteChannelIdOperation,
   HelpOperation,
 };
 
@@ -168,6 +176,9 @@ static const TubeCommandDefinition tubeCommandDefinitions[] PROGMEM = {
   TUBE_COMMAND('M', CancelOverrideOperation, MeshScope),
   TUBE_COMMAND('O', SoundOverlayOperation, MeshScope),
   TUBE_COMMAND('t', TubesModeOperation, LocalScope),
+  TUBE_COMMAND('B', BeatChannelIdOperation, LocalScope),
+  TUBE_COMMAND('K', PatternChannelIdOperation, LocalScope),
+  TUBE_COMMAND('C', PaletteChannelIdOperation, LocalScope),
   TUBE_COMMAND('?', HelpOperation, LocalScope),
 };
 
@@ -228,9 +239,9 @@ class PatternController : public MessageReceiver {
     VirtualStrip *vstrips[NUM_VSTRIPS];
     uint8_t next_vstrip = 0;
     bool canOverride = false;
-    uint8_t optionsBroadcastsPending = 0;
     uint8_t paletteOverride = 0;
     uint8_t patternOverride = 0;
+    uint8_t activePatternRenderMask = 0;
     uint16_t wled_fader = 0;
     ControllerRole role;
     bool power_save = false;  // Default to power save mode OFF but 3 sec press turns it on
@@ -241,12 +252,16 @@ class PatternController : public MessageReceiver {
 
     TubesTimer graphicsTimer;
     TubesTimer updateTimer;
-    TubesTimer optionsBroadcastTimer;
     TubesTimer paletteOverrideTimer;
     TubesTimer patternOverrideTimer;
     TubesTimer flashTimer;
     TubesTimer selectTimer;
     TubesTimer tubesModeTimer;
+    TubesTimer v3HeartbeatTimer;
+    TubesTimer v3PresenceTimer;
+    TubesTimer v3DebugExpiryTimer;
+    TubesTimer v3PositionTimer;
+    TubesTimer v3PaletteRepeatTimer;
 
 #ifdef USELCD
     Lcd *lcd;
@@ -261,6 +276,32 @@ class PatternController : public MessageReceiver {
     char key_buffer[20] = {0};
     int8_t pendingTubesMode = -1;
     DeferredBpmBroadcast deferredBpmBroadcast;
+    V3ProtocolRuntime v3;
+
+    ChannelWinnerTable channelWinners;
+    TubesChannelPayload channelSnapshots[3];
+    DeviceId channelIds[3] = {0, 0, 0};
+    uint16_t channelSequences[3] = {0, 0, 0};
+    uint16_t controlSequence = 0;
+    uint32_t channelSession = 1;
+
+    uint16_t v3DebugOverlayMask = V3DebugBeat | V3DebugNode | V3DebugLeader;
+    uint8_t v3DebugVerbosity = 0;
+    bool v3DebugExpiryActive = false;
+    uint8_t v3RuntimePaletteId = 0;
+    CRGBPalette16 v3RuntimePalette;
+    bool v3RuntimePaletteActive = false;
+    bool v3PalettePending = false;
+    V3PaletteSchedulePayload v3PendingPaletteSchedule;
+    V3Palette16Definition v3PendingPaletteDefinition;
+    V3Palette16Definition v3LocalPaletteDefinition;
+    V3PaletteSchedulePayload v3LocalPaletteSchedule;
+    uint8_t v3PaletteRepeatsPending = 0;
+    uint8_t lastPublishedBeat = UINT8_MAX;
+    V3PositionAdvertisementPayload v3LocalPosition;
+    bool hasV3LocalPosition = false;
+    V3PositionFramePayload v3ConfiguredPositionFrame;
+    bool hasV3ConfiguredPositionFrame = false;
 
     Energy energy=Chill;
     TubeState current_state;
@@ -366,6 +407,21 @@ class PatternController : public MessageReceiver {
 #endif
   }
 
+  // Reserve one runtime-only WLED palette slot; updating it never writes LittleFS.
+  void registerV3RuntimePalette() {
+    removeUsermodPalettes(tubesV3PaletteName);
+    if (usermodPalettes.size() >= WLED_MAX_USERMOD_PALETTES) {
+      Serial.println(F("Tubes v3: no runtime palette slot available"));
+      v3RuntimePaletteId = 0;
+      return;
+    }
+
+    uint8_t paletteIndex = usermodPalettes.size();
+    v3RuntimePalette = CRGBPalette16(CRGB::Black);
+    usermodPalettes.push_back({v3RuntimePalette, tubesV3PaletteName, 0, nullptr});
+    v3RuntimePaletteId = WLED_USERMOD_PALETTE_ID_BASE - paletteIndex;
+  }
+
   void setup()
   {
     EEPROM.begin(EEPSIZE);
@@ -428,6 +484,17 @@ class PatternController : public MessageReceiver {
 #if defined(GOLDEN) || defined(CHRISTMAS) || defined(RUBY) || defined(MAUVE) || defined(MASTER)
     node.reset(0xFFF);
 #endif
+    registerV3RuntimePalette();
+    v3.setup(node.header.id, esp_random());
+    channelSession = esp_random();
+    if (!channelSession)
+      channelSession = 1;
+    for (uint8_t index = 0; index < 3; index++)
+      channelIds[index] = node.header.id;
+    v3HeartbeatTimer.start(V3_HEARTBEAT_PERIOD);
+    ProtocolLocalValue localValue = protocolLocalValueFromId(node.header.id);
+    v3PresenceTimer.start((localValue * 37U) % V3_PRESENCE_PERIOD);
+    v3PositionTimer.start((localValue * 53U) % 1000U);
     options.debugging = false;
     load_options(options, true);
 
@@ -453,17 +520,29 @@ class PatternController : public MessageReceiver {
   void do_pattern_changes() {
     uint16_t phrase = current_state.beat_frame >> 12;
     bool changed = false;
+    bool publishPattern = false;
+    bool publishPalette = false;
+    bool publishEffect = false;
 
     if (phrase >= next_state.pattern_phrase) {
 #ifdef IDENTIFY_STUCK_PATTERNS
       Serial.println("Time to change pattern");
 #endif
       load_pattern(next_state);
-      next_state.pattern_phrase = phrase + set_next_pattern(phrase);
-
-      // Don't change pattern and others at the same time
-      while (next_state.pattern_phrase == next_state.palette_phrase || next_state.pattern_phrase == next_state.effect_phrase) {
-        next_state.pattern_phrase += random8(1,3);
+      bool canSchedule = channelWinners.localMayRequest(
+          PatternChannel,
+          localChannelId(PatternChannel),
+          node.header.id,
+          millis()
+      );
+      if (canSchedule) {
+        next_state.pattern_phrase = phrase + set_next_pattern(phrase);
+        publishPattern = true;
+        // Keep independently scheduled visual changes on distinct phrases.
+        while (next_state.pattern_phrase == next_state.palette_phrase || next_state.pattern_phrase == next_state.effect_phrase)
+          next_state.pattern_phrase += random8(1,3);
+      } else {
+        next_state.pattern_phrase = UINT16_MAX;
       }
       changed = true;
     }
@@ -472,11 +551,19 @@ class PatternController : public MessageReceiver {
       Serial.println("Time to change palette");
 #endif
       load_palette(next_state);
-      next_state.palette_phrase = phrase + set_next_palette(phrase);
-
-      // Don't change palette and others at the same time
-      while (next_state.palette_phrase == next_state.pattern_phrase || next_state.palette_phrase == next_state.effect_phrase) {
-        next_state.palette_phrase += random8(1,3);
+      bool canSchedule = channelWinners.localMayRequest(
+          PaletteChannel,
+          localChannelId(PaletteChannel),
+          node.header.id,
+          millis()
+      );
+      if (canSchedule && !v3RuntimePaletteActive) {
+        next_state.palette_phrase = phrase + set_next_palette(phrase);
+        publishPalette = true;
+        while (next_state.palette_phrase == next_state.pattern_phrase || next_state.palette_phrase == next_state.effect_phrase)
+          next_state.palette_phrase += random8(1,3);
+      } else {
+        next_state.palette_phrase = UINT16_MAX;
       }
       changed = true;
     }
@@ -485,19 +572,31 @@ class PatternController : public MessageReceiver {
       Serial.println("Time to change effect");
 #endif
       load_effect(next_state);
-      next_state.effect_phrase = phrase + set_next_effect(phrase);
-
-      // Don't change palette and others at the same time
-      while (next_state.effect_phrase == next_state.pattern_phrase || next_state.effect_phrase == next_state.palette_phrase) {
-        next_state.effect_phrase += random8(1,3);
+      bool canSchedule = channelWinners.localMayRequest(
+          PatternChannel,
+          localChannelId(PatternChannel),
+          node.header.id,
+          millis()
+      );
+      if (canSchedule) {
+        next_state.effect_phrase = phrase + set_next_effect(phrase);
+        publishEffect = true;
+        while (next_state.effect_phrase == next_state.pattern_phrase || next_state.effect_phrase == next_state.palette_phrase)
+          next_state.effect_phrase += random8(1,3);
+      } else {
+        next_state.effect_phrase = UINT16_MAX;
       }
       changed = true;
     }
 
-    if (changed) {
+    if (changed && node.serialTraceEnabled()) {
       next_state.print();
       Serial.println();
     }
+    if (publishPattern || publishEffect)
+      publishApplicationChannel(PatternChannel);
+    if (publishPalette)
+      publishApplicationChannel(PaletteChannel);
   }
 
   void cancelOverrides() {
@@ -545,10 +644,12 @@ class PatternController : public MessageReceiver {
 
     paletteOverride = value;
     if (value) {
-      Serial.println("WLED has control of palette.");
+      if (node.serialTraceEnabled())
+        Serial.println("WLED has control of palette.");
       paletteOverrideTimer.start(300000); // 5 minutes of manual control
     } else {
-      Serial.println("Turning off WLED control of palette.");
+      if (node.serialTraceEnabled())
+        Serial.println("Turning off WLED control of palette.");
       paletteOverrideTimer.stop();
       set_wled_palette(current_state.palette_id);
     }
@@ -564,17 +665,397 @@ class PatternController : public MessageReceiver {
 
     patternOverride = value;
     if (value) {
-      Serial.println("WLED has control of patterns.");
+      if (node.serialTraceEnabled())
+        Serial.println("WLED has control of patterns.");
       patternOverrideTimer.start(300000); // 5 minutes of manual control
       transitionDelay = 500;  // Short transitions
     } else {
-      Serial.println("Turning off WLED control of patterns.");
+      if (node.serialTraceEnabled())
+        Serial.println("Turning off WLED control of patterns.");
       patternOverrideTimer.stop();
       transitionDelay = 8000; // Back to long transitions
 
       uint8_t param = modeParameter(auto_mode);
-      set_wled_pattern(auto_mode, param, param);
+      const PatternRenderOptions& renderOptions = gPatterns[current_state.pattern_id].renderOptions;
+      set_wled_pattern(auto_mode, param, param, renderOptions);
     }
+  }
+
+  // AI: below section was generated by an AI
+  uint16_t currentPhrase() const {
+    return current_state.beat_frame >> 12;
+  }
+
+  uint16_t activeDebugOverlayMask() const {
+    if (!options.debugging)
+      return 0;
+    return v3DebugOverlayMask;
+  }
+
+  uint8_t activePositionConfidence() const {
+    return hasV3LocalPosition ? v3LocalPosition.confidence : 0;
+  }
+
+  void addV3JsonInfo(JsonObject& root) const {
+    JsonObject info = root.createNestedObject(F("tubesV3"));
+    info[F("mode")] = 0;
+    info[F("accepted")] = v3.counters.accepted;
+    info[F("rejected")] = v3.counters.rejected;
+    info[F("stale")] = v3.counters.stale;
+    info[F("unknown")] = v3.counters.unknown;
+    info[F("legacyPackets")] = v3.counters.legacyPackets;
+  }
+
+  bool localOwnsV3Topic(uint8_t topic) const {
+    const V3AuthorityState& authority = v3.authorities.get(topic);
+    return authority.active
+        && authority.authorityId == node.header.id
+        && authority.authoritySession == v3.session();
+  }
+
+  // Send a claim when ownership is new or its repeat interval has elapsed.
+  bool sendV3Claim(uint8_t topic, bool force = false) {
+    V3TopicPayload claim;
+    if (!v3.prepareClaim(topic, millis(), claim, force))
+      return localOwnsV3Topic(topic);
+    return node.sendV3Topic(topic, claim);
+  }
+
+  // Publish one authority-owned body after the local claim establishes its ordering session.
+  bool sendV3Body(
+      uint8_t topic,
+      V3MessageKind kind,
+      const void* body,
+      uint8_t bodyLength,
+      uint16_t leaseDeciseconds = V3_DEFAULT_TOPIC_LEASE_DECISECONDS,
+      uint8_t quality = 0,
+      uint8_t flags = 0,
+      bool forceClaim = false,
+      uint16_t* sequence = nullptr
+  ) {
+    if (topic != V3TopicPresence
+        && !(topic == V3TopicPosition && kind == V3Advertisement)
+        && !sendV3Claim(topic, forceClaim))
+      return false;
+
+    V3TopicPayload payload;
+    if (!v3.prepareMessage(
+          topic,
+          kind,
+          body,
+          bodyLength,
+          leaseDeciseconds,
+          millis(),
+          payload,
+          quality,
+          flags))
+      return false;
+    if (sequence)
+      *sequence = payload.envelope.sequence;
+    return node.sendV3Topic(topic, payload);
+  }
+
+  void publishV3Presence() {
+    V3PresencePayload presence;
+    presence.protocolMode = 0;
+    presence.topicMask = (1U << (V3TopicControl + 1)) - 1;
+    presence.paletteFormatMask = (1U << V3PaletteLegacyId)
+        | (1U << V3Palette16)
+        | (1U << V3PaletteGradientStops);
+    presence.paletteCacheEntries = 2;
+    presence.bootSession = v3.session();
+    sendV3Body(V3TopicPresence, V3State, &presence, sizeof(presence));
+  }
+
+  void publishV3Beat(bool forceClaim = false) {
+    V3BeatPayload beat;
+    beat.bpm = beats.bpm;
+    beat.beatFrame = beats.frac;
+    beat.measuredAtTimebase = strip.timebase + millis();
+    beat.sourceType = 4; // Fixed/local clock until a sensor source identifies itself.
+    sendV3Body(V3TopicBeat, V3State, &beat, sizeof(beat), 40, 128, 0, forceClaim);
+  }
+
+  void publishV3Pattern(bool forceClaim = false) {
+    V3PatternPayload pattern;
+    pattern.current.effectivePhrase = current_state.pattern_phrase;
+    pattern.current.patternId = current_state.pattern_id;
+    pattern.current.syncMode = current_state.pattern_sync_id;
+    pattern.current.legacyPatternId = current_state.pattern_id;
+    pattern.current.legacySyncMode = current_state.pattern_sync_id;
+    pattern.next.effectivePhrase = next_state.pattern_phrase;
+    pattern.next.patternId = next_state.pattern_id;
+    pattern.next.syncMode = next_state.pattern_sync_id;
+    pattern.next.legacyPatternId = next_state.pattern_id;
+    pattern.next.legacySyncMode = next_state.pattern_sync_id;
+    sendV3Body(V3TopicPattern, V3State, &pattern, sizeof(pattern),
+               V3_DEFAULT_TOPIC_LEASE_DECISECONDS, 0, 0, forceClaim);
+  }
+
+  void publishV3LegacyPalette(bool forceClaim = false) {
+    V3PaletteSchedulePayload schedule;
+    schedule.effectivePhrase = next_state.palette_phrase;
+    schedule.transitionMs = transitionDelay;
+    schedule.legacyPaletteId = next_state.palette_id;
+    schedule.paletteFormat = V3PaletteLegacyId;
+    sendV3Body(V3TopicPalette, V3Schedule, &schedule, sizeof(schedule),
+               V3_DEFAULT_TOPIC_LEASE_DECISECONDS, 0, 0, forceClaim);
+  }
+
+  void publishV3Effect(bool forceClaim = false) {
+    V3EffectPayload effect;
+    effect.current.effectivePhrase = current_state.effect_phrase;
+    effect.current.effect = current_state.effect_params.effect;
+    effect.current.pen = current_state.effect_params.pen;
+    effect.current.beat = current_state.effect_params.beat;
+    effect.current.chance = current_state.effect_params.chance;
+    effect.next.effectivePhrase = next_state.effect_phrase;
+    effect.next.effect = next_state.effect_params.effect;
+    effect.next.pen = next_state.effect_params.pen;
+    effect.next.beat = next_state.effect_params.beat;
+    effect.next.chance = next_state.effect_params.chance;
+    sendV3Body(V3TopicEffect, V3State, &effect, sizeof(effect),
+               V3_DEFAULT_TOPIC_LEASE_DECISECONDS, 0, 0, forceClaim);
+  }
+
+  void publishV3Debug(bool forceClaim = false) {
+    V3DebugPayload debug;
+    debug.enabled = options.debugging;
+    debug.overlayMask = v3DebugOverlayMask;
+    debug.verbosity = v3DebugVerbosity;
+    sendV3Body(V3TopicDebug, V3State, &debug, sizeof(debug),
+               V3_DEFAULT_TOPIC_LEASE_DECISECONDS, 0, 0, forceClaim);
+  }
+
+  void publishV3VisualSnapshot(bool claimMissingAuthorities) {
+    bool rootCanSeed = !node.isFollowing() && claimMissingAuthorities;
+    if (localOwnsV3Topic(V3TopicBeat) || (!v3.authorities.get(V3TopicBeat).active && rootCanSeed))
+      publishV3Beat(rootCanSeed);
+    if (localOwnsV3Topic(V3TopicPattern) || (!v3.authorities.get(V3TopicPattern).active && rootCanSeed))
+      publishV3Pattern(rootCanSeed);
+    if ((localOwnsV3Topic(V3TopicPalette) || (!v3.authorities.get(V3TopicPalette).active && rootCanSeed))
+        && !v3PalettePending && !v3RuntimePaletteActive)
+      publishV3LegacyPalette(rootCanSeed);
+    if (localOwnsV3Topic(V3TopicEffect) || (!v3.authorities.get(V3TopicEffect).active && rootCanSeed))
+      publishV3Effect(rootCanSeed);
+    if (localOwnsV3Topic(V3TopicDebug) || (!v3.authorities.get(V3TopicDebug).active && rootCanSeed))
+      publishV3Debug(rootCanSeed);
+  }
+
+  // Project a literal color master's palette into the runtime cache and schedule it atomically.
+  bool publishV3LiteralPalette(
+      const V3Palette16Definition& definition,
+      uint8_t legacyPaletteId,
+      uint16_t effectivePhrase,
+      uint16_t transitionMs,
+      bool forceClaim = true,
+      bool queueRepeats = true
+  ) {
+    if (legacyPaletteId >= gGradientPaletteCount)
+      return false;
+    if (!sendV3Claim(V3TopicPalette, forceClaim))
+      return false;
+
+    uint16_t definitionSequence = 0;
+    if (!sendV3Body(
+          V3TopicPalette,
+          V3Definition,
+          &definition,
+          sizeof(definition),
+          V3_DEFAULT_TOPIC_LEASE_DECISECONDS,
+          0,
+          0,
+          false,
+          &definitionSequence))
+      return false;
+
+    V3PaletteSchedulePayload schedule;
+    schedule.definitionSequence = definitionSequence;
+    schedule.effectivePhrase = effectivePhrase;
+    schedule.transitionMs = transitionMs;
+    schedule.legacyPaletteId = legacyPaletteId;
+    schedule.paletteFormat = V3Palette16;
+    if (!sendV3Body(V3TopicPalette, V3Schedule, &schedule, sizeof(schedule)))
+      return false;
+
+    v3PendingPaletteDefinition = definition;
+    v3PendingPaletteSchedule = schedule;
+    v3PalettePending = true;
+    v3LocalPaletteDefinition = definition;
+    v3LocalPaletteSchedule = schedule;
+    if (queueRepeats) {
+      v3PaletteRepeatsPending = 2;
+      v3PaletteRepeatTimer.start(400);
+    }
+    return true;
+  }
+
+  void activatePendingV3Palette() {
+    if (!v3PalettePending || int16_t(currentPhrase() - v3PendingPaletteSchedule.effectivePhrase) < 0)
+      return;
+
+    next_state.palette_phrase = v3PendingPaletteSchedule.effectivePhrase;
+    next_state.palette_id = v3PendingPaletteSchedule.legacyPaletteId;
+    transitionDelay = v3PendingPaletteSchedule.transitionMs;
+    strip.setTransition(transitionDelay);
+    if (v3PendingPaletteSchedule.paletteFormat == V3Palette16
+        || v3PendingPaletteSchedule.paletteFormat == V3PaletteGradientStops) {
+      for (uint8_t index = 0; index < 16; index++) {
+        v3RuntimePalette[index] = CRGB(
+            v3PendingPaletteDefinition.rgb[index][0],
+            v3PendingPaletteDefinition.rgb[index][1],
+            v3PendingPaletteDefinition.rgb[index][2]
+        );
+      }
+      if (v3RuntimePaletteId) {
+        uint8_t paletteIndex = WLED_USERMOD_PALETTE_ID_BASE - v3RuntimePaletteId;
+        if (paletteIndex < usermodPalettes.size())
+          usermodPalettes[paletteIndex].palette = v3RuntimePalette;
+      }
+      v3RuntimePaletteActive = true;
+      current_state.palette_phrase = v3PendingPaletteSchedule.effectivePhrase;
+      current_state.palette_id = v3PendingPaletteSchedule.legacyPaletteId;
+      update_background();
+    } else {
+      v3RuntimePaletteActive = false;
+      load_palette(next_state);
+    }
+    v3PalettePending = false;
+    v3PaletteRepeatsPending = 0;
+  }
+
+  // AI: below section was generated by an AI
+  static uint8_t channelIndex(uint8_t channel) {
+    return channel - BeatChannel;
+  }
+
+  DeviceId localChannelId(uint8_t channel) const {
+    return channelIds[channelIndex(channel)];
+  }
+
+  TubesChannelPayload makeChannelPayload(
+      uint8_t channel,
+      TubesChannelMessageKind kind,
+      const void* body,
+      uint8_t bodyLength
+  ) {
+    TubesChannelPayload payload;
+    payload.envelope.messageKind = kind;
+    payload.envelope.channelId = isApplicationChannel(channel)
+        ? localChannelId(channel)
+        : node.header.id;
+    payload.envelope.sourceControlId = node.header.id;
+    payload.envelope.sourceSession = channelSession;
+    payload.envelope.sequence = isApplicationChannel(channel)
+        ? ++channelSequences[channelIndex(channel)]
+        : ++controlSequence;
+    payload.envelope.leaseDeciseconds = kind == ControlBeacon
+        ? 0
+        : TUBES_CHANNEL_LEASE_DECISECONDS;
+    writeChannelBody(payload, body, bodyLength);
+    return payload;
+  }
+
+  BeatChannelState currentBeatChannelState() const {
+    BeatChannelState state;
+    state.bpm = current_state.bpm;
+    state.beatFrame = current_state.beat_frame;
+    return state;
+  }
+
+  PatternChannelState currentPatternChannelState() const {
+    PatternChannelState state;
+    state.current.patternPhrase = current_state.pattern_phrase;
+    state.current.patternId = current_state.pattern_id;
+    state.current.syncMode = current_state.pattern_sync_id;
+    state.current.effectPhrase = current_state.effect_phrase;
+    state.current.effect = current_state.effect_params.effect;
+    state.current.pen = current_state.effect_params.pen;
+    state.current.beat = current_state.effect_params.beat;
+    state.current.chance = current_state.effect_params.chance;
+    state.next.patternPhrase = next_state.pattern_phrase;
+    state.next.patternId = next_state.pattern_id;
+    state.next.syncMode = next_state.pattern_sync_id;
+    state.next.effectPhrase = next_state.effect_phrase;
+    state.next.effect = next_state.effect_params.effect;
+    state.next.pen = next_state.effect_params.pen;
+    state.next.beat = next_state.effect_params.beat;
+    state.next.chance = next_state.effect_params.chance;
+    return state;
+  }
+
+  PaletteChannelState currentPaletteChannelState() const {
+    PaletteChannelState state;
+    state.current.palettePhrase = current_state.palette_phrase;
+    state.current.paletteId = current_state.palette_id;
+    state.next.palettePhrase = next_state.palette_phrase;
+    state.next.paletteId = next_state.palette_id;
+    return state;
+  }
+
+  bool publishApplicationChannel(uint8_t channel) {
+    uint32_t nowMs = millis();
+    if (!channelWinners.localMayRequest(channel, localChannelId(channel), node.header.id, nowMs))
+      return false;
+
+    TubesChannelPayload payload;
+    if (channel == BeatChannel) {
+      BeatChannelState state = currentBeatChannelState();
+      payload = makeChannelPayload(channel, ChannelRequest, &state, sizeof(state));
+    } else if (channel == PatternChannel) {
+      PatternChannelState state = currentPatternChannelState();
+      payload = makeChannelPayload(channel, ChannelRequest, &state, sizeof(state));
+    } else {
+      PaletteChannelState state = currentPaletteChannelState();
+      payload = makeChannelPayload(channel, ChannelRequest, &state, sizeof(state));
+    }
+
+    if (node.isFollowing())
+      return node.sendV3Channel(channel, payload);
+
+    if (!channelWinners.acceptRequest(channel, payload.envelope, nowMs))
+      return false;
+    payload.envelope.messageKind = ChannelDeclaration;
+    channelSnapshots[channelIndex(channel)] = payload;
+    return node.sendV3Channel(channel, payload);
+  }
+
+  void publishControlBeacon() {
+    ControlBeaconBody beacon;
+    beacon.bootSession = channelSession;
+    TubesChannelPayload payload = makeChannelPayload(
+        ControlChannel,
+        ControlBeacon,
+        &beacon,
+        sizeof(beacon)
+    );
+    node.sendV3Channel(ControlChannel, payload);
+  }
+
+  void publishV2Projection() {
+    if (node.isFollowing())
+      return;
+    TubeStates projection = {current_state, next_state};
+    V3ProjectionTrailer trailer;
+    trailer.controlId = node.header.id;
+    trailer.controlSession = uint16_t(channelSession);
+    node.sendCommand(COMMAND_STATE, &projection, sizeof(projection), &trailer);
+  }
+
+  void updateV3Channels() {
+    if (v3HeartbeatTimer.every(V3_HEARTBEAT_PERIOD))
+      publishControlBeacon();
+
+    uint8_t beat = beats.frac >> 8;
+    if (beat != lastPublishedBeat) {
+      lastPublishedBeat = beat;
+      publishApplicationChannel(BeatChannel);
+    }
+  }
+  // AI: end
+
+  void updateV3Protocol() {
+    updateV3Channels();
   }
 
   void update()
@@ -599,8 +1080,8 @@ class PatternController : public MessageReceiver {
     // Update patterns to the beat
     update_beat();
 
-    // A locally selected BPM becomes public only when that local clock starts a phrase.
-    send_deferred_bpm();
+    // Publish channel requests and declarations from the freshly updated beat frame.
+    updateV3Protocol();
 
     Segment& segment = strip.getMainSegment();
 
@@ -634,17 +1115,7 @@ class PatternController : public MessageReceiver {
 
     // Update current status
     if (updateTimer.every(STATUS_UPDATE_PERIOD)) {
-      // Transmit less often when following
-      if (!node.isFollowing() || random(0, 4) == 0) {
-        send_update();
-      }
-    }
-
-    if (optionsBroadcastsPending) {
-      if (optionsBroadcastTimer.every(OPTIONS_BROADCAST_PERIOD)) {
-        broadcast_options();
-        optionsBroadcastsPending--;
-      }
+      broadcast_state();
     }
 
     updater.update();
@@ -761,19 +1232,19 @@ class PatternController : public MessageReceiver {
   void restart_phrase() {
     beats.start_phrase();
     update_beat();
-    send_update();
+    publishApplicationChannel(BeatChannel);
   }
 
   void set_phrase_position(uint8_t pos) {
     beats.sync(beats.bpm, (beats.frac & -0xFFF) + (pos<<8));
     update_beat();
-    send_update();
+    publishApplicationChannel(BeatChannel);
   }
 
   void set_tapped_bpm(accum88 bpm, uint8_t pos=15) {
     // By default, restarts at 15th beat - because this is the end of a tap
     apply_bpm(bpm, pos);
-    send_update();
+    publishApplicationChannel(BeatChannel);
   }
 
   void apply_bpm(accum88 bpm, uint8_t pos=0) {
@@ -789,7 +1260,7 @@ class PatternController : public MessageReceiver {
     // The controlling device responds now, while the mesh stays on its current clock
     // until this device reaches the phrase boundary used for the legacy declaration.
     apply_bpm(new_bpm);
-    deferredBpmBroadcast.schedule(new_bpm, current_state.beat_frame);
+    publishApplicationChannel(BeatChannel);
   }
 
   void send_deferred_bpm() {
@@ -812,29 +1283,33 @@ class PatternController : public MessageReceiver {
   }
 
   void send_update() {
-    Serial.print("     ");
-    current_state.print();
-    Serial.print(F(" "));
+    if (node.serialTraceEnabled()) {
+      Serial.print("     ");
+      current_state.print();
+      Serial.print(F(" "));
 
-    uint16_t phrase = current_state.beat_frame >> 12;
-    Serial.print(F("    "));
-    Serial.print(next_state.pattern_phrase - phrase);
-    Serial.print(F("P "));
-    Serial.print(next_state.palette_phrase - phrase);
-    Serial.print(F("C "));
-    Serial.print(next_state.effect_phrase - phrase);
-    Serial.print(F("E: "));
-    next_state.print();
-    Serial.print(F(" "));
-    Serial.println();
+      uint16_t phrase = current_state.beat_frame >> 12;
+      Serial.print(F("    "));
+      Serial.print(next_state.pattern_phrase - phrase);
+      Serial.print(F("P "));
+      Serial.print(next_state.palette_phrase - phrase);
+      Serial.print(F("C "));
+      Serial.print(next_state.effect_phrase - phrase);
+      Serial.print(F("E: "));
+      next_state.print();
+      Serial.print(F(" "));
+      Serial.println();
+    }
 
     broadcast_state();
   }
 
   void background_changed() {
     update_background();
-    current_state.print();
-    Serial.println();
+    if (node.serialTraceEnabled()) {
+      current_state.print();
+      Serial.println();
+    }
   }
 
   void load_options(ControllerOptions &options, bool init=false) {
@@ -871,7 +1346,8 @@ class PatternController : public MessageReceiver {
     hasLoadedPattern = true;
     isBoring = gPatterns[current_state.pattern_id].control.energy == Boring;
 
-    Serial.print(F("Change pattern "));
+    if (node.serialTraceEnabled())
+      Serial.print(F("Change pattern "));
     background_changed();
   }
 
@@ -944,7 +1420,9 @@ class PatternController : public MessageReceiver {
 
     current_state.palette_phrase = tube_state.palette_phrase;
     current_state.palette_id = tube_state.palette_id % gGradientPaletteCount;
-    set_wled_palette(current_state.palette_id);
+    // WLED 16 virtual layers snapshot their palette, so replace the layer when
+    // a palette-only transition becomes effective.
+    update_background();
   }
 
   // Choose the palette to display at the next palette cycle
@@ -1002,9 +1480,11 @@ class PatternController : public MessageReceiver {
   void _load_effect(EffectParameters params) {
     current_state.effect_params = params;
 
-    Serial.print(F("Change effect "));
-    current_state.print();
-    Serial.println();
+    if (node.serialTraceEnabled()) {
+      Serial.print(F("Change effect "));
+      current_state.print();
+      Serial.println();
+    }
 
     effects.load(current_state.effect_params);
   }
@@ -1046,11 +1526,13 @@ class PatternController : public MessageReceiver {
     for (uint8_t i = 0; i < NUM_VSTRIPS; i++) {
       vstrips[i]->fadeOut();
     }
-    vstrips[next_vstrip]->load(background);
+    const CRGBPalette16* runtimePalette = v3RuntimePaletteActive ? &v3RuntimePalette : nullptr;
+    vstrips[next_vstrip]->load(background, DEFAULT_FADE_SPEED, runtimePalette);
     next_vstrip = (next_vstrip + 1) % NUM_VSTRIPS;
 
+    const PatternRenderOptions& renderOptions = gPatterns[current_state.pattern_id].renderOptions;
     uint8_t param = modeParameter(background.wled_fx_id);
-    set_wled_pattern(background.wled_fx_id, param, param);
+    set_wled_pattern(background.wled_fx_id, param, param, renderOptions);
     set_wled_palette(background.palette_id);
   }
 
@@ -1064,6 +1546,8 @@ class PatternController : public MessageReceiver {
 
     if (paletteOverride)
       palette_id = paletteOverride;
+    else if (v3RuntimePaletteActive && v3RuntimePaletteId)
+      palette_id = v3RuntimePaletteId;
 
     Segment& seg = strip.getMainSegment();
     seg.setPalette(palette_id);
@@ -1072,10 +1556,13 @@ class PatternController : public MessageReceiver {
     stateUpdated(CALL_MODE_DIRECT_CHANGE);
   }
 
-  void set_wled_pattern(uint8_t pattern_id, uint8_t speed, uint8_t intensity) {
+  // Select a WLED effect and apply only the shared checkbox controls owned by its Tubes mapping.
+  void set_wled_pattern(uint8_t pattern_id, uint8_t speed, uint8_t intensity,
+                        const PatternRenderOptions& renderOptions = PatternRenderOptions()) {
     if (!shouldRenderTubes())
       return;
 
+    bool applyRenderOptions = !patternOverride;
     if (patternOverride)
       pattern_id = patternOverride;
     else if (pattern_id == 0)
@@ -1086,28 +1573,42 @@ class PatternController : public MessageReceiver {
     seg.intensity = intensity;
     seg.setMode(pattern_id);
 
+    // AI: below section was generated by an AI
+    uint8_t nextRenderMask = applyRenderOptions ? renderOptions.checkMask : 0;
+    uint8_t changedRenderMask = activePatternRenderMask | nextRenderMask;
+    if (changedRenderMask & PatternRenderCheck1)
+      seg.check1 = (nextRenderMask & renderOptions.checkValues & PatternRenderCheck1) != 0;
+    if (changedRenderMask & PatternRenderCheck2)
+      seg.check2 = (nextRenderMask & renderOptions.checkValues & PatternRenderCheck2) != 0;
+    if (changedRenderMask & PatternRenderCheck3)
+      seg.check3 = (nextRenderMask & renderOptions.checkValues & PatternRenderCheck3) != 0;
+    activePatternRenderMask = nextRenderMask;
+    // AI: end
+
     stateChanged = true;
     stateUpdated(CALL_MODE_DIRECT_CHANGE);
   }
 
   void setBrightness(uint8_t brightness, bool share = true) {
-    Serial.printf("brightness: %d\n", brightness);
+    if (node.serialTraceEnabled())
+      Serial.printf("brightness: %d\n", brightness);
 
     options.brightness = brightness;
     load_options(options);
 
     if (share)
-      queue_options_broadcast();
+      broadcast_options();
   }
 
   void setDebugging(bool debugging, bool share = true) {
-    Serial.printf("debugging: %d\n", debugging);
+    if (node.serialTraceEnabled())
+      Serial.printf("debugging: %d\n", debugging);
 
     options.debugging = debugging;
     load_options(options);
 
     if (share)
-      queue_options_broadcast();
+      publishV3Debug(true);
   }
 
   void togglePowerSave() {
@@ -1116,7 +1617,8 @@ class PatternController : public MessageReceiver {
 
   void setPowerSave(bool ps) {
     power_save = ps;
-    Serial.printf("power_save: %d\n", power_save);
+    if (node.serialTraceEnabled())
+      Serial.printf("power_save: %d\n", power_save);
 
     // Remember this setting on the next boot
     EEPROM.begin(2560);
@@ -1127,13 +1629,15 @@ class PatternController : public MessageReceiver {
     else
       boot->default_power_save = BOOT_OPTION_POWER_SAVE_OFF;
     EEPROM.write(BOOT_OPTIONS_EEPROM_LOCATION, b); // Reset all boot options
-    Serial.printf("wrote: %d\n", b);
+    if (node.serialTraceEnabled())
+      Serial.printf("wrote: %d\n", b);
     EEPROM.end();
   }
 
   void setRole(ControllerRole r) {
     role = r;
-    Serial.printf("Role = %d", role);
+    if (node.serialTraceEnabled())
+      Serial.printf("Role = %d", role);
     EEPROM.begin(EEPSIZE);
     EEPROM.write(ROLE_EEPROM_LOCATION, role);
     EEPROM.write(BOOT_OPTIONS_EEPROM_LOCATION, 0); // Reset all boot options
@@ -1251,7 +1755,7 @@ class PatternController : public MessageReceiver {
   }
 
   void printHelp() const {
-    Serial.println(F("b###.# - set bpm\ns - start phrase\n\np### - patterns\nm### - sync mode\nc### - colors\ne### - effects\nn - force next\n\ni### - set ID\nd - toggle debugging\nl### - brightness"));
+    Serial.println(F("b###.# - set bpm\ns - start phrase\n\np### - patterns\nm### - sync mode\nc### - colors\ne### - effects\nn - force next\n\ni### - set Control ID\nB/K/C### - set Beat/Pattern/Palette Channel ID\nd - toggle debugging\nl### - brightness"));
     Serial.println(F("@ - set power saving mode\nU - begin auto-update\nP - toggle all power saves\nO - toggle all sound overlays\n==== wifi ====\na - turn on access point\nq - turn off access point\nt0/1 - Tubes mode off/on"));
     Serial.println(F("==== global actions ====\n* - enter select mode (double-click to Ready)\nA - turn on access point (Ready to update)\nW - forget WiFi client\nX - restart\nV### - auto-upgrade to version\nz############ - probe a device by MAC\nM - cancel manual pattern override"));
   }
@@ -1342,6 +1846,8 @@ class PatternController : public MessageReceiver {
       case PaletteOperation:
         next_state.palette_phrase = 0;
         next_state.palette_id = argument;
+        v3RuntimePaletteActive = false;
+        v3PalettePending = false;
         if (share) broadcast_state();
         return true;
       case EffectOperation:
@@ -1356,7 +1862,10 @@ class PatternController : public MessageReceiver {
         if (share) broadcast_state();
         return true;
       case NodeIdOperation:
-        Serial.printf("Reset! ID -> %03X\n", argument);
+        if (!protocolLocalValueFromId(argument))
+          break;
+        Serial.printf("Reset! ID -> %04X\n",
+            makeDeviceId(CURRENT_PROTOCOL_GENERATION, protocolLocalValueFromId(argument)));
         node.reset(argument);
         return true;
       case UpdateOperation:
@@ -1430,6 +1939,20 @@ class PatternController : public MessageReceiver {
         pendingTubesMode = argument;
         tubesModeTimer.start(250);
         return true;
+      case BeatChannelIdOperation:
+      case PatternChannelIdOperation:
+      case PaletteChannelIdOperation: {
+        ProtocolLocalValue localValue = protocolLocalValueFromId(argument);
+        if (scope != LocalScope || !localValue)
+          break;
+        uint8_t channel = BeatChannel + tubeOperationCode(operation) - BeatChannelIdOperation;
+        DeviceId channelId = makeDeviceId(CURRENT_PROTOCOL_GENERATION, localValue);
+        channelIds[channelIndex(channel)] = channelId;
+        channelWinners.clear(channel);
+        publishApplicationChannel(channel);
+        Serial.printf("Channel %02X ID -> %04X\n", channel, channelId);
+        return true;
+      }
       case HelpOperation:
         printHelp();
         return true;
@@ -1453,6 +1976,11 @@ class PatternController : public MessageReceiver {
     if (scopeOverride < -1 || scopeOverride > SelectedScope)
       return;
 
+    readJsonV3Palette(json);
+    readJsonV3PositionFrame(json);
+    readJsonV3Position(json);
+    readJsonV3Debug(json);
+
     // Each sparse serial-style key becomes an operation and is consumed immediately.
     for (JsonPair item : json) {
       const char* key = item.key().c_str();
@@ -1473,10 +2001,142 @@ class PatternController : public MessageReceiver {
     }
   }
 
+  // AI: below section was generated by an AI
+  void readJsonV3Palette(JsonObject& json) {
+    JsonArray colors = json[F("palette16")];
+    if (colors.isNull())
+      return;
+    if (colors.size() != 16)
+      return;
+
+    V3Palette16Definition definition;
+    uint8_t index = 0;
+    for (JsonVariant colorValue : colors) {
+      if (!colorValue.is<uint32_t>())
+        return;
+      uint32_t color = colorValue.as<uint32_t>();
+      if (color > 0xFFFFFF)
+        return;
+      definition.rgb[index][0] = color >> 16;
+      definition.rgb[index][1] = color >> 8;
+      definition.rgb[index][2] = color;
+      index++;
+    }
+
+    uint32_t legacyPalette = json[F("legacyPalette")] | current_state.palette_id;
+    uint32_t effectivePhrase = json[F("palettePhrase")] | uint32_t(currentPhrase() + 1);
+    uint32_t transitionMs = json[F("paletteTransition")] | uint32_t(transitionDelay);
+    if (legacyPalette >= gGradientPaletteCount
+        || effectivePhrase > UINT16_MAX
+        || int16_t(uint16_t(effectivePhrase) - currentPhrase()) < 1
+        || transitionMs > 60000)
+      return;
+
+    publishV3LiteralPalette(
+        definition,
+        legacyPalette,
+        effectivePhrase,
+        transitionMs
+    );
+  }
+
+  void readJsonV3PositionFrame(JsonObject& json) {
+    JsonObject frameJson = json[F("positionFrame")];
+    if (frameJson.isNull())
+      return;
+
+    uint32_t frameNamespace = frameJson[F("namespace")] | 0U;
+    uint32_t epoch = frameJson[F("epoch")] | 0U;
+    uint32_t originId = frameJson[F("origin")] | uint32_t(node.header.id);
+    uint32_t axisId = frameJson[F("axis")] | 0U;
+    uint32_t positiveYId = frameJson[F("positiveY")] | 0U;
+    if (!frameNamespace || epoch > UINT16_MAX || originId > UINT16_MAX
+        || axisId > UINT16_MAX || positiveYId > UINT16_MAX)
+      return;
+
+    V3PositionFramePayload frame;
+    frame.frameNamespace = frameNamespace;
+    frame.frameEpoch = uint16_t(epoch);
+    frame.originId = DeviceId(originId);
+    frame.axisId = DeviceId(axisId);
+    frame.positiveYId = DeviceId(positiveYId);
+    if (sendV3Body(V3TopicPosition, V3State, &frame, sizeof(frame),
+                   V3_DEFAULT_TOPIC_LEASE_DECISECONDS, 0, 0, true)) {
+      v3.positionFrame = frame;
+      v3.hasPositionFrame = true;
+      v3ConfiguredPositionFrame = frame;
+      hasV3ConfiguredPositionFrame = true;
+    }
+  }
+
+  void readJsonV3Position(JsonObject& json) {
+    JsonObject position = json[F("position")];
+    if (position.isNull())
+      return;
+
+    long xQ8_8 = position[F("xQ8_8")] | LONG_MIN;
+    long yQ8_8 = position[F("yQ8_8")] | LONG_MIN;
+    uint32_t confidence = position[F("confidence")] | 0U;
+    long txCalibration = position[F("txCalibrationDbm")] | 0L;
+    bool anchor = position[F("anchor")] | false;
+    bool settled = position[F("settled")] | anchor;
+    if (xQ8_8 < INT16_MIN || xQ8_8 > INT16_MAX
+        || yQ8_8 < INT16_MIN || yQ8_8 > INT16_MAX
+        || confidence > UINT8_MAX
+        || txCalibration < INT8_MIN || txCalibration > INT8_MAX)
+      return;
+    if (!v3.hasPositionFrame)
+      return;
+
+    v3LocalPosition = V3PositionAdvertisementPayload();
+    v3LocalPosition.bootSession = v3.session();
+    v3LocalPosition.frameNamespace = v3.positionFrame.frameNamespace;
+    v3LocalPosition.frameEpoch = v3.positionFrame.frameEpoch;
+    v3LocalPosition.xQ8_8 = int16_t(xQ8_8);
+    v3LocalPosition.yQ8_8 = int16_t(yQ8_8);
+    v3LocalPosition.leaderViaId = node.header.uplinkId;
+    v3LocalPosition.txCalibrationDbm = int8_t(txCalibration);
+    v3LocalPosition.confidence = uint8_t(confidence);
+    v3LocalPosition.flags = V3PositionValid;
+    if (anchor) v3LocalPosition.flags |= V3PositionAnchor;
+    if (settled) v3LocalPosition.flags |= V3PositionSettled;
+    hasV3LocalPosition = true;
+    sendV3Body(
+        V3TopicPosition,
+        V3Advertisement,
+        &v3LocalPosition,
+        sizeof(v3LocalPosition),
+        0,
+        confidence
+    );
+  }
+
+  void readJsonV3Debug(JsonObject& json) {
+    bool changed = false;
+    if (json.containsKey(F("debugMask"))) {
+      uint32_t mask = json[F("debugMask")].as<uint32_t>();
+      if (mask > UINT16_MAX)
+        return;
+      v3DebugOverlayMask = mask;
+      changed = true;
+    }
+    if (json.containsKey(F("debugVerbosity"))) {
+      uint32_t verbosity = json[F("debugVerbosity")].as<uint32_t>();
+      if (verbosity > UINT8_MAX)
+        return;
+      v3DebugVerbosity = verbosity;
+      changed = true;
+    }
+    if (changed)
+      publishV3Debug(true);
+  }
+  // AI: end
+
   void read_keys() {
     if (!Serial.available())
       return;
 
+    node.renewSerialTrace();
     char c = Serial.read();
     char *k = key_buffer;
     uint8_t max = sizeof(key_buffer);
@@ -1527,7 +2187,7 @@ class PatternController : public MessageReceiver {
 
     if (key == 'b')
       argument = parsed;
-    else if (key == 'i')
+    else if (key == 'i' || key == 'B' || key == 'K' || key == 'C')
       argument = parsed >> 4;
     else if (key == 'd')
       argument = !options.debugging;
@@ -1566,41 +2226,71 @@ class PatternController : public MessageReceiver {
       broadcast_state();
   }
 
+  bool sendV3ControlCommand(CommandId command, const void* data, uint8_t length) {
+    if (length > TUBES_CHANNEL_BODY_SIZE - 2)
+      return false;
+    ControlChannelBody control;
+    control.command = command;
+    control.commandLength = length;
+    if (length > 0)
+      memcpy(control.commandData, data, length);
+    TubesChannelMessageKind kind = node.isFollowing()
+        ? ChannelRequest
+        : ChannelDeclaration;
+    TubesChannelPayload payload = makeChannelPayload(
+        ControlChannel,
+        kind,
+        &control,
+        length + 2
+    );
+    bool sent = node.sendV3Channel(ControlChannel, payload);
+    if (!node.isFollowing())
+      sendLegacyCommand(command, data, length);
+    return sent;
+  }
+
+  void sendLegacyCommand(CommandId command, const void* data, uint8_t length) {
+    V3ProjectionTrailer trailer;
+    trailer.controlId = node.header.id;
+    trailer.controlSession = uint16_t(channelSession);
+    node.sendCommand(command, data, length, &trailer);
+  }
+
   void broadcast_action(Action& action) {
     if (!node.isFollowing()) {
       onAction(&action);
     }
-    node.sendCommand(COMMAND_ACTION, &action, sizeof(Action));
+    sendV3ControlCommand(COMMAND_ACTION, &action, sizeof(Action));
   }
 
   void broadcast_info(NodeInfo *info) {
-    node.sendCommand(COMMAND_INFO, &info, sizeof(NodeInfo));
+    sendV3ControlCommand(COMMAND_INFO, info, sizeof(NodeInfo));
   }
 
   void broadcast_state() {
     // Publishing this device's state would reveal the new BPM before its phrase boundary.
     if (deferredBpmBroadcast.active())
       return;
-    node.sendCommand(COMMAND_STATE, &current_state, sizeof(TubeStates));
+    publishApplicationChannel(BeatChannel);
+    publishApplicationChannel(PatternChannel);
+    publishApplicationChannel(PaletteChannel);
+    publishV2Projection();
   }
 
   void broadcast_options() {
-    node.sendCommand(COMMAND_OPTIONS, &options, sizeof(options));
-  }
-
-  void queue_options_broadcast() {
-    broadcast_options();
-    optionsBroadcastsPending = OPTIONS_BROADCAST_RETRIES;
-    optionsBroadcastTimer.start(OPTIONS_BROADCAST_PERIOD);
+    sendV3ControlCommand(COMMAND_OPTIONS, &options, sizeof(options));
   }
 
   void broadcast_autoupdate() {
-    node.sendCommand(COMMAND_UPGRADE, &updater.current_version, sizeof(updater.current_version));
+    // The deployed update offer is larger than the gen1 Control body, so only the
+    // Control master emits this legacy-only command. It does not carry visual state.
+    if (!node.isFollowing())
+      node.sendCommand(COMMAND_UPGRADE, &updater.current_version, sizeof(updater.current_version));
   }
 
   void broadcast_bpm(accum88 bpm) {
-    // Hacked in feature: request a new BPM
-    node.sendCommand(COMMAND_BEATS, &bpm, sizeof(bpm));
+    (void)bpm;
+    publishApplicationChannel(BeatChannel);
   }
 
   void requestDeviceReport(const char* macText) {
@@ -1617,7 +2307,7 @@ class PatternController : public MessageReceiver {
       request.mac[0], request.mac[1], request.mac[2],
       request.mac[3], request.mac[4], request.mac[5]
     );
-    node.sendCommand(COMMAND_ACTION, &request, sizeof(request));
+    sendV3ControlCommand(COMMAND_ACTION, &request, sizeof(request));
   }
 
   void broadcastDeviceReport(uint32_t nonce, const uint8_t mac[6]) {
@@ -1649,12 +2339,12 @@ class PatternController : public MessageReceiver {
         report.ledPin = pins[0];
       report.ledType = firstBus->getType() & 0x7F;
     }
-    node.sendCommand(COMMAND_ACTION, &report, sizeof(report));
+    sendV3ControlCommand(COMMAND_ACTION, &report, sizeof(report));
   }
 
   void printDeviceReport(const DeviceReportMessage& report) const {
     Serial.printf(
-      "TUBE_REPORT nonce=%08lX mac=%02x%02x%02x%02x%02x%02x family=%u variant=%u tubes=%u release=%08lX leds=%u buses=%u pin=%u type=%u role=%u mesh=%u node=%u uplink=%u uptime=%lu\n",
+      "TUBE_REPORT nonce=%08lX mac=%02x%02x%02x%02x%02x%02x family=%u variant=%u tubes=%u release=%08lX leds=%u buses=%u pin=%u type=%u role=%u mesh=%u node=0x%04X uplink=0x%04X uptime=%lu\n",
       (unsigned long)report.nonce,
       report.mac[0], report.mac[1], report.mac[2],
       report.mac[3], report.mac[4], report.mac[5],
@@ -1689,10 +2379,168 @@ class PatternController : public MessageReceiver {
       broadcastDeviceReport(message.nonce, deviceMac);
   }
 
+  // AI: below section was generated by an AI
+  bool isValidRemoteOperation(const TubeOperation& operation) const {
+    if (tubeOperationScope(operation) == LocalScope)
+      return false;
+    switch (tubeOperationCode(operation)) {
+      case DebugOperation:
+      case PowerSaveOperation:
+      case SelectOperation:
+      case SoundOverlayOperation:
+        return operation.argument <= 1;
+      case BrightnessOperation:
+        return operation.argument >= 5 && operation.argument <= UINT8_MAX;
+      case BpmOperation:
+        return operation.argument >= (60U << 8) && operation.argument <= (300U << 8);
+      case PatternOperation:
+        return operation.argument < gPatternCount;
+      case SyncModeOperation:
+        return operation.argument <= SwingDrift;
+      case PaletteOperation:
+        return operation.argument < gGradientPaletteCount;
+      case EffectOperation:
+        return operation.argument < gEffectCount;
+      case EffectChanceOperation:
+      case FlashOperation:
+        return operation.argument <= UINT8_MAX;
+      case RoleOperation:
+        return operation.argument == DefaultRole
+            || operation.argument == CampRole
+            || operation.argument == InstallationRole
+            || operation.argument == SmallArtRole
+            || operation.argument == HomeLightRole
+            || operation.argument == LegacyRole
+            || operation.argument == MasterRole;
+      case RebootOperation:
+      case AccessPointOperation:
+      case DisconnectWifiOperation:
+      case ForgetWifiOperation:
+      case StartPhraseOperation:
+      case NextOperation:
+      case UpdateOperation:
+      case UpdateOfferOperation:
+      case GlitterOperation:
+      case CancelOverrideOperation:
+        return true;
+      case NodeIdOperation:
+      case TubesModeOperation:
+      case HelpOperation:
+        return false;
+    }
+    return false;
+  }
+
+  bool isValidActionPayload(const uint8_t* data, uint8_t logicalLength, bool exactLength) const {
+    if (!data || logicalLength < sizeof(Action))
+      return false;
+    if (data[0] == DEVICE_REPORT_ACTION_KEY) {
+      if (logicalLength < sizeof(DeviceReportMessage)
+          || (exactLength && logicalLength != sizeof(DeviceReportMessage)))
+        return false;
+      DeviceReportMessage report;
+      memcpy(&report, data, sizeof(report));
+      return isDeviceReportMessage(report);
+    }
+    if (exactLength && logicalLength != sizeof(Action))
+      return false;
+    Action action;
+    memcpy(&action, data, sizeof(action));
+    TubeOperation operation;
+    return decodeOperation(action.key, action.arg, operation)
+        && isValidRemoteOperation(operation);
+  }
+
+  bool isValidLegacyState(const TubeState& state) const {
+    if (state.bpm < (40U << 8) || state.bpm > (300U << 8))
+      return false;
+    if (state.pattern_id >= gPatternCount || state.pattern_sync_id > SwingDrift)
+      return false;
+    if (state.palette_id >= gGradientPaletteCount)
+      return false;
+    if (state.effect_params.effect > Flash || state.effect_params.pen > Flicker)
+      return false;
+    return isValidBeatPulse(state.effect_params.beat);
+  }
+
+  bool isValidBeatPulse(uint8_t beatPulse) const {
+    return beatPulse == Continuous
+        || beatPulse == Eighth
+        || beatPulse == Quarter
+        || beatPulse == Half
+        || beatPulse == Beat
+        || beatPulse == TwoBeats
+        || beatPulse == Measure
+        || beatPulse == TwoMeasures
+        || beatPulse == Phrase;
+  }
+
+  bool applyLegacyStates(const TubeStates& update) {
+    if (!isValidLegacyState(update.current) || !isValidLegacyState(update.next))
+      return false;
+
+    TubeState state = update.current;
+    next_state = update.next;
+    if (node.serialTraceEnabled()) {
+      state.print();
+      next_state.print();
+    }
+
+    // Apply the complete v2 snapshot only after every field has passed ingress validation.
+    v3RuntimePaletteActive = false;
+    load_pattern(state);
+    load_palette(state);
+    load_effect(state);
+    if (!deferredBpmBroadcast.active())
+      beats.sync(state.bpm, state.beat_frame);
+    return true;
+  }
+
+  virtual bool isValidV2Command(CommandId command, const uint8_t* data) const override {
+    switch (command) {
+      case COMMAND_STATE: {
+        TubeStates update;
+        memcpy(&update, data, sizeof(update));
+        return isValidLegacyState(update.current) && isValidLegacyState(update.next);
+      }
+      case COMMAND_BEATS: {
+        accum88 bpm;
+        memcpy(&bpm, data, sizeof(bpm));
+        return bpm >= (40U << 8) && bpm <= (300U << 8);
+      }
+      case COMMAND_INFO:
+      case COMMAND_UPGRADE:
+        return true;
+      case COMMAND_OPTIONS:
+        return data[0] <= 1;
+      case COMMAND_ACTION:
+        return isValidActionPayload(data, MESSAGE_DATA_SIZE, false);
+      default:
+        return false;
+    }
+  }
+
   virtual bool onCommand(CommandId command, void *data) override {
+    return applyCommand(command, data);
+  }
+
+  virtual bool onV2Message(const NodeMessage& message) override {
+    V3ProjectionTrailer trailer;
+    if (readV3ProjectionTrailer(message, trailer))
+      return true;
+
+    // A gen1 Control owner never accepts gen0 visual or Control authority. The
+    // legacy-only upgrade offer remains usable because it carries no rendered state.
+    if (message.command == COMMAND_UPGRADE)
+      return applyCommand(message.command, const_cast<uint8_t*>(message.data));
+    return false;
+  }
+
+  bool applyCommand(CommandId command, void *data) {
     switch (command) {
       case COMMAND_INFO:
-        Serial.printf("   \"%s\"\n",
+        Serial.printf("   \"%.*s\"\n",
+          int(sizeof(((NodeInfo*)data)->message)),
           ((NodeInfo*)data)->message
         );
         return true;
@@ -1707,23 +2555,9 @@ class PatternController : public MessageReceiver {
         return true;
 
       case COMMAND_STATE: {
-        auto update_data = (TubeStates*)data;
-
-        TubeState state;
-        memcpy(&state, &update_data->current, sizeof(TubeState));
-        memcpy(&next_state, &update_data->next, sizeof(TubeState));
-        state.print();
-        next_state.print();
-
-        // Catch up to this state
-        load_pattern(state);
-        load_palette(state);
-        load_effect(state);
-        // Visual state still follows the root, but its old clock must not undo a local
-        // BPM change that is waiting for this device's phrase boundary.
-        if (!deferredBpmBroadcast.active())
-          beats.sync(state.bpm, state.beat_frame);
-        return true;
+        TubeStates update;
+        memcpy(&update, data, sizeof(update));
+        return applyLegacyStates(update);
       }
 
       case COMMAND_UPGRADE:
@@ -1740,6 +2574,8 @@ class PatternController : public MessageReceiver {
         return true;
 
       case COMMAND_BEATS:
+        if (*(accum88*)data < (40U << 8) || *(accum88*)data > (300U << 8))
+          return false;
         // A declared BPM supersedes any local change that has not reached its boundary.
         deferredBpmBroadcast.cancel();
         apply_bpm(*(accum88*)data);
@@ -1749,6 +2585,493 @@ class PatternController : public MessageReceiver {
     Serial.printf("UNKNOWN COMMAND %02X", command);
     return false;
   }
+
+  virtual void onV2PacketObserved(const NodeMessage& message) override {
+    (void)message;
+    v3.observeLegacyPacket();
+  }
+
+  // AI: below section was generated by an AI
+  bool isValidPatternChannelState(const PatternChannelState& state) const {
+    auto valid = [this](const PatternChannelEntry& entry) {
+      return entry.patternId < gPatternCount
+          && entry.syncMode <= SwingDrift
+          && entry.effect <= Flash
+          && entry.pen <= Flicker
+          && isValidBeatPulse(entry.beat);
+    };
+    return valid(state.current) && valid(state.next);
+  }
+
+  virtual bool isValidV3Channel(
+      uint8_t channel,
+      const TubesChannelPayload& payload,
+      const MeshNodeHeader& transportSender,
+      MessageRecipients recipients
+  ) const override {
+    (void)transportSender;
+    if (!isValidTubesChannelPayload(channel, payload))
+      return false;
+    if (payload.envelope.messageKind == ControlBeacon)
+      return channel == ControlChannel && recipients == RECIPIENTS_NEIGHBORS;
+    if (payload.envelope.messageKind == ChannelRequest && recipients != RECIPIENTS_ROOT)
+      return false;
+    if (payload.envelope.messageKind == ChannelDeclaration && recipients != RECIPIENTS_ALL)
+      return false;
+
+    if (channel == BeatChannel) {
+      BeatChannelState state;
+      return readChannelBody(payload, state)
+          && state.bpm >= (40U << 8)
+          && state.bpm <= (300U << 8);
+    }
+    if (channel == PatternChannel) {
+      PatternChannelState state;
+      return readChannelBody(payload, state) && isValidPatternChannelState(state);
+    }
+    if (channel == PaletteChannel) {
+      PaletteChannelState state;
+      return readChannelBody(payload, state)
+          && state.current.paletteId < gGradientPaletteCount
+          && state.next.paletteId < gGradientPaletteCount;
+    }
+    if (channel == ControlChannel) {
+      ControlChannelBody control;
+      memset(&control, 0, sizeof(control));
+      memcpy(&control, payload.body, payload.envelope.bodyLength);
+      if (control.command == COMMAND_STATE || control.command == COMMAND_BEATS)
+        return false;
+      return isValidV2Command(control.command, control.commandData);
+    }
+    return false;
+  }
+
+  bool applyApplicationChannel(uint8_t channel, const TubesChannelPayload& payload) {
+    if (channel == BeatChannel) {
+      BeatChannelState state;
+      if (!readChannelBody(payload, state)) return false;
+      deferredBpmBroadcast.cancel();
+      beats.sync(state.bpm, state.beatFrame);
+      return true;
+    }
+    if (channel == PatternChannel) {
+      PatternChannelState state;
+      if (!readChannelBody(payload, state)) return false;
+      TubeState current = current_state;
+      current.pattern_phrase = state.current.patternPhrase;
+      current.pattern_id = state.current.patternId;
+      current.pattern_sync_id = state.current.syncMode;
+      current.effect_phrase = state.current.effectPhrase;
+      current.effect_params = EffectParameters(
+          EffectMode(state.current.effect),
+          PenMode(state.current.pen),
+          BeatPulse(state.current.beat),
+          state.current.chance
+      );
+      next_state.pattern_phrase = state.next.patternPhrase;
+      next_state.pattern_id = state.next.patternId;
+      next_state.pattern_sync_id = state.next.syncMode;
+      next_state.effect_phrase = state.next.effectPhrase;
+      next_state.effect_params = EffectParameters(
+          EffectMode(state.next.effect),
+          PenMode(state.next.pen),
+          BeatPulse(state.next.beat),
+          state.next.chance
+      );
+      load_pattern(current);
+      load_effect(current);
+      return true;
+    }
+    if (channel == PaletteChannel) {
+      PaletteChannelState state;
+      if (!readChannelBody(payload, state)) return false;
+      TubeState current = current_state;
+      current.palette_phrase = state.current.palettePhrase;
+      current.palette_id = state.current.paletteId;
+      next_state.palette_phrase = state.next.palettePhrase;
+      next_state.palette_id = state.next.paletteId;
+      v3RuntimePaletteActive = false;
+      load_palette(current);
+      return true;
+    }
+    return false;
+  }
+
+  virtual bool onV3Channel(
+      uint8_t channel,
+      const TubesChannelPayload& payload,
+      const MeshNodeHeader& transportSender,
+      MessageRecipients recipients
+  ) override {
+    (void)transportSender;
+    (void)recipients;
+    if (payload.envelope.messageKind == ControlBeacon)
+      return true;
+
+    if (channel == ControlChannel) {
+      ControlChannelBody control;
+      memset(&control, 0, sizeof(control));
+      memcpy(&control, payload.body, payload.envelope.bodyLength);
+      bool applied = applyCommand(control.command, control.commandData);
+      if (applied && !node.isFollowing()
+          && payload.envelope.messageKind == ChannelRequest)
+        sendLegacyCommand(control.command, control.commandData, control.commandLength);
+      return applied;
+    }
+
+    bool accepted = payload.envelope.messageKind == ChannelRequest
+        ? channelWinners.acceptRequest(channel, payload.envelope, millis())
+        : channelWinners.acceptDeclaration(channel, payload.envelope, millis());
+    if (!accepted)
+      return false;
+    channelSnapshots[channelIndex(channel)] = payload;
+    bool applied = applyApplicationChannel(channel, payload);
+    if (applied && !node.isFollowing())
+      publishV2Projection();
+    return applied;
+  }
+  // AI: end
+
+  // Prove topic ranges at ingress; only applying nodes require referenced cache entries,
+  // because an upward relay intentionally does not apply or cache Root requests.
+  bool isValidV3TopicSemantics(
+      uint8_t topic,
+      const V3TopicPayload& payload,
+      const MeshNodeHeader& transportSender,
+      MessageRecipients recipients,
+      uint32_t nowMs,
+      bool requireCachedReferences
+  ) const {
+    if (topic == V3TopicPresence && payload.envelope.messageKind != V3State)
+      return false;
+    if (payload.envelope.messageKind == V3Claim
+        || payload.envelope.messageKind == V3Release
+        || payload.envelope.messageKind == V3Heartbeat)
+      return true;
+
+    switch (topic) {
+      case V3TopicPresence: {
+        V3PresencePayload presence;
+        return readV3Body(payload, presence)
+            && recipients == RECIPIENTS_NEIGHBORS
+            && presence.minimumOuterVersion <= presence.maximumOuterVersion
+            && presence.maximumOuterVersion >= TUBES_PROTOCOL_V3
+            && presence.protocolMode == 0
+            && presence.maximumBodyLength <= TUBES_V3_BODY_SIZE
+            && presence.bootSession != 0;
+      }
+      case V3TopicBeat: {
+        V3BeatPayload beat;
+        if (!readV3Body(payload, beat) || beat.bpm < (40U << 8) || beat.bpm > (300U << 8))
+          return false;
+        int32_t elapsedMs = int32_t(strip.timebase + nowMs - beat.measuredAtTimebase);
+        return elapsedMs >= -1000 && elapsedMs <= 60000;
+      }
+      case V3TopicPattern: {
+        V3PatternPayload pattern;
+        return readV3Body(payload, pattern)
+            && pattern.current.patternId < gPatternCount
+            && pattern.next.patternId < gPatternCount
+            && pattern.current.syncMode <= SwingDrift
+            && pattern.next.syncMode <= SwingDrift
+            && pattern.current.legacyPatternId < gPatternCount
+            && pattern.next.legacyPatternId < gPatternCount
+            && pattern.current.legacySyncMode <= SwingDrift
+            && pattern.next.legacySyncMode <= SwingDrift
+            && int16_t(pattern.current.effectivePhrase - currentPhrase()) <= 0
+            && int16_t(pattern.next.effectivePhrase - currentPhrase()) >= -1
+            && int16_t(pattern.next.effectivePhrase - currentPhrase()) <= 1024;
+      }
+      case V3TopicPalette:
+        if (payload.envelope.messageKind == V3Definition)
+          if (payload.envelope.bodyLength == sizeof(V3Palette16Definition))
+            return true;
+          else if (payload.envelope.bodyLength == sizeof(V3GradientPaletteDefinition)) {
+            V3GradientPaletteDefinition gradient;
+            V3Palette16Definition expanded;
+            return readV3Body(payload, gradient) && expandV3Gradient(gradient, expanded);
+          } else
+            return false;
+        if (payload.envelope.messageKind == V3Schedule) {
+          V3PaletteSchedulePayload schedule;
+          if (!readV3Body(payload, schedule)
+              || schedule.legacyPaletteId >= gGradientPaletteCount
+              || (schedule.paletteFormat != V3PaletteLegacyId
+                  && schedule.paletteFormat != V3Palette16
+                  && schedule.paletteFormat != V3PaletteGradientStops)
+              || schedule.transitionMs > 60000
+              || int16_t(schedule.effectivePhrase - currentPhrase()) < -1
+              || int16_t(schedule.effectivePhrase - currentPhrase()) > 1024)
+            return false;
+          return schedule.paletteFormat == V3PaletteLegacyId
+              || !requireCachedReferences
+              || v3.palettes.find(
+                  payload.envelope.authorityId,
+                  payload.envelope.authoritySession,
+                  schedule.definitionSequence) != nullptr;
+        }
+        return false;
+      case V3TopicEffect: {
+        V3EffectPayload effect;
+        return readV3Body(payload, effect)
+            && effect.current.effect <= Flash
+            && effect.next.effect <= Flash
+            && effect.current.pen <= Flicker
+            && effect.next.pen <= Flicker
+            && isValidBeatPulse(effect.current.beat)
+            && isValidBeatPulse(effect.next.beat)
+            && int16_t(effect.current.effectivePhrase - currentPhrase()) <= 0
+            && int16_t(effect.next.effectivePhrase - currentPhrase()) >= -1
+            && int16_t(effect.next.effectivePhrase - currentPhrase()) <= 1024;
+      }
+      case V3TopicDebug: {
+        V3DebugPayload debug;
+        return readV3Body(payload, debug) && debug.enabled <= 1;
+      }
+      case V3TopicPosition:
+        if (payload.envelope.messageKind == V3State) {
+          V3PositionFramePayload frame;
+          return readV3Body(payload, frame)
+              && frame.frameNamespace != 0
+              && frame.originId != 0
+              && frame.flags == 0
+              && frame.reserved[0] == 0
+              && frame.reserved[1] == 0
+              && frame.reserved[2] == 0;
+        }
+        if (payload.envelope.messageKind == V3Advertisement) {
+          V3PositionAdvertisementPayload advertisement;
+          return recipients == RECIPIENTS_NEIGHBORS
+              && payload.envelope.authorityId == transportSender.id
+              && readV3Body(payload, advertisement)
+              && advertisement.bootSession == payload.envelope.authoritySession
+              && advertisement.frameNamespace != 0
+              && v3.hasPositionFrame
+              && advertisement.frameNamespace == v3.positionFrame.frameNamespace
+              && advertisement.frameEpoch == v3.positionFrame.frameEpoch
+              && !(advertisement.flags & ~(V3PositionValid | V3PositionAnchor | V3PositionSettled | V3PositionAmbiguous));
+        }
+        return false;
+      case V3TopicControl: {
+        V3ControlPayload control;
+        memset(&control, 0, sizeof(control));
+        memcpy(&control, payload.body, payload.envelope.bodyLength);
+        switch (control.command) {
+          case COMMAND_OPTIONS:
+            return control.commandLength == sizeof(ControllerOptions)
+                && control.commandData[0] <= 1;
+          case COMMAND_INFO: return control.commandLength == sizeof(NodeInfo);
+          case COMMAND_ACTION:
+            return isValidActionPayload(control.commandData, control.commandLength, true);
+          default: return false;
+        }
+      }
+    }
+    return false;
+  }
+
+  virtual bool isValidV3Topic(
+      uint8_t topic,
+      const V3TopicPayload& payload,
+      const MeshNodeHeader& transportSender,
+      MessageRecipients recipients,
+      int8_t rssi
+  ) const override {
+    (void)rssi;
+    return isValidV3TopicSemantics(topic, payload, transportSender, recipients, millis(), false);
+  }
+
+  virtual bool onV3Topic(
+      uint8_t topic,
+      const V3TopicPayload& payload,
+      const MeshNodeHeader& transportSender,
+      MessageRecipients recipients,
+      int8_t rssi
+  ) override {
+    uint32_t nowMs = millis();
+    if (!isKnownV3Topic(topic)) {
+      v3.counters.unknown++;
+      return false;
+    }
+    if (!isValidV3TopicSemantics(topic, payload, transportSender, recipients, nowMs, true))
+      return false;
+
+    if (topic == V3TopicPresence) {
+      V3PresencePayload presence;
+      if (!readV3Body(payload, presence))
+        return false;
+      return v3.acceptTopic(topic, payload, nowMs);
+    }
+
+    if (!v3.acceptTopic(topic, payload, nowMs))
+      return false;
+    if (payload.envelope.messageKind == V3Claim
+        || payload.envelope.messageKind == V3Release
+        || payload.envelope.messageKind == V3Heartbeat)
+      return true;
+
+    switch (topic) {
+      case V3TopicBeat: {
+        V3BeatPayload beat;
+        if (!readV3Body(payload, beat)
+            || beat.bpm < (40U << 8)
+            || beat.bpm > (300U << 8))
+          return false;
+        uint32_t localTimebase = strip.timebase + nowMs;
+        int32_t elapsedMs = int32_t(localTimebase - beat.measuredAtTimebase);
+        if (elapsedMs < -1000 || elapsedMs > 60000)
+          return false;
+        uint32_t projectedFrame = beat.beatFrame;
+        if (elapsedMs > 0)
+          projectedFrame += (uint64_t(uint32_t(elapsedMs)) * beat.bpm) / 60000U;
+        deferredBpmBroadcast.cancel();
+        beats.sync(beat.bpm, projectedFrame);
+        update_beat();
+        return true;
+      }
+
+      case V3TopicPattern: {
+        V3PatternPayload pattern;
+        if (!readV3Body(payload, pattern)
+            || pattern.current.patternId >= gPatternCount
+            || pattern.next.patternId >= gPatternCount
+            || pattern.current.syncMode > SwingDrift
+            || pattern.next.syncMode > SwingDrift
+            || pattern.current.legacyPatternId >= gPatternCount
+            || pattern.next.legacyPatternId >= gPatternCount)
+          return false;
+        TubeState state = current_state;
+        state.pattern_phrase = pattern.current.effectivePhrase;
+        state.pattern_id = pattern.current.patternId;
+        state.pattern_sync_id = pattern.current.syncMode;
+        load_pattern(state);
+        next_state.pattern_phrase = pattern.next.effectivePhrase;
+        next_state.pattern_id = pattern.next.patternId;
+        next_state.pattern_sync_id = pattern.next.syncMode;
+        return true;
+      }
+
+      case V3TopicPalette:
+        if (payload.envelope.messageKind == V3Definition) {
+          V3Palette16Definition definition;
+          if (payload.envelope.bodyLength == sizeof(V3GradientPaletteDefinition)) {
+            V3GradientPaletteDefinition gradient;
+            if (!readV3Body(payload, gradient) || !expandV3Gradient(gradient, definition))
+              return false;
+          } else if (!readV3Body(payload, definition)) {
+            return false;
+          }
+          v3.palettes.store(payload.envelope, definition);
+          return true;
+        }
+        if (payload.envelope.messageKind == V3Schedule) {
+          V3PaletteSchedulePayload schedule;
+          if (!readV3Body(payload, schedule)
+              || schedule.legacyPaletteId >= gGradientPaletteCount
+              || (schedule.paletteFormat != V3PaletteLegacyId
+                  && schedule.paletteFormat != V3Palette16
+                  && schedule.paletteFormat != V3PaletteGradientStops))
+            return false;
+          if (int16_t(schedule.effectivePhrase - currentPhrase()) < -1)
+            return false;
+          if (schedule.paletteFormat == V3Palette16 || schedule.paletteFormat == V3PaletteGradientStops) {
+            const V3Palette16Definition* definition = v3.palettes.find(
+                payload.envelope.authorityId,
+                payload.envelope.authoritySession,
+                schedule.definitionSequence
+            );
+            if (!definition)
+              return false;
+            v3PendingPaletteDefinition = *definition;
+          }
+          v3PendingPaletteSchedule = schedule;
+          v3PalettePending = true;
+          return true;
+        }
+        return false;
+
+      case V3TopicEffect: {
+        V3EffectPayload effect;
+        if (!readV3Body(payload, effect)
+            || effect.current.effect > Flash
+            || effect.next.effect > Flash
+            || effect.current.pen > Flicker
+            || effect.next.pen > Flicker)
+          return false;
+        TubeState state = current_state;
+        state.effect_phrase = effect.current.effectivePhrase;
+        state.effect_params = EffectParameters(
+            EffectMode(effect.current.effect),
+            PenMode(effect.current.pen),
+            BeatPulse(effect.current.beat),
+            effect.current.chance
+        );
+        if (!isValidLegacyState(state))
+          return false;
+        load_effect(state);
+        next_state.effect_phrase = effect.next.effectivePhrase;
+        next_state.effect_params = EffectParameters(
+            EffectMode(effect.next.effect),
+            PenMode(effect.next.pen),
+            BeatPulse(effect.next.beat),
+            effect.next.chance
+        );
+        return isValidLegacyState(next_state);
+      }
+
+      case V3TopicDebug: {
+        V3DebugPayload debug;
+        if (!readV3Body(payload, debug) || debug.enabled > 1)
+          return false;
+        options.debugging = debug.enabled;
+        v3DebugOverlayMask = debug.overlayMask;
+        v3DebugVerbosity = debug.verbosity;
+        if (debug.expiresAfterSeconds)
+          v3DebugExpiryTimer.start(uint32_t(debug.expiresAfterSeconds) * 1000U);
+        else
+          v3DebugExpiryTimer.stop();
+        v3DebugExpiryActive = debug.expiresAfterSeconds != 0;
+        return true;
+      }
+
+      case V3TopicPosition:
+        if (payload.envelope.messageKind == V3State) {
+          V3PositionFramePayload frame;
+          if (!readV3Body(payload, frame) || frame.reserved[0] || frame.reserved[1] || frame.reserved[2])
+            return false;
+          v3.positionFrame = frame;
+          v3.hasPositionFrame = true;
+          return true;
+        }
+        if (payload.envelope.messageKind == V3Advertisement && recipients == RECIPIENTS_NEIGHBORS) {
+          V3PositionAdvertisementPayload advertisement;
+          if (!readV3Body(payload, advertisement)
+              || advertisement.flags & ~(V3PositionValid | V3PositionAnchor | V3PositionSettled | V3PositionAmbiguous))
+            return false;
+          v3.positionPeers.observe(transportSender.id, rssi, nowMs, advertisement);
+          return true;
+        }
+        return false;
+
+      case V3TopicControl: {
+        V3ControlPayload control;
+        memset(&control, 0, sizeof(control));
+        memcpy(&control, payload.body, payload.envelope.bodyLength);
+        if (control.command == COMMAND_STATE || control.command == COMMAND_UPGRADE)
+          return false;
+        if (control.command == COMMAND_OPTIONS) {
+          ControllerOptions receivedOptions;
+          memcpy(&receivedOptions, control.commandData, sizeof(receivedOptions));
+          options.brightness = receivedOptions.brightness;
+          load_options(options);
+          return true;
+        }
+        return applyCommand(control.command, control.commandData);
+      }
+    }
+    return false;
+  }
+  // AI: end
 
   void onAction(Action* action) {
     TubeOperation operation;

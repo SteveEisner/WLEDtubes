@@ -114,8 +114,9 @@ does not pass until it has joined an uplink, so a reachable but detached device
 cannot be counted as a successful upgrade.
 
 The general Dig2Go profile does not define `GOLDEN` or `CHRISTMAS`.
-Those intentional installation profiles retain their special palettes, node
-`0xFFF`, and master behavior under distinct release names. Once a MAC is
+Those intentional installation profiles retain their special palettes,
+protocol-local value `0xFFF` (Device ID `0x1FFF` in protocol generation 1), and
+master behavior under distinct release names. Once a MAC is
 enrolled as a special profile, the updater refuses to replace it with standard
 Dig2Go firmware. The mesh report also verifies the compiled variant.
 

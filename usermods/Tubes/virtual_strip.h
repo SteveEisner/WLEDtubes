@@ -68,11 +68,14 @@ class VirtualStrip {
   }
 
 
-  void load(Background &b, uint8_t fs=DEFAULT_FADE_SPEED)
+  void load(Background &b, uint8_t fs=DEFAULT_FADE_SPEED, const CRGBPalette16* runtimePalette=nullptr)
   {
     background = b;
     // Snapshot palette colors so fading layers keep their original color intent.
-    loadPalette(background.palette_id);
+    if (runtimePalette)
+      palette = *runtimePalette;
+    else
+      loadPalette(background.palette_id);
     fade = FadeIn;
     fader = 0;
     fade_speed = fs;

@@ -167,10 +167,22 @@ void drawNoise(VirtualStrip *strip)
 void draw_wled_fx(VirtualStrip *strip) {
 }
 
+enum PatternRenderOption : uint8_t {
+  PatternRenderCheck1 = 1U << 0,
+  PatternRenderCheck2 = 1U << 1,
+  PatternRenderCheck3 = 1U << 2,
+};
+
+struct PatternRenderOptions {
+  uint8_t checkMask;
+  uint8_t checkValues;
+};
+
 typedef struct {
   uint8_t wled_fx_id;
   BackgroundFn backgroundFn;
   ControlParameters control;
+  PatternRenderOptions renderOptions;
 } PatternDef;
 
 
@@ -228,7 +240,8 @@ PatternDef gPatterns[] = {
   {FX_MODE_LAKE, draw_wled_fx, {ShortDuration}}, // 75
   {FX_MODE_LAKE, draw_wled_fx, {MediumDuration}}, // 75
   {FX_MODE_LAKE, draw_wled_fx, {LongDuration}}, // 75
-  {FX_MODE_METEOR_SMOOTH, draw_wled_fx, {MediumDuration}}, // 77
+  // WLED 16 merged legacy Meteor Smooth (77) into Meteor's Smooth option.
+  {FX_MODE_METEOR, draw_wled_fx, {MediumDuration}, {PatternRenderCheck3, PatternRenderCheck3}}, // 77
   {FX_MODE_STARBURST, draw_wled_fx, {ExtraShortDuration, HighEnergy}}, // 89
   {FX_MODE_EXPLODING_FIREWORKS, draw_wled_fx, {ExtraShortDuration}},// 90
       // TODO: Must be set to only fire from one side

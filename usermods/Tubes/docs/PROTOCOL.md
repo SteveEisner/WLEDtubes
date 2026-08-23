@@ -18,9 +18,10 @@ Protocol compatibility therefore means:
 - Existing v2 packets must keep their byte layout and semantic meaning.
 - Existing command IDs, pattern IDs, palette IDs, sync modes, effect modes, pen
   modes, action keys, and role values must not be repurposed.
-- Newer devices may add a future protocol, but must continue to speak v2 when a
-  legacy v2 device is nearby.
-- In a mixed flock, v2 `State` remains the shared visual contract.
+- Newer devices may add a future protocol, but their Control owner must project
+  representable state into v2 for legacy followers.
+- In a mixed flock, newer devices use their native declarations while legacy devices
+  render the Control owner's v2 `State` projection.
 - Future-only features should be additive: side-channel beacons, extension packets,
   capability-gated commands, or dual-broadcast behavior.
 
@@ -54,7 +55,10 @@ Rules for non-WLED implementations:
 - Set known reserved bytes to zero when generating packets.
 - Ignore reserved bytes when receiving packets.
 - Keep all payload fields at their documented offsets.
-- Leave unused bytes in the 64-byte command payload as zero.
+- Leave unused bytes in the 64-byte command payload as zero. The sole proposed
+  exception is the v3 compatibility bridge's marker in payload bytes `48..63`,
+  defined under [Legacy detection and compatibility trailer](#legacy-detection-and-compatibility-trailer);
+  v2-only receivers still ignore those bytes.
 
 ## Mesh Envelope
 
@@ -62,8 +66,8 @@ Every v2 Tubes mesh packet uses this 84-byte envelope:
 
 | Byte offset | Size | Name | Type | Meaning |
 |---:|---:|---|---|---|
-| 0 | 2 | `senderId` | `u16le` | Mesh ID of the node that transmitted this packet. |
-| 2 | 2 | `senderUplinkId` | `u16le` | Mesh ID the sender follows, or `0` if none. |
+| 0 | 2 | `senderId` | `u16le` | Device ID of the node that transmitted this packet. |
+| 2 | 2 | `senderUplinkId` | `u16le` | Device ID the sender follows, or `0` if none. |
 | 4 | 1 | `protocolVersion` | `u8` | Must be `2` for this protocol. |
 | 5 | 1 | `headerReserved` | `u8` | Reserved. Ignore on receive. Send as `0`. |
 | 6 | 2 | `reservedA` | `u16` | Reserved alignment bytes. Ignore on receive. Send as `0`. |
@@ -80,7 +84,7 @@ leader-election behavior.
 
 | Field | Meaning |
 |---|---|
-| `senderId` | The sender's current mesh ID. |
+| `senderId` | The sender's current Device ID. |
 | `senderUplinkId` | The ID this sender currently follows. `0` means the sender has no uplink. |
 | `protocolVersion` | The sender's mesh protocol version. Current deployed packets use `2`. |
 
@@ -95,6 +99,34 @@ Current ID conventions:
 
 If a node receives a packet with its own `senderId`, it treats that as an ID
 collision and chooses a new ID.
+
+### Generation-qualified Device IDs
+
+Beginning with the channel-protocol migration, the 16-bit `senderId` and
+`senderUplinkId` fields have a formal internal structure:
+
+| Bits | Name | Meaning |
+|---:|---|---|
+| `15..12` | Protocol generation | Protocol namespace; `0` is legacy and `1` is the channel protocol. |
+| `11..0` | Protocol-local value | Randomly generated or configured value within that protocol generation. |
+
+The complete word is the Device ID: `deviceId = (generation << 12) | protocolLocalValue`.
+Deployed v2 poles already
+emit generation `0` because their IDs occupy only the low 12 bits. A generation-1
+pole with protocol-local value `ADC` uses Device ID `1ADC` in native packets and V2-layout compatibility
+packets. Legacy receivers preserve all 16 bits and therefore interpret `1ADC` as an
+ordinary higher ID, which makes the generation transition backward compatible with
+their existing election algorithm.
+
+All routing, payload references, reports, diagnostics, collision checks, and operator
+references use the full Device ID. `0ADC` and `1ADC` are distinct and do not collide.
+The protocol-local value is used separately only while generating or normalizing an ID and in
+bounded calculations such as startup staggering and debug-pixel placement.
+
+The `protocolVersion` byte still selects the packet layout and decoder; it is separate
+from the generation nibble. See
+[`V3_CHANNEL_MIGRATION.md`](V3_CHANNEL_MIGRATION.md#device-identity-and-protocol-generation)
+for the generation-1 routing and migration rules.
 
 ## Recipient Classes
 
@@ -723,189 +755,598 @@ Recognized buttons:
 | 18 | Master only: 125 BPM and fire pattern. |
 | 19 | Master only: force pattern 38. |
 
-## Future Extension Shape
+## Version 3 Implementation Candidate
 
-Future protocols should be parallel and negotiable.
+This claim-based candidate and its fleet-wide compatibility fallback are retained as
+design history. They were superseded by `V3_CHANNEL_MIGRATION.md`; the implemented
+generation-1 protocol never yields visual authority to generation-0 `State` packets.
 
-### Version 3 WIP
+> **Superseded design:** The claim-based candidate below is retained as historical
+> context. The active implementation and migration contract is
+> [`V3_CHANNEL_MIGRATION.md`](V3_CHANNEL_MIGRATION.md), which keeps one Control tree,
+> carries Beat, Pattern, and Palette as requests and declarations, and forward-adapts
+> V2 state independently at every V3 receiver.
 
-Version 3 should be a set of topic protocols, not one larger replacement for
-`State`. Each topic has its own authority, role, cadence, and compatibility rules.
-The node that forwards a packet is only the transport sender; it is not necessarily
-the authority for every visual topic.
+This section defines the v3 implementation on the `codex/tubes-v3-protocol`
+branch. It is an implementation candidate, not yet a deployed fleet contract;
+mixed-fleet capture and hardware tests remain rollout gates.
 
-This lets the flock split leadership naturally. For example, a tube near the
-speakers can lead beat tracking while another tube controls palettes from the WLED
-interface and another controls generated patterns.
+Version 3 is a parallel, topic-oriented protocol carried by the same ESP-NOW
+transport. It is not a second radio network and it does not change the deployed v2
+contract. A v3-capable receiver understands both 84-byte packet families; a v2-only
+receiver continues to accept only packets whose outer version is `2`.
 
-### Topics
+V3 exists to separate responsibilities that v2 combines inside one `State` packet.
+Pattern, palette, beat, effect, debug, and position may each have a different
+authority. The transport root routes and arbitrates requests, but it does not
+automatically become the authority for every topic.
 
-Topics are numeric enum values on the wire, with space reserved for future
-expansion. Names below are documentation labels only.
+The central compatibility policy is conservative:
 
-| Value | Topic | Purpose | Expected cadence | Look-ahead behavior |
+- An all-v3 connected component sends v3 application traffic and no routine v2
+  traffic.
+- Hearing evidence of any genuine v2-only device causes v3 devices in that connected
+  component to enter v2 compatibility mode.
+- Compatibility mode stops v3 application topics and makes every upgraded device
+  render and broadcast the tested v2 visual contract.
+- Compatibility mode expires only after genuine legacy evidence has been absent for
+  a lease and upgraded devices reach a coordinated phrase boundary.
+- A disconnected component can know only about devices whose evidence reaches it.
+  "Any legacy pole" therefore means any legacy pole in the current radio-connected
+  component, not a device in an unreachable partition.
+
+### Design invariants
+
+The following are requirements, not implementation suggestions:
+
+1. V2 packet layouts, command IDs, registries, timing meanings, and visible behavior
+   remain unchanged.
+2. V3 authorities are independent. One device may lead beat while another leads
+   pattern, palette, debug, or the position frame.
+3. Unknown v3 topics, topic versions, fields, enum values, and flags are ignored.
+4. Every visual v3 value that cannot be represented exactly in v2 carries an explicit
+   v2 fallback.
+5. Scheduled visual topics retain look-ahead. A receiver should normally know the
+   current and next pattern, palette, and scheduled effect.
+6. Relays may change the physical transport sender, but never the logical topic
+   authority, authority session, sequence, or topic body.
+7. Every untrusted ESP-NOW packet is length-checked and range-checked before it may
+   alter routing, authority, clocks, rendering, or fixed-size caches.
+8. All protocol state is bounded. Topic caches, peer tables, duplicate filters, and
+   definition caches have compile-time capacities and deterministic eviction rules.
+
+### V3 outer packet
+
+The first v3 implementation keeps the 84-byte physical packet size and the same
+outer offsets as v2. This avoids a second receive-buffer shape and remains well below
+the 250-byte ESP-NOW v1 interoperability ceiling.
+
+| Byte offset | Size | V3 meaning |
+|---:|---:|---|
+| 0 | 2 | `transportSenderId`, the node physically transmitting this hop. |
+| 2 | 2 | `transportUplinkId`, the sender's current mesh uplink. |
+| 4 | 1 | Outer protocol version, exactly `3`. |
+| 5 | 3 | Reserved; send zero and ignore on receive. |
+| 8 | 4 | Recipient class using the existing `All`, `Root`, and `Info` values. |
+| 12 | 4 | Mesh timebase in milliseconds. |
+| 16 | 1 | Topic ID. |
+| 17 | 64 | Common topic envelope followed by at most 48 body bytes. |
+| 81 | 3 | Reserved; send zero and ignore on receive. |
+
+V3-capable firmware must accept outer versions `2` and `3` in its receive filter and
+dispatch them to separate decoders. A v3 packet is never cast to a v2 command payload,
+and a v2 packet is never interpreted as a v3 topic.
+
+### Topic registry
+
+Topics are stable numeric values. Retired values remain reserved permanently.
+
+| Value | Topic | Authority controls | Expected cadence | V2 fallback |
 |---:|---|---|---:|---|
-| `0x00` | `Presence` | Capabilities, protocol support, topic authority claims, future positional coordination. | Low | Current only. |
-| `0x01` | `Beat` | BPM, beat frame, source quality, latency/source metadata. | High | Live current value only; future music timing is unknown. |
-| `0x02` | `Pattern` | Generated background pattern selection and pattern parameters. | Low / on change | Current plus next, or phrase-keyed future values. |
-| `0x03` | `Palette` | Generated colors and palette timing. | Low / burst on change | Current plus next, or phrase-keyed future values. |
-| `0x04` | `Effect` | Generated particles, transforms, overlays, and effect parameters. | Event-driven | Immediate or scheduled by beat/phrase as needed. |
-| `0x05..0x7f` | reserved core topics | Future standard flock topics. | varies | varies |
-| `0x80..0xef` | experimental/vendor topics | Local experiments or vendor-specific extensions. | varies | varies |
-| `0xf0..0xff` | reserved control topics | Future protocol control / escape range. | varies | varies |
+| `0x00` | `Presence` | Capabilities and compatibility state; no visual authority. | One per 10 seconds per node, staggered. | Compatibility trailer only. |
+| `0x01` | `Beat` | BPM and beat phase. | On change and normally once per beat from one authority. | `State` clock fields plus phrase-boundary `Beats`. |
+| `0x02` | `Pattern` | Pattern, sync mode, and pattern parameters. | On change plus low-rate authority heartbeat. | `patternId`, `syncMode`, and phrase fields in `State`. |
+| `0x03` | `Palette` | Literal color palette and activation schedule. | Definition burst on change plus low-rate heartbeat. | `legacyPaletteId` and phrase fields in `State`. |
+| `0x04` | `Effect` | Overlay/effect parameters and schedule. | Event-driven plus low-rate authority heartbeat. | Existing v2 effect fields or `Action`. |
+| `0x05` | `Position` | Coordinate frame authority and direct-neighbor position beliefs. | Frame changes on demand; position advertisements about once per second per enabled node. | None; suspend in compatibility mode. |
+| `0x06` | `Debug` | Fleet debug overlay and diagnostic presentation. | On change plus low-rate authority heartbeat. | `Options.debugging`. |
+| `0x07` | `Control` | Existing non-visual v2 options, actions, and info while all-v3. | Event-driven. | Original v2 command. |
+| `0x08..0x7f` | reserved core | Future standard topics. | Varies. | Must be defined per topic. |
+| `0x80..0xef` | experimental/vendor | Local experiments. | Varies. | Must not affect v2 behavior without an explicit bridge. |
+| `0xf0..0xff` | reserved control | Future protocol control or escape range. | Varies. | None. |
 
-### Topic Roles
+### Common topic envelope
 
-Roles are per-topic, not global:
+Every v3 topic uses a fixed 16-byte common envelope. The topic body begins at payload
+offset 16 and is limited to 48 bytes.
 
-| Role | Meaning |
-|---|---|
-| `Leader` | This node is the current authority for the topic. |
-| `Follower` | This node follows another authority for the topic. |
-| topic-specific roles | Reserved for future roles such as beat sensor, palette director, spatial anchor, or bridge. |
+| Payload offset | Size | Field | Meaning |
+|---:|---:|---|---|
+| 0 | 1 | `topicVersion` | Version of this topic's body and semantics. |
+| 1 | 1 | `messageKind` | `Heartbeat=0`, `Claim=1`, `State=2`, `Release=3`, `Definition=4`, `Schedule=5`, or `Advertisement=6`. |
+| 2 | 1 | `flags` | Topic-defined optional flags. Unknown optional flags are ignored. |
+| 3 | 1 | `bodyLength` | Number of valid body bytes, `0..48`. |
+| 4 | 2 | `authorityId` | Logical authority for this topic; unaffected by relaying. |
+| 6 | 1 | `priority` | Authority class chosen by the topic policy. |
+| 7 | 1 | `quality` | Source quality where meaningful, otherwise zero. |
+| 8 | 4 | `authoritySession` | Random boot/claim nonce preventing an old authority session from reviving. |
+| 12 | 2 | `sequence` | Monotonic sequence within the authority session. |
+| 14 | 2 | `leaseDeciseconds` | Requested authority lease in 100 ms units, clamped by the receiver. |
 
-Each topic needs its own leader/follower IDs. A device may be leader for one topic
-and follower for another. Topic leadership should use hysteresis and explicit
-priority/quality fields where applicable, so leadership does not rapidly flap.
+The common envelope is positional and immutable. V3 topic version 1 uses fixed,
+packed bodies whose exact lengths are validated before decoding. A changed body
+shape requires a new topic version; unknown topic versions are ignored.
 
-### Common Topic Envelope
+### Routing and authority
 
-The exact v3 binary layout is not defined yet, but every topic message should carry
-these concepts:
-
-| Field | Meaning |
-|---|---|
-| `protocolVersion` | v3 or later protocol family. |
-| `topicId` | Numeric topic enum value. |
-| `topicVersion` | Version of this topic payload. |
-| `role` | Sender's role for this topic. |
-| `transportSenderId` | Node that transmitted this packet. |
-| `topicLeaderId` | Node currently claiming authority for this topic. |
-| `topicFollowerId` | Node this sender follows for this topic, or zero. |
-| `sequence` | Monotonic per-topic sequence/generation value. |
-| `payloadLength` | Allows receivers to skip unknown future fields. |
-| `flags` | Optional behavior bits. Unknown bits must be ignored. |
-
-### Palette Topic
-
-The first v3 palette design should keep color definitions inside `Palette`, not in
-a separate `PaletteDef` topic. A fixed `CRGBPalette16` value is 48 bytes, so the
-topic may need separate phrase-tagged packets for current and next palettes rather
-than trying to carry both in one small packet.
-
-Palette payloads should be able to express:
-
-| Field | Meaning |
-|---|---|
-| `paletteRole` | Current, next, preview, or future topic-specific role. |
-| `palettePhrase` | Phrase when this palette is active, when scheduled. |
-| `legacyPaletteId` | Best v2-compatible palette ID fallback. |
-| `paletteFormat` | `Palette16` first; future formats may add gradient stops. |
-| `paletteData` | Inline color data, such as 16 RGB colors for `Palette16`. |
-
-Receivers that understand v3 use the inline palette. Receivers that only understand
-v2 continue to use `legacyPaletteId` from the v2 compatibility bridge.
-
-### Beat Topic
-
-`Beat` is intentionally different from other visual topics. It should not require a
-future value because the likely use case is live music. A beat leader should send
-the best current timing estimate and enough quality metadata for followers to pick
-the best source.
-
-Likely fields include BPM, beat frame, confidence/quality, source type, source
-latency, and the leader's topic sequence.
-
-### Scheduled Visual Topics
-
-Visual topics that can be planned ahead should preserve the v2 look-ahead property.
-`Pattern`, `Palette`, and scheduled `Effect` data should either carry both current
-and next values or carry phrase-keyed values that receivers can cache before they
-become active. A single "current only" design would make v3 more fragile than v2
-during intermittent mesh reception.
-
-This matters for palette extensions. A fixed `CRGBPalette16` value is 48 bytes, so
-naively sending both current and next palettes would require 96 bytes before any
-metadata. That does not fit inside one v2-style 64-byte command payload. A v3
-palette topic should therefore use one of these shapes:
-
-| Shape | Meaning | Tradeoff |
-|---|---|---|
-| Separate current/next palette packets | Send one inline palette per packet, tagged by phrase or role. | Simple fixed payloads; requires receiver cache. |
-| Phrase-keyed palette cache inside Palette | Cache inline palette values by sequence/phrase, then reference them from later Palette messages. | Efficient once cached; needs cache invalidation/versioning. |
-| Larger future packet | A new negotiated transport can carry both palettes together. | Clean model; not compatible with v2 packet limits. |
-
-### Backward Compatibility
-
-Some form of backward compatibility is mandatory. The minimum acceptable behavior
-is an explicit option to downshift to v2 when a trigger is seen. Possible triggers:
-
-| Trigger | Expected behavior |
-|---|---|
-| A v2-only node is heard | Continue or resume v2 `State` broadcasting. |
-| A configured compatibility mode is enabled | Stay in mixed v2/v3 mode. |
-| v3 topic negotiation fails | Fall back to v2 for core flock behavior. |
-| A bridge node is present | Bridge v3 topic state into v2 `State` for legacy nodes. |
-
-Mixed flocks must keep the v2 core alive: beat, pattern, palette, and effect intent
-should continue to be translated into v2 `State`/`Beats`/`Action` behavior until a
-future deployment can safely stop doing so.
-
-### Forward Compatibility
-
-V3 should make future protocol changes easier than v2 did:
-
-| Mechanism | Requirement |
-|---|---|
-| Per-topic versions | A receiver can support `Beat` v3 while ignoring `Palette` v4. |
-| Tagged fields | Evolving topic payloads use numeric field IDs, not positional struct layouts. |
-| Length-delimited payloads | Unknown fields can be skipped without knowing their meaning. |
-| Reserved flags | Unknown flags are ignored unless a required-capability bit is defined. |
-| Capability advertisement | `Presence` advertises supported topics, topic versions, and limits. |
-| Unknown topic handling | Unknown numeric topic IDs must be ignored and must not affect visible output. |
-| Stable fallbacks | New richer values should include a v2-compatible fallback when possible. |
-
-The intent is to borrow protobuf's compatibility attributes, not necessarily to use
-protobuf itself. Topic payloads that are expected to evolve should be encoded as a
-small tagged field stream inside the topic envelope:
-
-| Attribute | Rule |
-|---|---|
-| Stable field numbers | Once assigned, a field number keeps the same meaning forever. |
-| Typed/skippable fields | Each field carries enough type or length information for an older receiver to skip it. |
-| Optional by default | Receivers must tolerate absent fields and use documented defaults. |
-| Additive changes | New behavior is added with new field numbers, not by changing old fields. |
-| No required new fields | A newer sender must not require old receivers to understand a new field for core flock behavior. |
-| Retired fields reserved | Removed fields are marked reserved and their numbers are never reused. |
-| Enum growth | Unknown enum values are ignored or treated as documented defaults. |
-| Order independent | Fields may appear in any order unless a topic explicitly says otherwise. |
-| Repetition allowed where defined | Repeated values use repeated fields or length-delimited arrays with explicit counts. |
-| Required capability bits | If a field changes interpretation rather than merely adding detail, advertise that through `Presence` before relying on it. |
-
-Fixed positional layouts are still acceptable for immutable headers and tiny
-compatibility shims, but topic payloads that may grow should follow these tagged
-field rules.
-
-Recommended channel split:
+Transport routing and topic authority are separate:
 
 ```mermaid
 flowchart LR
-  Presence["Presence / capabilities"] --> Bridge["Compatibility bridge"]
-  Beat["Beat / BPM"] --> Bridge
-  Palette["Palette intent"] --> Bridge
-  Pattern["Pattern intent"] --> Bridge
-  Effect["Effect / overlays"] --> Bridge
-  Bridge --> V2["v2 State packet for legacy flock"]
-  Bridge --> Future["Future packets for capable peers"]
+  C["Controller or sensor"] --> S["Any v3 device"]
+  S -->|"Root: claim/state request"| R["Current transport root"]
+  R -->|"All: canonical declaration"| F["V3 flock"]
+  P["Position observation"] -->|"Info: one hop only"| N["Direct radio neighbors"]
 ```
 
-Recommended migration behavior:
+- `Presence` and direct position advertisements use `Info` and are never relayed
+  verbatim.
+- Beat, pattern, palette, effect, and debug requests from followers travel `Root`.
+- The transport root validates a request, serializes competing claims, and emits the
+  canonical `All` declaration. Relays preserve the topic envelope and body.
+- A root is an arbiter and distributor. It does not replace `authorityId` with its
+  own ID unless it is itself the topic authority.
+- Only an explicit `Claim` may replace a live authority. Ordinary `State`,
+  `Definition`, `Schedule`, and `Heartbeat` packets from another source cannot claim
+  ownership accidentally.
+- A valid `Release` ends the matching authority session. Silence also releases the
+  authority after its lease; followers retain the last valid state rather than
+  resetting visually.
+- The root accepts a new operator claim in receive order. Within a stable component,
+  the latest accepted explicit claim therefore wins. After partitions merge, the
+  surviving transport root republishes its canonical topic authorities; equal-priority
+  unresolved conflicts use the higher authority ID as a deterministic tie-breaker.
+- Receivers reject stale sessions, duplicate or backward sequences, excessive leases,
+  impossible effective times, and topic values outside their documented ranges.
 
-- Send future capability beacons at low cadence.
-- Continue to send v2 `State` while any legacy v2 node is heard.
-- Use hysteresis before entering or leaving future-only mode.
-- In mixed mode, translate future state back into v2 `VisualState`.
-- Never require old nodes to understand new fields to preserve the core flock.
+Topic leases are intentionally independent. Loss of a beat authority does not
+release the palette authority, and a debug claim does not alter pattern leadership.
+
+### Presence and capabilities
+
+`Presence` uses `Info` routing and a fixed 12-byte state body:
+
+| Body offset | Size | Field |
+|---:|---:|---|
+| 0 | 1 | Minimum supported outer version. |
+| 1 | 1 | Maximum supported outer version. |
+| 2 | 1 | Current compatibility mode. |
+| 3 | 1 | Maximum accepted topic body length. |
+| 4 | 2 | Supported topic bit mask. |
+| 6 | 1 | Supported palette-format bit mask. |
+| 7 | 1 | Palette-definition cache entries. |
+| 8 | 4 | Sender boot session. |
+
+Presence is advisory. A receiver still validates every packet and never assumes that
+a capability beacon guarantees successful delivery. Devices do not wait for a known
+population or unanimous negotiation before operating; they act on the bounded local
+evidence they have heard.
+
+### Beat authority
+
+The Beat topic makes beat authority independent of transport root and visual master
+roles. Its initial state body contains:
+
+| Field | Meaning |
+|---|---|
+| `bpm` | Unsigned 8.8 fixed-point BPM. |
+| `beatFrame` | Complete unsigned 24.8 beat position. |
+| `measuredAtTimebase` | Mesh time at which `beatFrame` was valid. |
+| `sourceType` | Tap, microphone, USB/application, fixed clock, or future source. |
+| `sourceLatencyMs` | Estimated source-processing delay, clamped to a topic maximum. |
+| `quality` | Common-envelope quality score used for diagnostics and optional source policy. |
+
+The source applies a new beat locally and issues a v3 request immediately. Followers
+extrapolate from `measuredAtTimebase`; the first implementation may snap to large
+errors and leave small errors alone until slewing has been evaluated.
+
+The root accepts ticks only from the active authority/session. A roughly four-second
+default lease is renewed by valid Beat states. On expiry, every device free-runs from
+the last valid BPM and frame.
+
+When entering compatibility mode, the bridge writes the active BPM and beat frame
+into v2 `State`. A BPM change also schedules one legacy `Beats` declaration at the
+source's next phrase boundary. Upgraded receivers relay but do not reapply their own
+echoed legacy declaration while that bridge transition is pending.
+
+### Pattern authority
+
+Pattern owns pattern selection and sync mode but does not own palette, beat, effect,
+or debug state. Its body supports current and next phrase-keyed entries containing:
+
+- pattern definition or stable pattern ID;
+- sync mode;
+- pattern-specific bounded parameters;
+- effective phrase;
+- explicit `legacyPatternId` and `legacySyncMode`.
+
+The first implementation should accept existing v2 pattern IDs and parameters before
+adding generated pattern definitions. Pattern changes activate only at their declared
+phrase. Missing, invalid, or unsupported future definitions leave the current pattern
+running.
+
+### Palette authority and literal colors
+
+Palette is the color-master protocol. A palette authority can transmit colors that
+are not compiled into the Tubes palette registry. Literal palettes are runtime state,
+not persistent WLED custom-palette files, so frequent changes do not write flash.
+
+The initial formats are:
+
+| Format | Encoding | Use |
+|---|---|---|
+| `Palette16` | Sixteen RGB888 colors, exactly 48 body bytes. | Exact FastLED/WLED runtime palette. |
+| `GradientStops` | One-byte count plus eight fixed `(position, R, G, B)` slots, exactly 33 body bytes. | Compact arbitrary gradients normalized atomically to `Palette16`. |
+| `LegacyId` | Existing v2 palette ID. | No literal definition required. |
+
+Because a `Palette16` consumes the entire 48-byte topic body, definition and
+activation are separate messages:
+
+1. `Definition` carries one palette. The tuple `(authorityId, authoritySession,
+   sequence)` is its definition key.
+2. Receivers validate and cache the definition in a fixed two-entry current/next
+   cache.
+3. `Schedule` references the definition sequence, supplies an effective phrase,
+   transition duration, and `legacyPaletteId`.
+4. A receiver activates only a complete cached definition. A missing definition
+   leaves the current palette unchanged and causes later repeated definitions to heal
+   the state.
+
+The authority sends a new definition in a short jittered burst, follows it with the
+schedule, and periodically repeats current and next definitions at low cadence for
+late joiners. The schedule is sent before the activation phrase with enough lead time
+for intermittent reception. Receivers never display a partially received palette.
+
+Every literal palette schedule must include a stable v2 `legacyPaletteId`. On
+compatibility entry, upgraded and legacy devices all use that fallback ID at the next
+palette boundary. The fallback may be approximate, but it prevents upgraded devices
+from retaining colors that old devices cannot reproduce.
+
+The fixed eight-byte schedule body is `definitionSequence:u16`,
+`effectivePhrase:u16`, `transitionMs:u16`, `legacyPaletteId:u8`, and
+`paletteFormat:u8`, all little-endian where wider than one byte.
+
+### Effect authority
+
+Effect owns generated particles, overlays, transforms, and their activation times.
+It does not alter the base pattern or palette. Scheduled effects carry an effective
+beat or phrase; immediate transient effects carry a bounded lifetime and sequence so
+duplicates can be discarded.
+
+Every persistent effect state supplies existing v2 effect, pen, pulse, and chance
+fallbacks. A future effect with no safe v2 representation must fall back to `None`,
+not to a reused effect ID with different meaning.
+
+### Debug authority
+
+Debug is a separate operator-controlled topic. Its first version carries:
+
+- enabled/disabled state;
+- a bounded overlay mask for beat marker, node ID, logical leader, physical relay,
+  role, and radio/position quality indicators;
+- diagnostic verbosity;
+- optional automatic expiry.
+
+Only the enabled bit maps to v2 `Options.debugging`; the remaining indicators are
+v3-only. Debug authority uses the ordinary claim/session/lease machinery so a stale
+debug controller cannot leave an installation permanently covered by diagnostics.
+Entering compatibility mode disables v3-only indicators and uses the bridged v2
+debugging bit on every upgraded device.
+
+### Control topic
+
+Control carries the existing `Options`, `Action`, and `Info` commands without
+forcing an all-v3 component to emit legacy packets. Its body begins with the v2
+command ID and a one-byte command length, followed by at most 46 command bytes.
+Receivers accept only those three known commands with their existing validated body
+shapes. Upgrade offers remain v2-compatibility-only because their current platform
+shape is not a stable bounded payload.
+
+### Position frame authority and distributed estimates
+
+"Position master" means coordinate-frame authority, not a central position solver.
+It establishes the frame namespace, epoch, origin, axis, and positive-Y convention.
+Each device still estimates only its own position from direct radio neighbors using
+bounded local state, as specified in
+[`../simulator/POSITIONING_PROTOCOL_DESIGN.md`](../simulator/POSITIONING_PROTOCOL_DESIGN.md).
+
+Position has two message classes:
+
+- Frame `Claim`, `State`, and `Release` use root arbitration when an operator or
+  configured anchor establishes a frame authority.
+- Position advertisements use `Neighbors`, remain one-hop, and associate RSSI only with
+  the physical transport sender. A device propagates a frame by advertising its own
+  resulting belief, never by relaying somebody else's position packet verbatim.
+
+Without an explicit position authority, configured anchors or deterministic floating
+origin/axis/orientation election provide the frame exactly as in the positioning
+design. Frame authority and lighting topics remain independent.
+
+Positioning is suspended in compatibility mode because v2 has no position contract.
+An upgraded device may retain its last estimate internally, but it marks the estimate
+stale and neither broadcasts nor uses it for new visible behavior. Resuming v3 starts
+a new position authority session or revalidates the configured anchored frame before
+the estimate becomes usable again.
+
+The candidate implements frame authority, an eight-entry direct-peer table with a
+five-second freshness timeout, and compatibility suspension. The RSSI estimator and
+multilateration solver described
+in the positioning design remain a separate rendering/estimation integration step.
+
+### Scheduled visual look-ahead
+
+Pattern, palette, and scheduled effect messages preserve the v2 current/next model.
+Each authority maintains bounded current and next entries. Heartbeats reference both,
+and definitions needed by the next entry are repeated before activation.
+
+Beat is intentionally current-only because live musical timing is not normally known
+in advance. Debug is state plus lease. Position carries frame freshness and current
+belief rather than a visual schedule.
+
+### Legacy detection and compatibility trailer
+
+The compatibility policy needs to distinguish a genuine v2-only sender from a v3
+device temporarily speaking v2. Without such a distinction, upgraded poles would
+continually detect one another as legacy and compatibility mode could never expire.
+
+Every v3-capable device therefore places a 16-byte `VNextCompatibilityTrailer` in
+payload bytes `48..63` of every v2 packet it originates while speaking v2. Those bytes
+are unused by the stable v2 `State` payload and by all other stable v2 commands. V2
+receivers already ignore them. Upgrade traffic whose payload is not safely bounded
+below offset 48 is excluded from this trailer scheme and is not emitted by the normal
+compatibility bridge.
+
+| Trailer offset | Size | Field | Meaning |
+|---:|---:|---|---|
+| 0 | 2 | `magic` | Little-endian `0x4E58`. |
+| 2 | 1 | `trailerVersion` | Starts at `1`. |
+| 3 | 1 | `flags` | Next-capable, compatibility-active, legacy-evidence, or resume-proposed. |
+| 4 | 2 | `controlId` | Evidence witness while legacy is active; resume coordinator afterward. |
+| 6 | 2 | `controlSession` | Random witness/coordinator boot nonce. |
+| 8 | 2 | `generation` | Advancing evidence heartbeat or resume proposal generation. |
+| 10 | 2 | `resumePhrase` | Coordinated v3 resume phrase, or zero. |
+| 12 | 1 | `hopCount` | Incremented when evidence or a proposal is propagated. |
+| 13 | 1 | `reserved` | Send zero; ignore after the trailer validates. |
+| 14 | 2 | `crc16` | Integrity check over trailer bytes `0..13`; this validates the marker but does not authenticate it. |
+
+A valid trailer is an additive marker, not a new interpretation of any v2 field.
+Both magic bytes, the trailer version, reserved byte, and CRC must validate before a
+packet is classified as vNext-generated. The selected magic and flag allocation
+must still be checked against captured fleet traffic before rollout. A failed marker
+check is conservatively treated as genuine legacy evidence.
+
+Legacy evidence is interpreted as follows:
+
+- Any structurally valid v2 packet without a valid compatibility trailer proves
+  genuine legacy presence. This remains true if an old relay changed the outer
+  sender header, because it preserves the unmarked payload.
+- A v3-capable direct observer becomes an evidence witness. While it continues to
+  hear unmarked v2 traffic, it advances its witness generation and sets
+  `legacy-evidence` in its own marked v2 heartbeats.
+- Other upgraded devices adopt and propagate fresh marked evidence, incrementing
+  `hopCount`. They do not pretend to have directly heard the old pole.
+- Marked compatibility traffic without fresh legacy evidence never renews the
+  evidence lease. It therefore cannot make fallback permanent by itself.
+- Multiple witnesses may exist. Devices retain the best fresh witness tuple using
+  bounded state and may replace an expired witness with another one they continue to
+  hear.
+
+### Compatibility state machine
+
+Every upgraded node runs the following component-local state machine:
+
+| State | Sends | Applies | Exit condition |
+|---|---|---|---|
+| `Next` | V3 topics only. | Independent v3 authorities. | Fresh unmarked v2 or propagated legacy evidence. |
+| `CompatibilityPending` | Marked v2 bridge traffic; no new v3 application packets. | Current output while scheduling v2 fallbacks. | All visual topics have crossed their safe fallback boundary. |
+| `Compatibility` | Marked v2 traffic only. | Complete v2 state and commands. | Legacy evidence lease expires and a resume proposal is adopted. |
+| `ResumePending` | Marked v2 traffic only. | V2 state initialized for seamless v3 bootstrap. | Coordinated `resumePhrase`, unless new evidence cancels it. |
+
+On compatibility entry:
+
+1. Stop accepting new v3 claims and stop emitting v3 application topics
+   immediately.
+2. Cancel unapplied v3-only future entries.
+3. Build a complete v2 `current + next` snapshot from the active topic states.
+4. Keep the current pixels stable, then switch pattern, palette, and persistent
+   effect to their explicit v2 fallbacks at their next declared boundaries.
+5. Bridge Beat through v2 state immediately and through one phrase-boundary `Beats`
+   declaration when BPM changed.
+6. Map Debug to `Options.debugging` and suspend Position traffic.
+7. Begin normal tested v2 heartbeat and relay behavior, adding only the ignored
+   compatibility trailer.
+
+The initial evidence lease should be 30 seconds and must be validated against the
+slowest real v2 follower cadence and multi-hop relaying. Fresh evidence restarts the
+lease. Packet loss alone should not make a component oscillate between protocols.
+
+### Coordinated return to v3
+
+When no legacy witness heartbeat has advanced for the evidence lease:
+
+1. Each upgraded device may propose itself after evidence expires; proposals
+   converge on the highest active `controlId`, so a previously heard node that has
+   left the component cannot block recovery forever.
+2. The winning coordinator carries a new generation and a `resumePhrase` at least
+   one full phrase in the future.
+3. Nodes repeat the proposal in their compatibility trailers while continuing v2.
+4. Fresh legacy evidence cancels the proposal immediately.
+5. At `resumePhrase`, nodes initialize every v3 topic from the current v2 snapshot,
+   stop routine v2 transmission, and start v3 Presence and topic heartbeats. This
+   protocol switch causes no immediate visible change.
+6. V3-only literal colors, generated patterns, debug overlays, and position state do
+   not silently revive. Their authorities must issue fresh claims or states in new
+   sessions after the resume boundary.
+
+Nodes that miss the proposal remain on v2. Their marked v2 packets do not count as
+legacy evidence, and a later repeated proposal can bring them forward. If an actual
+legacy pole remains but was temporarily unheard, its next unmarked packet immediately
+returns the component to compatibility mode.
+
+### V2 bridge ownership
+
+While compatibility is active, v3 topic authorities no longer compete on the wire.
+The component runs the existing v2 leadership and complete `State` behavior. The
+compatibility bridge is a projection of the last accepted v3 topic states into one
+v2 snapshot, followed by ordinary v2 changes.
+
+| V3 topic | V2 projection |
+|---|---|
+| Beat | `bpm`, `beatFrame`, and phrase-boundary `Beats`. |
+| Pattern | `patternId`, `syncMode`, current/next pattern phrases. |
+| Palette | Required `legacyPaletteId`, current/next palette phrases. |
+| Effect | Existing effect/pen/pulse/chance fields or `None`. |
+| Debug | `Options.debugging`; v3-only overlay bits are disabled. |
+| Position | No projection; suspend and mark stale. |
+
+Once fallback completes, upgraded poles deliberately show the same representable
+state as legacy poles. They must not keep a richer v3 palette or effect merely because
+they are capable of doing so.
+
+### Forward compatibility
+
+V3 topic evolution follows these rules:
+
+| Mechanism | Requirement |
+|---|---|
+| Per-topic versions | A receiver may support Beat v1 while ignoring Palette v2. |
+| Stable field numbers | A field number keeps one meaning forever. |
+| Typed/skippable fields | Unknown tagged fields can be skipped safely. |
+| Optional by default | Absent fields use documented defaults. |
+| Additive changes | New behavior uses new fields or topic versions. |
+| Retired fields reserved | Removed field and enum numbers are never reused. |
+| Reserved flags | Unknown optional flags are ignored; required behavior needs a capability bit. |
+| Stable fallbacks | Rich visual values carry v2-compatible fallbacks. |
+| Unknown topics | Ignore without changing output, authority, or compatibility state. |
+
+### Traffic budget
+
+V3 removes routine v2 traffic in an all-v3 component, but positioning adds a
+per-device stream. Initial maximum cadences are:
+
+| Traffic | Maximum initial cadence |
+|---|---:|
+| Presence | 0.1 packet/second/device. |
+| Beat authority | 2 packets/second total at 120 BPM, with a configurable ceiling. |
+| Pattern authority | Event burst plus 0.1 packet/second heartbeat. |
+| Palette authority | Definition/schedule burst plus 0.1 packet/second heartbeat. |
+| Effect authority | Event burst plus 0.1 packet/second heartbeat. |
+| Debug authority | On change plus 0.1 packet/second heartbeat while claimed. |
+| Position | 1 packet/second/enabled device before adaptive backoff. |
+
+Every periodic sender derives a stable phase from node ID and boot/session state and
+adds bounded jitter, preventing lockstep bursts. A device sends no second ESP-NOW
+packet until the previous send callback completes. The receive path records per-topic
+accepted, rejected, duplicate, stale, and queue-drop counters. Fleet-scale tests must
+exercise the current six-message receive queue before enabling the one-second position
+cadence by default.
+
+### Security and validation
+
+V3 inherits the existing LAN/event-local trust model and does not add encryption by
+default. It nevertheless expands the consequences of a spoofed packet, especially
+for debug control, beat authority, literal palettes, and position anchors.
+
+At first ingress, firmware must validate packet length, outer version, recipient
+class, topic ID, topic version, body length, message kind, flags, IDs, lease, sequence,
+field lengths, counts, coordinates, phrase/timestamp age, and every enum/range before
+copying or applying data. Invalid packets fail closed and do not refresh topology,
+authority, compatibility evidence, or leases. Literal palette parsing writes only to
+a fixed temporary value and commits atomically after the complete body validates.
+
+Authentication of topic claims and surveyed position anchors is a possible future
+capability. It is not silently implied by `authorityId`, priority, a device MAC, or
+the compatibility trailer.
+
+### Required test matrix
+
+The design is ready for firmware work only when the harness can express these
+outcomes:
+
+1. All-v3 pattern, palette, beat, debug, and position authorities reside on five
+   different devices and remain independent through relays.
+2. A literal palette definition is received before activation, activates on its
+   phrase, heals a late joiner, and never displays partially.
+3. Missing palette definitions leave the previous palette active.
+4. A v2 pole introduced next to one v3 leaf causes compatibility evidence to cross a
+   multi-hop component and stops v3 application traffic everywhere reachable.
+5. V3-generated marked v2 traffic never counts as genuine legacy evidence.
+6. Upgraded and legacy poles converge on the same pattern, fallback palette, beat,
+   effect, brightness, and debug state in compatibility mode.
+7. A v2 pole disappearing lets evidence expire, produces one coordinated resume
+   proposal, and resumes v3 at the announced phrase without a visible jump.
+8. A legacy packet received during `ResumePending` cancels resume immediately.
+9. A real legacy pole missed during recovery forces fallback again on its next
+   packet without reviving old v3 authority sessions.
+10. A disconnected component resumes independently and falls back when it later
+    merges with a component containing legacy evidence.
+11. Duplicate, reordered, stale-session, oversized, malformed, and unknown-topic
+    packets do not alter state or renew leases.
+12. Authority release, lease expiry, device reboot, transport-root change, partition,
+    and merge have explicit results for every topic.
+13. Sixty-four simulated devices at maximum initial cadences do not produce
+    synchronized bursts, unbounded relay loops, or silent queue loss.
+14. V2-only firmware continues to follow the resulting v2 bridge without any code
+    change.
+
+### Compatibility failure analysis
+
+The feared event is a mixed connected component showing divergent output because
+some devices run v3 while a legacy device can understand only v2. The compatibility
+state machine fails toward v2 because a false fallback costs features temporarily,
+while a missed fallback breaks the installation's visible contract.
+
+| Failure mode | Effect | Mitigation | Residual expectation |
+|---|---|---|---|
+| A legacy packet is lost. | Fallback is delayed. | Legacy senders repeat normal v2 state, and witnesses hold evidence for a 30-second lease. | Credible on one packet; unlikely to persist while the legacy sender remains active and reachable. |
+| A vNext trailer is corrupted or only partly recognized. | An upgraded sender is mistaken for legacy. | Require magic, version, reserved byte, and CRC to validate, then fail conservatively into compatibility. | Temporary feature loss; no visual split once fallback completes. |
+| Old firmware previously wrote nonzero unused bytes that resemble the marker. | A real legacy sender could be mistaken for vNext. | Capture representative fleet traffic, choose a non-colliding magic, and require the complete CRC-checked trailer. | Low after fleet capture; this is the most important pre-deployment compatibility check. |
+| A witness disappears while another legacy pole remains. | Evidence can expire and v3 can resume too early. | Any other direct observer becomes a witness; the still-present legacy pole forces fallback again on its next unmarked packet. | A temporary protocol transition is possible in a lossy or partitioned component. |
+| Nodes miss the coordinated resume proposal. | Some upgraded nodes remain in marked-v2 mode while others resume v3. | Marked v2 is not legacy evidence; repeat the resume proposal and initialize v3 from the same v2 snapshot. | Temporary transport split without an immediate visual jump. |
+| A literal palette has no exact v2 equivalent. | Compatibility output differs from the richer all-v3 output. | Require the color master to choose `legacyPaletteId` before scheduling the literal palette, then switch everyone at a palette boundary. | Intentional color approximation, shared by old and new devices. |
+| The radio mesh partitions. | No component can know about legacy poles across the partition. | Define evidence and fallback per connected component; re-enter compatibility immediately when components merge and unmarked v2 is observed. | Global unanimity is impossible without connectivity; the protocol guarantees component-local convergence. |
+| A spoofed packet claims legacy evidence or topic authority. | Features can be disabled or visual state controlled. | Strict validation prevents malformed state, but the current unauthenticated trust model cannot prove sender identity. | Credible on an untrusted nearby radio; authentication is required if this threat enters scope. |
+
+### Staged implementation
+
+1. **Dual decoder and observability:** accept v2 and v3, add packet counters and
+   Presence, but keep v3 application topics disabled.
+2. **Compatibility detector:** add the ignored v2 trailer, witness propagation,
+   fallback state machine, and coordinated phrase-boundary resume. Prove it with
+   unchanged v2 firmware before adding richer features.
+3. **Independent existing topics:** split Beat, Pattern, Effect, and Debug authority
+   while projecting them back into v2.
+4. **Literal Palette:** add fixed definition caches, phrase-keyed activation, and
+   required legacy palette fallback.
+5. **Position frame:** integrate the existing positioning design with Position
+   suspended during compatibility.
+6. **Fleet evaluation:** simulate and hardware-test partitions, old relays, packet
+   loss, queue pressure, and repeated protocol transitions before enabling v3 by
+   default.
+
+This candidate implements stages 1 through 4 and the Position frame/advertisement
+portion of stage 5. Host tests cover body validation, independent authority leases,
+legacy-marker behavior, phrase-boundary resume, stale-sequence rejection, relay
+version preservation, and atomic gradient expansion. Stage 6, real v2 capture
+validation, queue-pressure testing, and the position estimator are still required
+before fleet rollout.
+
+The current operator surface is the existing WLED JSON-state request. `palette16`
+accepts exactly 16 integer `0xRRGGBB` values, with optional `legacyPalette`,
+`palettePhrase`, and `paletteTransition`. `positionFrame` establishes a namespace,
+epoch, and anchor IDs; `position` supplies validated Q8.8 coordinates and quality;
+`debugMask` and `debugVerbosity` update the independent Debug topic. These are
+runtime controls and do not persist literal palettes to flash.
 
 # WLED Tubes Reference Implementation
 
@@ -918,6 +1359,10 @@ definition above is the interop contract.
 | Area | File |
 |---|---|
 | Mesh protocol and routing | `usermods/Tubes/node.h` |
+| V3 wire layouts and validation | `usermods/Tubes/v3_protocol.h` |
+| Per-topic authority leases | `usermods/Tubes/v3_authority.h` |
+| Gen0 projection marker | `usermods/Tubes/legacy_projection.h` |
+| Bounded v3 caches and runtime | `usermods/Tubes/v3_runtime.h` |
 | Visual state and command IDs | `usermods/Tubes/global_state.h` |
 | Controller send/receive behavior | `usermods/Tubes/controller.h` |
 | Pattern registry | `usermods/Tubes/pattern.h` |
@@ -946,15 +1391,10 @@ implementation and must be considered during refactors.
 
 ### Version Filtering
 
-The WLED receiver filter accepts `NodeMessage` only when:
-
-```text
-packet length == 84
-packet.protocolVersion == local protocol version
-```
-
-Current local protocol version is `2`. A future protocol version must not simply
-replace v2 unless it also keeps receiving and sending v2 for legacy nodes.
+The candidate receiver accepts only exact 84-byte packets whose outer version is
+`2` or `3`, then dispatches the payload to separate validated decoders. Relays
+preserve the received outer version, so an upgraded relay cannot accidentally turn a
+v2 packet into v3 or vice versa.
 
 ### State Payload Adjacency
 
@@ -966,11 +1406,10 @@ members in `PatternController`.
 Refactors must preserve the payload layout even if the implementation stops relying
 on member adjacency.
 
-### Info Broadcast Bug
+### Info Broadcast
 
-`broadcast_info(NodeInfo *info)` currently passes the address of the pointer rather
-than the `NodeInfo` payload. Treat `Info` as a defined packet shape, but do not rely
-on the current WLED helper until this is corrected compatibly.
+The candidate fixes the prior pointer-address bug in `broadcast_info(NodeInfo*)` and
+sends the bounded `NodeInfo` payload. Existing v2 layout and routing are unchanged.
 
 ### Upgrade Payload Size
 
@@ -1004,6 +1443,14 @@ preserved.
 
 The serial console is not part of the mesh protocol, but it is a common operator
 surface for producing mesh traffic.
+
+Routine packet and status tracing is quiet until the device receives a serial
+character. Any command, including an empty newline, enables tracing for 60
+seconds; further input renews the lease. Startup messages and errors remain
+unconditional. Quiet devices print one dot per second and add
+`[press enter]` every 50 dots as a low-cost liveness signal. This avoids
+blocking LED rendering on an unattended device while letting a serial watcher
+activate field diagnostics as soon as it connects.
 
 | Serial command | Mesh effect |
 |---|---|

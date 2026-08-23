@@ -5,10 +5,6 @@
 typedef uint16_t accum88;
 typedef int16_t saccum78;
 
-#ifndef FX_MODE_METEOR_SMOOTH
-#define FX_MODE_METEOR_SMOOTH FX_MODE_METEOR
-#endif
-
 #define TUBES_CONCAT_IMPL(a, b) a##b
 #define TUBES_CONCAT(a, b) TUBES_CONCAT_IMPL(a, b)
 #define TUBES_EVERY_N_MILLISECONDS(var, ms) \

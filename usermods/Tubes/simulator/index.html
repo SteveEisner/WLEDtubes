@@ -1191,7 +1191,7 @@
       const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
       const dbToPowerRatio = decibels => 10 ** (decibels / 10);
       const formatDecibels = decibels => `${Number(decibels.toFixed(2))} dB`;
-      const formatId = id => id ? id.toString(16).toUpperCase().padStart(3, "0") : "---";
+      const formatId = id => id ? id.toString(16).toUpperCase().padStart(4, "0") : "----";
       const formatFrameId = id => id === ANCHORED_FRAME_ID ? "ANCHORED" : formatId(id);
       const dnaKey = dna => `${dna.pattern}:${dna.palette}`;
       const scheduleRemainingRatio = (lastChangePhrase, nextChangePhrase, beatFrame) => {
@@ -1306,7 +1306,7 @@
         constructor(simulation, bornAt, options = {}) {
           this.simulation = simulation;
           this.auditDeviceKey = ++simulation.auditDeviceSequence;
-          this.id = simulation.randomMeshId();
+          this.id = simulation.randomDeviceId();
           this.isAnchor = options.isAnchor === true;
           this.positionEstimate = {
             frameId: this.isAnchor ? ANCHORED_FRAME_ID : this.id,
@@ -2406,7 +2406,7 @@
 
         resetForIdConflict() {
           const previous = this.id;
-          this.id = this.simulation.randomMeshId();
+          this.id = this.simulation.randomDeviceId();
           this.uplinkId = 0;
           this.leaderId = this.id;
           this.leaderViaId = this.id;
@@ -2572,7 +2572,7 @@
               this.executedCount += 1;
               appliedState = true;
               if (this.simulation.fixedRelay && message.header.id === this.uplinkId) {
-                this.recordLeaderPath(auditMeta.senderMeshId ?? message.header.id);
+                this.recordLeaderPath(auditMeta.senderDeviceId ?? message.header.id);
               }
               if (beforeDNA !== dnaKey(this.dna)) {
                 this.simulation.log(this, "state", `adopted now ${this.simulation.describeDNA(this.dna)}`);
@@ -2784,7 +2784,7 @@
           return Math.sqrt(-2 * Math.log(firstUniform)) * Math.cos(2 * Math.PI * secondUniform);
         }
         randomInt(minimum, maximum) { return Math.floor(minimum + this.random() * (maximum - minimum)); }
-        randomMeshId() { return Math.floor(256 + this.random() * (4000 - 256)); }
+        randomDeviceId() { return Math.floor(256 + this.random() * (4000 - 256)); }
         randomDNA() {
           return {
             pattern: Math.floor(this.random() * PATTERNS.length),
@@ -3038,7 +3038,7 @@
             ? (node.uplinkId || node.id)
             : node.leaderId;
           return {
-            meshId: node.id,
+            deviceId: node.id,
             uplinkId: this.fixedRelay ? null : node.uplinkId,
             leaderId: logicalLeaderId,
             leaderViaId: this.fixedRelay ? node.leaderViaId : null,
@@ -3194,7 +3194,7 @@
             deviceId: target.id,
             peerKey: auditMeta.senderDeviceKey ?? null,
             peerId: message?.header?.id ?? null,
-            physicalPeerId: auditMeta.senderMeshId ?? null,
+            physicalPeerId: auditMeta.senderDeviceId ?? null,
             traceId,
             hop,
             rebroadcast: auditMeta.rebroadcast === true,
@@ -3202,7 +3202,7 @@
             message: auditMeta.messageSnapshot || this.auditMessage(message),
             before: this.auditNodeState(target),
             radio: {
-              transmitterId: auditMeta.senderMeshId ?? null,
+              transmitterId: auditMeta.senderDeviceId ?? null,
               distance: Number.isFinite(auditMeta.distance) ? +auditMeta.distance.toFixed(3) : null,
               meanStrength: Number.isFinite(auditMeta.meanStrength) ? +auditMeta.meanStrength.toFixed(5) : null,
               deliveryProbability: Number.isFinite(auditMeta.deliveryProbability)
@@ -3414,7 +3414,7 @@
               hop,
               auditMeta: {
                 senderDeviceKey: sender.auditDeviceKey,
-                senderMeshId: sender.id,
+                senderDeviceId: sender.id,
                 rebroadcast,
                 behalfOfId,
                 distance,
@@ -5047,7 +5047,7 @@
           scope: "device",
           capturedAtSimulationMs: Math.round(simulation.time),
           deviceKey: node.auditDeviceKey,
-          currentMeshId: formatId(node.id),
+          currentDeviceId: formatId(node.id),
           lightingCatalog: createLightingCatalog(),
           currentState: simulation.auditNodeState(node),
           summary: { ...simulation.auditStatsForNode(node) },
@@ -5321,7 +5321,7 @@
             dueAtMs: Math.round(delivery.at),
             targetId: formatId(delivery.target.id),
             logicalHeaderId: formatId(delivery.message.header.id),
-            physicalTransmitterId: formatId(delivery.auditMeta.senderMeshId),
+            physicalTransmitterId: formatId(delivery.auditMeta.senderDeviceId),
             senderUplinkId: delivery.message.header.uplinkId ? formatId(delivery.message.header.uplinkId) : null,
             recipients: simulation.recipientName(delivery.message.recipients),
             command: delivery.message.command,

@@ -93,8 +93,8 @@ def parse_report_line(line: str) -> Optional[DeviceReport]:
             type=int(fields["type"]),
             role=int(fields["role"]),
             mesh=int(fields["mesh"]),
-            node=int(fields["node"]),
-            uplink=int(fields["uplink"]),
+            node=int(fields["node"], 0),
+            uplink=int(fields["uplink"], 0),
             uptime=int(fields["uptime"]),
         )
     except ValueError:

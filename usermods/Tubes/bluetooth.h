@@ -22,7 +22,7 @@ typedef struct {
 
 // Asynchronous queue handling
 typedef struct {
-    MeshId id;
+    DeviceId id;
     NimBLEAddress address;
 } MeshUpdateRequest;
 
@@ -338,7 +338,7 @@ class BLEMeshNode: public NimBLEAdvertisedDeviceCallbacks {
     }
 
     void onPeerPing(MeshNodeHeader* pRemoteNode, NimBLEAdvertisedDevice* pAdvertisedDevice) {
-        Serial.printf("Found %03X/%03X at %s\n",
+        Serial.printf("Found %04X/%04X at %s\n",
             pRemoteNode->id,
             pRemoteNode->uplinkId,
             std::string(pAdvertisedDevice->getAddress()).c_str()
@@ -425,7 +425,7 @@ class BLEMeshNode: public NimBLEAdvertisedDeviceCallbacks {
         if (!pAdvertisedDevice->isAdvertisingService(NimBLEUUID("D00B")))
             return;
 
-        // Make sure it's booted up and advertising Mesh IDs
+        // Make sure it's booted up and advertising Device IDs
         auto data = pAdvertisedDevice->getServiceData(NimBLEUUID(serviceUUID));
         if (data.length() != sizeof(MeshNodeHeader))
             return;

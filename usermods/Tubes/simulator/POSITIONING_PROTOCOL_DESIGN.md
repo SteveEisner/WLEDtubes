@@ -6,7 +6,7 @@ Status: design proposal only. This document describes how to turn the positionin
 
 Every device runs the same mesh and positioning code. A device:
 
-- knows only its own persistent `MeshId`, boot-local state, configuration, and clock;
+- knows only its own persistent `DeviceId`, boot-local state, configuration, and clock;
 - receives unpredictable broadcasts from immediate radio neighbors;
 - measures RSSI only for the ESP-NOW frame it directly received;
 - never knows the total device count or the complete network topology;
@@ -26,7 +26,7 @@ The design should extend the existing behavior rather than create a second netwo
 - [`node.h`](../node.h) defines a fixed `NodeMessage` with a 64-byte data area, the sender's `id`, the sender's current `uplinkId`, recipients, timebase, and command.
 - The ESP-NOW callback reaches `LightNode::onPeerData()` with the immediate sender's MAC address and RSSI.
 - The current relay implementation replaces the message header with its own header before transmitting. The intended lighting behavior is instead transparent: preserve the accepted leader's logical header while ESP-NOW's receive metadata continues to identify the physical transmitter.
-- `RECIPIENTS_INFO` is accepted by every receiver and is deliberately excluded from rebroadcasting.
+- `RECIPIENTS_NEIGHBORS` is accepted by every direct radio neighbor and is deliberately excluded from rebroadcasting.
 - [`espnow_broadcast.cpp`](../../../wled00/espnow_broadcast.cpp) moves received packets out of the Wi-Fi callback into a small main-loop queue. Position calculations must stay out of the Wi-Fi callback.
 - [`controller.h`](../controller.h) receives only a command and payload. It no longer has the RSSI or immediate-sender identity needed for ranging.
 
@@ -46,7 +46,7 @@ flowchart LR
 
 ## Core protocol decision
 
-Use a dedicated `COMMAND_POSITION` packet with `RECIPIENTS_INFO`.
+Use a dedicated `COMMAND_POSITION` packet with `RECIPIENTS_NEIGHBORS`.
 
 Do not relay a position packet verbatim. The RSSI belongs to the physical transmitter of the received ESP-NOW frame. If device B rebroadcasts device A's position payload and device C treats C's RSSI as a range to A, the geometry is false.
 
@@ -141,7 +141,7 @@ frame kind + frame namespace + frame epoch
 ```
 
 - An anchored frame uses a configured 32-bit installation namespace. It is stable across anchor reboots.
-- A floating frame derives its namespace from the elected origin's `MeshId` and boot nonce.
+- A floating frame derives its namespace from the elected origin's `DeviceId` and boot nonce.
 - A locally solvable anchored frame always outranks a floating frame, regardless of device IDs. Underconstrained anchored evidence is retained without destroying the current floating belief.
 - `frame epoch` changes when surveyed anchor coordinates change or, in a floating frame, when the origin changes its axis or orientation references.
 
@@ -155,7 +155,7 @@ Use a compile-time array, not `std::map` and not an unbounded history. The simul
 
 Each entry needs approximately:
 
-- immediate sender `MeshId` and sender boot nonce;
+- immediate sender `DeviceId` and sender boot nonce;
 - the sender's advertised frame, anchor flag, references, coordinates, solution, and quality;
 - last position sequence and last-heard time;
 - filtered RSSI mean and variance;
@@ -206,7 +206,7 @@ Keep the outer `CURRENT_NODE_VERSION` unchanged for the first experiment if mixe
 
 An anchor starts immediately in its configured anchored frame and advertises its fixed coordinates. It does not begin at `(0, 0)` unless that is its surveyed coordinate.
 
-An estimated device that receives a fresh anchored-frame advertisement records the anchored constraint immediately, even if the anchor's `MeshId` is lower than the current floating origin. It keeps its active floating estimate while the anchored evidence describes only a circle or mirror pair. Once its own peer table contains enough fresh, non-collinear anchored-frame constraints for a unique solution, it adopts the installation frame and resets the superseded floating estimate.
+An estimated device that receives a fresh anchored-frame advertisement records the anchored constraint immediately, even if the anchor's `DeviceId` is lower than the current floating origin. It keeps its active floating estimate while the anchored evidence describes only a circle or mirror pair. Once its own peer table contains enough fresh, non-collinear anchored-frame constraints for a unique solution, it adopts the installation frame and resets the superseded floating estimate.
 
 Anchored-frame knowledge propagates through ordinary devices after they have a valid anchored position, because every device advertises its own belief and adopted frame. The anchor packet itself is still never relayed. A tube several hops away may therefore enter the installation frame and localize from already-positioned neighbors without ever measuring an anchor directly.
 
@@ -217,7 +217,7 @@ Do not combine coordinates or range constraints from different frame namespaces 
 An estimated device that has not heard a fresh anchor starts as the origin of its own floating frame:
 
 ```text
-origin = my MeshId
+origin = my DeviceId
 position = (0, 0)
 solution = origin
 ```
@@ -226,7 +226,7 @@ If it is the only device, that belief remains internally correct. No special dis
 
 ### Merging frames
 
-Within floating mode, advertisements carry the sender's derived frame namespace and origin owner. A node adopts the fresh floating frame with the higher origin `MeshId`. Thus knowledge of a higher origin can move one hop per advertisement even when most devices cannot hear the origin directly.
+Within floating mode, advertisements carry the sender's derived frame namespace and origin owner. A node adopts the fresh floating frame with the higher origin `DeviceId`. Thus knowledge of a higher origin can move one hop per advertisement even when most devices cannot hear the origin directly.
 
 This is not a claim that the receiver measured a range to the remote origin. It is only frame election. Ranging still applies exclusively to the immediate sender.
 
@@ -259,7 +259,7 @@ The elected origin is always `(0, 0)`.
 
 ### Floating axis with two devices
 
-The origin selects a qualified direct neighbor as `axisId`. Selection should be deterministic—prefer a fresh, mature, low-variance link, then use the highest `MeshId` as a tie-breaker.
+The origin selects a qualified direct neighbor as `axisId`. Selection should be deterministic—prefer a fresh, mature, low-variance link, then use the highest `DeviceId` as a tie-breaker.
 
 The axis device places itself at:
 
@@ -412,7 +412,7 @@ Lighting leadership, floating coordinate election, and anchor authority are diff
 - Transparent relay forwarding uses bounded duplicate suppression. A small ring of recent `(leader ID, command, leader timebase)` fingerprints is sufficient for the simulator model and requires no topology or network-size knowledge; firmware should size the ring explicitly for available RAM and expected burst depth.
 - In the current simulator policy, a non-anchor whose lighting uplink expires also invalidates the floating position frame learned through that leader. It clears its bounded peer table and restarts as a new local origin at `(0,0)`. A surveyed anchor retains its authoritative coordinate.
 
-Keeping the state machines separate prevents a lighting topology change from silently reinterpreting coordinate meaning: loss of the authority path causes an explicit frame reset instead. Anchor authority outranks floating ID election. Reusing `MeshId` for deterministic tie-breaking is fine; reusing `uplinkId` as a measured position target is not.
+Keeping the state machines separate prevents a lighting topology change from silently reinterpreting coordinate meaning: loss of the authority path causes an explicit frame reset instead. Anchor authority outranks floating ID election. Reusing `DeviceId` for deterministic tie-breaking is fine; reusing `uplinkId` as a measured position target is not.
 
 ## Partitions, joins, reboots, and movement
 
@@ -426,7 +426,7 @@ An anchored component wins over a floating component. Two floating components us
 
 ### Reboot
 
-The sender boot nonce invalidates old peer-filter state. A floating origin reboot creates a new frame identity even if it happens to receive the same `MeshId`. An anchor reboot does not change its installation frame or coordinates; another fresh anchor may temporarily own the heartbeat.
+The sender boot nonce invalidates old peer-filter state. A floating origin reboot creates a new frame identity even if it happens to receive the same `DeviceId`. An anchor reboot does not change its installation frame or coordinates; another fresh anchor may temporarily own the heartbeat.
 
 ### ID conflict
 
@@ -442,7 +442,7 @@ An anchor is different: its firmware continues advertising configured coordinate
 
 The simulator represents the smaller units as configured anchors. The Devices toolbar can add them alongside ordinary tubes so anchor geometry and mixed radio paths can be exercised interactively.
 
-- An anchor has the same radio, mesh ID, packet handling, RSSI measurements, and peer table as a tube.
+- An anchor has the same radio, Device ID, packet handling, RSSI measurements, and peer table as a tube.
 - It has no lighting animation and ignores lighting rendering.
 - Its advertised estimate is set to its simulator-only physical `(x, y)` every update.
 - Dragging it changes its known position immediately, modeling an operator who has also updated the surveyed coordinate.
