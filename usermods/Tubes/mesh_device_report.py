@@ -26,7 +26,7 @@ MESH_STARTED = 1 << 0
 MESH_FOLLOWING = 1 << 1
 MASTER_BEHAVIOR = 1 << 2
 REPORT_PREFIX = "TUBE_REPORT "
-PROBE_PATTERN = re.compile(r"TUBE_PROBE nonce=([0-9A-Fa-f]{8}) mac=([0-9A-Fa-f]{12})")
+PROBE_PATTERN = re.compile(r"TUBE_PROBE nonce=([0-9A-Fa-f]{8}) mac=(\*|[0-9A-Fa-f]{12})")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -232,6 +232,62 @@ def verify_over_mesh(args) -> int:
     return 1
 
 
+def request_manifest(args) -> int:
+    descriptor = open_serial(args.serial)
+    buffer = bytearray()
+    issued_nonces: Set[int] = set()
+    reports: Dict[str, DeviceReport] = {}
+    deadline = time.monotonic() + args.timeout
+    next_probe = 0.0
+    try:
+        while time.monotonic() < deadline:
+            now = time.monotonic()
+            if now >= next_probe:
+                os.write(descriptor, b"z\n")
+                next_probe = now + 2.5
+
+            for line in read_available_lines(descriptor, buffer, 0.1):
+                probe_match = PROBE_PATTERN.search(line)
+                if probe_match and probe_match.group(2) == "*":
+                    issued_nonces.add(int(probe_match.group(1), 16))
+                report = parse_report_line(line)
+                if report is not None and report.nonce in issued_nonces:
+                    reports[report.mac] = report
+    finally:
+        os.close(descriptor)
+
+    if not issued_nonces:
+        print("USB controller did not confirm the manifest request", file=sys.stderr)
+        return 1
+    if not reports:
+        print("manifest request returned no device reports", file=sys.stderr)
+        return 1
+    print(json.dumps([dataclasses.asdict(reports[mac]) for mac in sorted(reports)], sort_keys=True))
+    return 0
+
+
+def target_update(args) -> int:
+    normalized_id = args.device_id.upper().removeprefix("0X")
+    if not re.fullmatch(r"[0-9A-F]{4}", normalized_id) or normalized_id == "0000":
+        print(f"invalid Device ID: {args.device_id}", file=sys.stderr)
+        return 2
+
+    descriptor = open_serial(args.serial)
+    try:
+        if not send_and_confirm(
+            descriptor,
+            f"y{normalized_id}\n".encode("ascii"),
+            f"node=0x{normalized_id}",
+            2.0,
+        ):
+            print("USB controller did not confirm the targeted update request", file=sys.stderr)
+            return 1
+    finally:
+        os.close(descriptor)
+    print(f"targeted update request sent to 0x{normalized_id}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Control and verify Tubes devices through a USB mesh node.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -241,6 +297,14 @@ def main() -> int:
 
     check_parser = subparsers.add_parser("check", help="require device-report support on the USB controller")
     check_parser.add_argument("serial", type=pathlib.Path)
+
+    manifest_parser = subparsers.add_parser("manifest", help="request reports from every visible device")
+    manifest_parser.add_argument("serial", type=pathlib.Path)
+    manifest_parser.add_argument("--timeout", type=float, default=5.0)
+
+    target_parser = subparsers.add_parser("target", help="put one visible Device ID into update mode")
+    target_parser.add_argument("serial", type=pathlib.Path)
+    target_parser.add_argument("device_id")
 
     offer_parser = subparsers.add_parser("offer", help="wake every mesh device older than a Tubes release")
     offer_parser.add_argument("serial", type=pathlib.Path)
@@ -261,6 +325,10 @@ def main() -> int:
     args = parser.parse_args()
     if args.command == "verify":
         return verify_over_mesh(args)
+    if args.command == "manifest":
+        return request_manifest(args)
+    if args.command == "target":
+        return target_update(args)
 
     descriptor = open_serial(args.serial)
     try:
@@ -285,7 +353,7 @@ def main() -> int:
             print(f"update offer V{args.version} sent")
             return 0
 
-        if not send_and_confirm(descriptor, b"z000000000000\n", "TUBE_PROBE nonce=", 2.0):
+        if not send_and_confirm(descriptor, b"z\n", "TUBE_PROBE nonce=", 2.0):
             print("USB controller does not support device reports; flash it with the current firmware first", file=sys.stderr)
             return 1
         print("USB controller supports device reports")

@@ -6,6 +6,28 @@ direct Wi-Fi access point; firmware is never carried over the mesh.
 
 ## Fast fleet workflow
 
+For a durable job that survives a temporary loss of this computer's normal
+network, start either updater through `fleet_update_job.sh`. macOS `launchd`
+owns the process, output is kept under `build_output/fleet-update-jobs`, and
+the launcher restores the Wi-Fi network that was active when the job began:
+
+```sh
+cd usermods/Tubes
+./fleet_update_job.sh start-one dig2go /dev/cu.usbserial-8320
+./fleet_update_job.sh start-target dig2go /dev/cu.usbserial-8320 1ABC
+./fleet_update_job.sh start-fleet /dev/cu.usbserial-8320
+./fleet_update_job.sh status
+./fleet_update_job.sh log
+```
+
+`start-one` requires a physical double-click. On release 15 and newer, first run
+`mesh_device_report.py manifest` and pass the fresh four-digit Device ID to
+`start-target`; that device enters update mode without a button press. The fleet form is
+the unattended canary-first workflow described below. A wired connection or a
+second network adapter keeps remote control available throughout the update;
+without one, the job continues locally while Wi-Fi is attached to a device and
+remote control resumes after the saved network is restored.
+
 Flash the USB-connected controller with current firmware once. That controller
 is the trusted mesh bridge for all later upgrades: it opens each selection
 window, probes the selected device by stable MAC after reboot, and rejects a
@@ -47,7 +69,7 @@ cd usermods/Tubes
 ./upgrade_batch.sh /dev/cu.usbserial-8320
 ```
 
-The batch validates the standard, Christmas, Golden, and ATHOM-C3 images before sending `V14`. It upgrades
+The batch validates the standard, Christmas, Golden, and ATHOM-C3 images before sending `V15`. It upgrades
 an AP only when its exact MAC is already enrolled or its running release is one
 of `DIG2GO_TUBES`, `CHRISTMAS_TUBES`, or `GOLDEN_TUBES`. A legacy `Custom`,
 `Light Tube`, or blank release does not distinguish those variants, so an

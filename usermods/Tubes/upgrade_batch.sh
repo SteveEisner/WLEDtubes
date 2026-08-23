@@ -8,7 +8,7 @@ source "$script_dir/firmware.sh"
 mesh_reporter="${TUBES_MESH_REPORTER:-$script_dir/mesh_device_report.py}"
 update_ssid="${TUBES_UPDATE_SSID:-WLED-UPDATE}"
 update_password="${TUBES_UPDATE_PASSWORD:-update1234}"
-connect_timeout="${TUBES_BATCH_CONNECT_TIMEOUT:-12}"
+connect_timeout="${TUBES_BATCH_CONNECT_TIMEOUT:-30}"
 verification_timeout="${TUBES_VERIFICATION_TIMEOUT:-45}"
 mesh_settle_delay="${TUBES_MESH_SETTLE_DELAY:-30}"
 max_rounds="${TUBES_BATCH_ROUNDS:-5}"
@@ -215,7 +215,7 @@ process_connected_device() {
     fi
   fi
 
-  if ! config_has_explicit_output "$upgrade_work_dir/cfg.json"; then
+  if config_needs_prepare "$upgrade_work_dir/cfg.json"; then
     if prepare_device "$upgrade_work_dir" "$selected_mac" true; then
       archive_observation "configuration-migrated"
       migrated_count=$((migrated_count + 1))
@@ -308,6 +308,9 @@ main_batch() {
 
   cleanup
   upgrade_work_dir=""
+  if [[ -z "$canary_mac" ]]; then
+    fail "no eligible device exposed $update_ssid after $max_rounds update offers"
+  fi
   if [[ -n "$canary_mac" && "$batch_phase" == "canary" ]]; then
     fail "canary $canary_mac never reached verified firmware within $max_rounds rounds"
   fi

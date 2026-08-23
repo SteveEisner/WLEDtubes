@@ -11,16 +11,20 @@ update_password="${TUBES_UPDATE_PASSWORD:-update1234}"
 selection_timeout="${TUBES_SELECTION_TIMEOUT:-25}"
 verification_timeout="${TUBES_VERIFICATION_TIMEOUT:-45}"
 wifi_device="${TUBES_WIFI_DEVICE:-}"
+target_id="${TUBES_TARGET_ID:-}"
 
 usage_fast() {
   cat <<'EOF'
 Usage:
-  ./upgrade_fast.sh PROFILE SERIAL_DEVICE [--loop]
+  ./upgrade_fast.sh PROFILE SERIAL_DEVICE [--loop | --id DEVICE_ID]
 
 PROFILE is dig2go, athom-c3, christmas, or golden. It is the operator's physical
 identification of the devices being upgraded. The script discovers and locks
 every write to the selected MAC. The USB controller must already run firmware
 with device-report support.
+
+--id selects one release-15-or-newer device by its current four-digit
+hexadecimal Device ID. Without --id, the operator double-clicks one device.
 EOF
 }
 
@@ -43,7 +47,11 @@ wait_for_selected_device() {
   local deadline=$((SECONDS + selection_timeout))
   local probe_file="$upgrade_work_dir/selection-probe.json"
 
-  echo "Double-click one $profile_name now. Waiting for $update_ssid..."
+  if [[ -n "$target_id" ]]; then
+    echo "Waiting for Device ID 0x$target_id to serve $update_ssid..."
+  else
+    echo "Double-click one $profile_name now. Waiting for $update_ssid..."
+  fi
   while (( SECONDS < deadline )); do
     networksetup -setairportnetwork "$wifi_device" "$update_ssid" "$update_password" >/dev/null 2>&1 || true
     if "$curl_bin" --fail --silent --connect-timeout 1 --max-time 2 \
@@ -57,8 +65,24 @@ wait_for_selected_device() {
 }
 
 select_and_connect() {
-  "$python_bin" "$mesh_reporter" select "$serial_device"
+  if [[ -n "$target_id" ]]; then
+    "$python_bin" "$mesh_reporter" target "$serial_device" "$target_id"
+  else
+    "$python_bin" "$mesh_reporter" select "$serial_device"
+  fi
   wait_for_selected_device
+}
+
+refresh_target_id() {
+  local selected_mac="$1"
+  local manifest
+  local node_decimal
+  manifest="$("$python_bin" "$mesh_reporter" manifest "$serial_device" --timeout 5)"
+  node_decimal="$(printf '%s\n' "$manifest" | "$jq_bin" -e -r \
+    --arg mac "$selected_mac" '.[] | select(.mac == $mac) | .node')" \
+    || fail "rebooted device $selected_mac did not reappear in the visible manifest"
+  printf -v target_id '%04X' "$node_decimal"
+  echo "Rebooted device $selected_mac now has Device ID 0x$target_id."
 }
 
 enroll_selected_device() {
@@ -109,7 +133,7 @@ upgrade_one() {
   local selected_mac="$device_mac"
 
   local needed_config_migration=false
-  if ! config_has_explicit_output "$upgrade_work_dir/cfg.json"; then
+  if config_needs_prepare "$upgrade_work_dir/cfg.json"; then
     needed_config_migration=true
   fi
   prepare_device "$upgrade_work_dir" "$selected_mac" true
@@ -117,6 +141,9 @@ upgrade_one() {
   if [[ "$needed_config_migration" == "true" ]]; then
     echo "Configuration migration rebooted the device; selecting the same MAC once more."
     sleep 6
+    if [[ -n "$target_id" ]]; then
+      refresh_target_id "$selected_mac"
+    fi
     select_and_connect
     fetch_device_files "$upgrade_work_dir"
     load_device_identity "$upgrade_work_dir/info.json"
@@ -159,13 +186,34 @@ upgrade_one() {
 }
 
 main_fast() {
-  [[ $# -eq 2 || ($# -eq 3 && "$3" == "--loop") ]] || { usage_fast; return 2; }
+  [[ $# -ge 2 ]] || { usage_fast; return 2; }
   requested_profile="$1"
   serial_device="$2"
+  shift 2
   local loop_requested=false
-  if [[ $# -eq 3 ]]; then
-    loop_requested=true
-  fi
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --loop)
+        loop_requested=true
+        shift
+        ;;
+      --id)
+        [[ $# -ge 2 ]] || { usage_fast; return 2; }
+        target_id="${2#0x}"
+        target_id="${target_id#0X}"
+        target_id="$(printf '%s' "$target_id" | tr '[:lower:]' '[:upper:]')"
+        shift 2
+        ;;
+      *)
+        usage_fast
+        return 2
+        ;;
+    esac
+  done
+  [[ "$target_id" =~ ^[0-9A-F]{4}$ && "$target_id" != "0000" || -z "$target_id" ]] \
+    || fail "target Device ID must be four hexadecimal digits and nonzero"
+  [[ "$loop_requested" != "true" || -z "$target_id" ]] \
+    || fail "--loop cannot reuse a Device ID because IDs change after reboot"
   [[ -e "$serial_device" ]] || fail "serial device not found: $serial_device"
 
   require_tools

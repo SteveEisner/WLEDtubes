@@ -230,7 +230,7 @@ fetch_device_files() {
   "$curl_bin" --fail-with-body --silent --show-error --connect-timeout 5 --max-time 15 \
     "$device_url/json/si" -o "$work_dir/info.json"
   "$curl_bin" --fail-with-body --silent --show-error --connect-timeout 5 --max-time 15 \
-    "$device_url/cfg.json" -o "$work_dir/cfg.json"
+    "$device_url/json/cfg" -o "$work_dir/cfg.json"
   "$jq_bin" -e 'type == "object" and (.info | type == "object")' "$work_dir/info.json" >/dev/null
   "$jq_bin" -e 'type == "object" and (.hw.led | type == "object")' "$work_dir/cfg.json" >/dev/null
 }
@@ -283,6 +283,16 @@ save_device_profile() {
 config_has_explicit_output() {
   local config_file="$1"
   "$jq_bin" -e '(.hw.led.ins // []) | length > 0' "$config_file" >/dev/null
+}
+
+config_allows_update_ap_ota() {
+  local config_file="$1"
+  "$jq_bin" -e '(.ota["same-subnet"] // false) == false' "$config_file" >/dev/null
+}
+
+config_needs_prepare() {
+  local config_file="$1"
+  ! config_has_explicit_output "$config_file" || ! config_allows_update_ap_ota "$config_file"
 }
 
 validate_explicit_output() {
@@ -424,25 +434,32 @@ prepare_device() {
   local migrated_file="$work_dir/cfg-migrated.json"
   if [[ "$files_are_current" != "true" ]]; then
     fetch_device_files "$work_dir"
+    load_device_identity "$work_dir/info.json"
   fi
-  load_device_identity "$work_dir/info.json"
   require_selected_access_point "$work_dir/info.json"
   require_expected_mac "$requested_mac"
   backup_file="$(save_config_backup "$work_dir/cfg.json")"
   echo "Saved configuration backup: $backup_file"
 
-  if config_has_explicit_output "$work_dir/cfg.json"; then
+  if config_has_explicit_output "$work_dir/cfg.json" && config_allows_update_ap_ota "$work_dir/cfg.json"; then
     validate_explicit_output "$work_dir/cfg.json"
-    echo "Configuration already has an explicit $profile_name LED output; no device changes made."
+    echo "Configuration already has an explicit $profile_name LED output and permits selected-AP OTA; no device changes made."
     return 0
   fi
 
-  make_legacy_config_explicit "$work_dir/cfg.json" "$migrated_file"
+  if config_has_explicit_output "$work_dir/cfg.json"; then
+    validate_explicit_output "$work_dir/cfg.json"
+    "$jq_bin" '.ota["same-subnet"] = false' "$work_dir/cfg.json" > "$migrated_file"
+  else
+    make_legacy_config_explicit "$work_dir/cfg.json" "$migrated_file"
+    "$jq_bin" '.ota["same-subnet"] = false' "$migrated_file" > "$migrated_file.tmp"
+    mv "$migrated_file.tmp" "$migrated_file"
+  fi
   "$curl_bin" --fail-with-body --silent --show-error --connect-timeout 10 --max-time 60 \
     "$device_url/upload" \
     -F "data=@$migrated_file;filename=/cfg.json" \
     -H "Connection: close" --no-keepalive >/dev/null
-  echo "Legacy configuration migrated. The device is rebooting; select it again before upload."
+  echo "Configuration prepared for safe selected-AP OTA. The device is rebooting; select it again before upload."
 }
 
 read_image_identity() {
@@ -476,8 +493,8 @@ upload_device() {
   local image_release
   if [[ "$files_are_current" != "true" ]]; then
     fetch_device_files "$work_dir"
+    load_device_identity "$work_dir/info.json"
   fi
-  load_device_identity "$work_dir/info.json"
   require_selected_access_point "$work_dir/info.json"
   require_expected_mac "$requested_mac"
   require_running_release "$adoption_requested"

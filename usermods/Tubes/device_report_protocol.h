@@ -3,7 +3,10 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "mesh_protocol.h"
+
 constexpr char DEVICE_REPORT_ACTION_KEY = 'z';
+constexpr char DEVICE_UPDATE_SERIAL_KEY = 'y';
 constexpr uint16_t DEVICE_REPORT_MAGIC = 0x5452;
 constexpr uint8_t DEVICE_REPORT_PROTOCOL_VERSION = 1;
 
@@ -16,6 +19,7 @@ enum DeviceReportMeshFlag : uint8_t {
 enum DeviceReportKind : uint8_t {
     DeviceReportProbe = 1,
     DeviceReportReply = 2,
+    DeviceUpdateSelect = 3,
 };
 
 enum TubeHardwareFamily : uint8_t {
@@ -75,7 +79,14 @@ inline bool isDeviceReportMessage(const DeviceReportMessage& message) {
     return message.actionKey == DEVICE_REPORT_ACTION_KEY
         && message.magic == DEVICE_REPORT_MAGIC
         && message.protocolVersion == DEVICE_REPORT_PROTOCOL_VERSION
-        && (message.kind == DeviceReportProbe || message.kind == DeviceReportReply);
+        && (message.kind == DeviceReportProbe
+            || message.kind == DeviceReportReply
+            || message.kind == DeviceUpdateSelect);
+}
+
+inline bool deviceReportMacIsWildcard(const uint8_t mac[6]) {
+    static const uint8_t wildcard[6] = {0};
+    return memcmp(mac, wildcard, sizeof(wildcard)) == 0;
 }
 
 inline bool deviceReportTargetsMac(
@@ -83,7 +94,17 @@ inline bool deviceReportTargetsMac(
     const uint8_t deviceMac[6]
 ) {
     return message.kind == DeviceReportProbe
-        && memcmp(message.mac, deviceMac, sizeof(message.mac)) == 0;
+        && (deviceReportMacIsWildcard(message.mac)
+            || memcmp(message.mac, deviceMac, sizeof(message.mac)) == 0);
+}
+
+inline bool deviceReportTargetsNode(
+    const DeviceReportMessage& message,
+    DeviceId deviceId
+) {
+    return message.kind == DeviceUpdateSelect
+        && message.nodeId != 0
+        && message.nodeId == deviceId;
 }
 
 inline int deviceReportHexNibble(char value) {
@@ -94,7 +115,7 @@ inline int deviceReportHexNibble(char value) {
 }
 
 inline bool parseDeviceReportMac(const char* text, uint8_t mac[6]) {
-    if (!text || strlen(text) != 12)
+    if (!text || strnlen(text, 13) != 12)
         return false;
 
     for (uint8_t index = 0; index < 6; index++) {
@@ -104,5 +125,22 @@ inline bool parseDeviceReportMac(const char* text, uint8_t mac[6]) {
             return false;
         mac[index] = uint8_t((high << 4) | low);
     }
+    return true;
+}
+
+inline bool parseDeviceReportId(const char* text, DeviceId& deviceId) {
+    if (!text || strnlen(text, 5) != 4)
+        return false;
+
+    DeviceId parsed = 0;
+    for (uint8_t index = 0; index < 4; index++) {
+        int nibble = deviceReportHexNibble(text[index]);
+        if (nibble < 0)
+            return false;
+        parsed = DeviceId((parsed << 4) | nibble);
+    }
+    if (parsed == 0)
+        return false;
+    deviceId = parsed;
     return true;
 }

@@ -1463,8 +1463,19 @@ activate field diagnostics as soon as it connects.
 | `e###` | Set next effect from the WLED `gEffects` table and broadcast `State`. |
 | `%###` | Set effect chance and broadcast `State`. |
 | `U`, `V`, `*`, `(`, `)`, `@`, `G`, `A`, `W`, `X`, `F`, `R`, `M` | Broadcast `Action`. |
+| `z` | Request a nonce-bound report from every visible gen1 device. Reports include stable MAC, Device ID and uplink, firmware release/hash, hardware family/variant, role, mesh state, uptime, LED count, bus count, first pin, and first bus type. |
+| `z############` | Request the same report from one stable 12-digit MAC. |
+| `y####` | Route an update-selection request to one four-digit hexadecimal Device ID. The matching device reports its stable MAC, then starts `WLED-UPDATE` without physical selection. |
 | `O` | Broadcast sound-overlay `Action`. |
 | `P` | Broadcasts an action key that current `onAction()` does not handle. |
 
 Local-only commands include debug toggle, local reboot, local role set, local AP
 control, and local ID reset.
+
+The bare `z` request uses the all-zero MAC as its explicit wildcard. Responders
+derive a bounded delay from their Device ID so a neighborhood does not answer in one
+synchronized ESP-NOW burst. Tooling correlates the nonce and deduplicates by stable
+MAC; it repeats the request and merges replies because broadcast delivery is not
+guaranteed. Device IDs are intentionally reboot-scoped, so an operator must take `y####`
+from a fresh manifest; the updater still locks every HTTP write and post-reboot
+verification to the stable MAC reported by the selected device.

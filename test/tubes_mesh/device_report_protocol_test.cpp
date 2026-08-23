@@ -14,9 +14,9 @@ void expect(bool condition, const std::string& message) {
         throw std::runtime_error(message);
 }
 
-// A probe accepts exactly one normalized MAC, so malformed serial input cannot
-// turn into a broadcast match against an unintended device.
-void normalized_mac_selects_only_the_requested_device() {
+// A probe accepts one normalized MAC or the explicit all-zero wildcard, so
+// malformed serial input cannot become an unintended fleet request.
+void normalized_mac_or_wildcard_selects_expected_devices() {
     uint8_t requestedMac[6] = {0};
     expect(parseDeviceReportMac("5443b2b542f4", requestedMac), "normalized MAC was rejected");
     expect(!parseDeviceReportMac("54:43:b2:b5:42:f4", requestedMac), "separator-filled MAC was accepted");
@@ -28,6 +28,28 @@ void normalized_mac_selects_only_the_requested_device() {
 
     uint8_t otherMac[6] = {0x54, 0x43, 0xb2, 0xb5, 0x42, 0xf5};
     expect(!deviceReportTargetsMac(probe, otherMac), "probe selected a neighboring MAC");
+
+    memset(probe.mac, 0, sizeof(probe.mac));
+    expect(deviceReportMacIsWildcard(probe.mac), "zero MAC was not recognized as the wildcard");
+    expect(deviceReportTargetsMac(probe, requestedMac), "wildcard omitted the requested device");
+    expect(deviceReportTargetsMac(probe, otherMac), "wildcard omitted a neighboring device");
+}
+
+// Targeted update selection uses the complete printed Device ID and rejects
+// zero or partial values before they can enter the mesh.
+void update_selection_targets_one_device_id() {
+    DeviceId requestedId = 0;
+    expect(parseDeviceReportId("1A2B", requestedId), "hexadecimal Device ID was rejected");
+    expect(requestedId == 0x1A2B, "hexadecimal Device ID changed during parsing");
+    expect(!parseDeviceReportId("1A2", requestedId), "partial Device ID was accepted");
+    expect(!parseDeviceReportId("0000", requestedId), "zero Device ID was accepted");
+    expect(!parseDeviceReportId("1X2B", requestedId), "non-hexadecimal Device ID was accepted");
+
+    DeviceReportMessage request;
+    request.kind = DeviceUpdateSelect;
+    request.nodeId = 0x1A2B;
+    expect(deviceReportTargetsNode(request, 0x1A2B), "target device ignored its update selection");
+    expect(!deviceReportTargetsNode(request, 0x1A2C), "neighbor accepted another device's selection");
 }
 
 // The two-byte Action prefix is the compatibility contract that lets deployed
@@ -49,8 +71,9 @@ void report_preserves_the_deployed_action_prefix() {
 } // namespace
 
 int main() {
-    const std::array<std::pair<const char*, void (*)()>, 2> tests = {{
-        {"normalized MAC selects only requested device", normalized_mac_selects_only_the_requested_device},
+    const std::array<std::pair<const char*, void (*)()>, 3> tests = {{
+        {"normalized MAC or wildcard selects expected devices", normalized_mac_or_wildcard_selects_expected_devices},
+        {"update selection targets one Device ID", update_selection_targets_one_device_id},
         {"report preserves deployed action prefix", report_preserves_the_deployed_action_prefix},
     }};
 

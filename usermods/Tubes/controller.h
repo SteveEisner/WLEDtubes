@@ -262,6 +262,8 @@ class PatternController : public MessageReceiver {
     TubesTimer v3DebugExpiryTimer;
     TubesTimer v3PositionTimer;
     TubesTimer v3PaletteRepeatTimer;
+    TubesTimer deviceReportTimer;
+    TubesTimer targetedUpdateTimer;
 
 #ifdef USELCD
     Lcd *lcd;
@@ -302,6 +304,10 @@ class PatternController : public MessageReceiver {
     bool hasV3LocalPosition = false;
     V3PositionFramePayload v3ConfiguredPositionFrame;
     bool hasV3ConfiguredPositionFrame = false;
+    DeviceReportMessage pendingDeviceReport;
+    uint32_t lastDeviceReportProbeNonce = 0;
+    bool deviceReportPending = false;
+    bool targetedUpdatePending = false;
 
     Energy energy=Chill;
     TubeState current_state;
@@ -626,10 +632,8 @@ class PatternController : public MessageReceiver {
 
     if (selected)
       updater.ready();
-    else {
+    else
       updater.stop();
-      WiFi.softAPdisconnect(true);
-    }
   }
 
   void deselect() {
@@ -1073,6 +1077,18 @@ class PatternController : public MessageReceiver {
 
     // Update the mesh
     node.update();
+
+    if (deviceReportPending && deviceReportTimer.ended()) {
+      deviceReportPending = false;
+      uint8_t deviceMac[6];
+      Network.localMAC(deviceMac);
+      broadcastDeviceReport(pendingDeviceReport.nonce, deviceMac);
+    }
+
+    if (targetedUpdatePending && targetedUpdateTimer.ended()) {
+      targetedUpdatePending = false;
+      select();
+    }
 
     // Update sound meter
     sound.update();
@@ -1757,7 +1773,7 @@ class PatternController : public MessageReceiver {
   void printHelp() const {
     Serial.println(F("b###.# - set bpm\ns - start phrase\n\np### - patterns\nm### - sync mode\nc### - colors\ne### - effects\nn - force next\n\ni### - set Control ID\nB/K/C### - set Beat/Pattern/Palette Channel ID\nd - toggle debugging\nl### - brightness"));
     Serial.println(F("@ - set power saving mode\nU - begin auto-update\nP - toggle all power saves\nO - toggle all sound overlays\n==== wifi ====\na - turn on access point\nq - turn off access point\nt0/1 - Tubes mode off/on"));
-    Serial.println(F("==== global actions ====\n* - enter select mode (double-click to Ready)\nA - turn on access point (Ready to update)\nW - forget WiFi client\nX - restart\nV### - auto-upgrade to version\nz############ - probe a device by MAC\nM - cancel manual pattern override"));
+    Serial.println(F("==== global actions ====\n* - enter select mode (double-click to Ready)\nA - turn on access point (Ready to update)\nW - forget WiFi client\nX - restart\nV### - auto-upgrade to version\nz - report all visible devices\nz############ - probe a device by MAC\ny#### - select one hexadecimal Device ID for update\nM - cancel manual pattern override"));
   }
 
   bool executeOperation(const TubeOperation& operation) {
@@ -2180,6 +2196,10 @@ class PatternController : public MessageReceiver {
       requestDeviceReport(command + 1);
       return;
     }
+    if (key == DEVICE_UPDATE_SERIAL_KEY) {
+      requestDeviceUpdate(command + 1);
+      return;
+    }
 
     accum88 parsed = parse_number(command + 1);
     uint16_t argument = parsed >> 8;
@@ -2295,18 +2315,36 @@ class PatternController : public MessageReceiver {
 
   void requestDeviceReport(const char* macText) {
     DeviceReportMessage request;
-    if (!parseDeviceReportMac(macText, request.mac)) {
+    bool wildcard = !macText || !*macText;
+    if (!wildcard && !parseDeviceReportMac(macText, request.mac)) {
       Serial.println(F("TUBE_PROBE_ERROR invalid_mac"));
       return;
     }
 
     request.nonce = esp_random();
     Serial.printf(
-      "TUBE_PROBE nonce=%08lX mac=%02x%02x%02x%02x%02x%02x\n",
+      "TUBE_PROBE nonce=%08lX mac=%s\n",
       (unsigned long)request.nonce,
-      request.mac[0], request.mac[1], request.mac[2],
-      request.mac[3], request.mac[4], request.mac[5]
+      wildcard ? "*" : macText
     );
+    onDeviceReportMessage(request);
+    sendV3ControlCommand(COMMAND_ACTION, &request, sizeof(request));
+  }
+
+  void requestDeviceUpdate(const char* idText) {
+    DeviceReportMessage request;
+    request.kind = DeviceUpdateSelect;
+    if (!parseDeviceReportId(idText, request.nodeId)) {
+      Serial.println(F("TUBE_UPDATE_ERROR invalid_id"));
+      return;
+    }
+    request.nonce = esp_random();
+    Serial.printf(
+      "TUBE_UPDATE_TARGET nonce=%08lX node=0x%04X\n",
+      (unsigned long)request.nonce,
+      request.nodeId
+    );
+    onDeviceReportMessage(request);
     sendV3ControlCommand(COMMAND_ACTION, &request, sizeof(request));
   }
 
@@ -2339,6 +2377,7 @@ class PatternController : public MessageReceiver {
         report.ledPin = pins[0];
       report.ledType = firstBus->getType() & 0x7F;
     }
+    printDeviceReport(report);
     sendV3ControlCommand(COMMAND_ACTION, &report, sizeof(report));
   }
 
@@ -2373,10 +2412,32 @@ class PatternController : public MessageReceiver {
       return;
     }
 
+    if (message.kind == DeviceUpdateSelect) {
+      if (deviceReportTargetsNode(message, node.header.id) && !isHomeLightRole()) {
+        uint8_t deviceMac[6];
+        Network.localMAC(deviceMac);
+        broadcastDeviceReport(message.nonce, deviceMac);
+        targetedUpdatePending = true;
+        targetedUpdateTimer.start(250);
+      }
+      return;
+    }
+
+    if (message.nonce == lastDeviceReportProbeNonce)
+      return;
+    lastDeviceReportProbeNonce = message.nonce;
+
     uint8_t deviceMac[6];
     Network.localMAC(deviceMac);
-    if (deviceReportTargetsMac(message, deviceMac))
-      broadcastDeviceReport(message.nonce, deviceMac);
+    if (!deviceReportTargetsMac(message, deviceMac))
+      return;
+
+    pendingDeviceReport = message;
+    deviceReportPending = true;
+    uint16_t delayMs = deviceReportMacIsWildcard(message.mac)
+        ? 50 + ((uint32_t(protocolLocalValueFromId(node.header.id)) * 37U) % 1200U)
+        : 20;
+    deviceReportTimer.start(delayMs);
   }
 
   // AI: below section was generated by an AI
