@@ -112,7 +112,7 @@ class DebugController {
       auto seg = strip.getMainSegment();
       extractModeName(seg.mode, JSON_mode_names, mode_name, 50);
       extractModeName(seg.palette, JSON_palette_names, palette_name, 50);
-      Serial.printf("=== WLED: %d LEDs, buses:%u segs:%u main:%u-%u/%u bri:%u/%u/%u, %s(%u) %s(%u) speed:%u intensity:%u",
+      Serial.printf("=== WLED: %d LEDs, buses:%u segs:%u main:%u-%u/%u bri:%u/%u/%u abl:%u/%u/%u, %s(%u) %s(%u) speed:%u intensity:%u",
         strip.getLengthTotal(),
         BusManager::getNumBusses(),
         strip.getSegmentsNum(),
@@ -122,6 +122,9 @@ class DebugController {
         bri,
         briT,
         briLast,
+        BusManager::currentMilliamps(),
+        BusManager::ablMilliampsMax(),
+        BusManager::isABLActive(),
         mode_name,
         seg.mode,
         palette_name,
@@ -246,7 +249,7 @@ class DebugController {
       return;
     lastRenderReportAt = now;
 
-    Serial.printf("RENDER t=%lu id=%04X fade=%u src=%u/%u out=%u lit=%u/%u delta=%u black=%u snap=%u layers=",
+    Serial.printf("RENDER t=%lu id=%04X fade=%u src=%u/%u out=%u lit=%u/%u delta=%u black=%u snap=%u abl=%u/%u layers=",
       now,
       controller.node.header.id,
       capturedWledFader,
@@ -257,7 +260,9 @@ class DebugController {
       length,
       maximumRenderDelta,
       blackRenderFrames,
-      snapRenderFrames
+      snapRenderFrames,
+      BusManager::currentMilliamps(),
+      BusManager::ablMilliampsMax()
     );
     for (uint8_t layer = 0; layer < NUM_VSTRIPS; layer++) {
       const VirtualStrip *vstrip = controller.vstrips[layer];
