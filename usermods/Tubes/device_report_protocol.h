@@ -20,6 +20,8 @@ enum DeviceReportKind : uint8_t {
     DeviceReportProbe = 1,
     DeviceReportReply = 2,
     DeviceUpdateSelect = 3,
+    DeviceIdentifyOn = 4,
+    DeviceIdentifyOff = 5,
 };
 
 enum TubeHardwareFamily : uint8_t {
@@ -81,7 +83,9 @@ inline bool isDeviceReportMessage(const DeviceReportMessage& message) {
         && message.protocolVersion == DEVICE_REPORT_PROTOCOL_VERSION
         && (message.kind == DeviceReportProbe
             || message.kind == DeviceReportReply
-            || message.kind == DeviceUpdateSelect);
+            || message.kind == DeviceUpdateSelect
+            || message.kind == DeviceIdentifyOn
+            || message.kind == DeviceIdentifyOff);
 }
 
 inline bool deviceReportMacIsWildcard(const uint8_t mac[6]) {
@@ -102,7 +106,9 @@ inline bool deviceReportTargetsNode(
     const DeviceReportMessage& message,
     DeviceId deviceId
 ) {
-    return message.kind == DeviceUpdateSelect
+    return (message.kind == DeviceUpdateSelect
+            || message.kind == DeviceIdentifyOn
+            || message.kind == DeviceIdentifyOff)
         && message.nodeId != 0
         && message.nodeId == deviceId;
 }
