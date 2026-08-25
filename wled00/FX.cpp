@@ -4417,6 +4417,9 @@ static const char _data_FX_MODE_SINEWAVE[] PROGMEM = "Sine@!,Scale;;!";
  */
 void mode_flow(void)
 {
+  // A persisted one-pixel placeholder cannot form Flow's zone geometry.
+  if (SEGLEN < 2) return;
+
   unsigned counter = 0;
   if (SEGMENT.speed != 0)
   {
