@@ -50,6 +50,13 @@ public:
     return used;
   }
 
+  size_t freshCount(uint32_t now, uint32_t maximumAgeMs) const {
+    size_t used = 0;
+    for (const PeerTelemetryEntry &entry : entries)
+      if (entry.nodeId != 0 && now - entry.lastSeenMs <= maximumAgeMs) used++;
+    return used;
+  }
+
   const PeerTelemetryEntry *entry(size_t index) const {
     size_t used = 0;
     for (const PeerTelemetryEntry &candidate : entries) {

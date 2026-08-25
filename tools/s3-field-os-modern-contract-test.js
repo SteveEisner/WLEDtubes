@@ -11,10 +11,12 @@ test('Conductor remains on canonical completed WLED framebuffer', () => {
 });
 test('Field OS offers Next but no Previous or authority mutation', () => {
   assert.match(ui, /F\("Next"\)/);
-  assert.match(bridge, /tubes\.s3ForceNext\(\)/);
-  assert.match(tubes, /controller\.force_next\(true\)/);
+  assert.match(bridge, /return tubes\.s3ForceNext\(\)/);
+  assert.match(tubes, /return controller\.force_next_if_authoritative\(\)/);
   assert.doesNotMatch(ui, /Previous|SetMasterAuthority|SetAnchorAuthority|Update\.begin|esp_ota_begin/);
-  assert.doesNotMatch(tubes, /force_next_pattern/);
+  assert.doesNotMatch(tubes, /force_next_pattern\(/);
+  assert.match(ui, /Next unavailable/);
+  assert.match(ui, /Next failed/);
 });
 test('Surveyor is bounded, fresh, read-only, and exposes modern channel winners', () => {
   assert.match(ui, /TubesS3PeerStatus sorted\[7\]/);

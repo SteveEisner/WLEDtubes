@@ -92,5 +92,12 @@ int main() {
   require(vault.claim(requestFor(stale), &stale, 20) == S3VaultDecision::DeviceNotObserved,
           "stale observation was accepted");
 
+  vault.disarm();
+  vault.setArmTimeoutMs(100);
+  vault.arm(0x1234abcd, 40, 1000);
+  require(!vault.expire(1100), "arm expired at its inclusive deadline");
+  require(vault.expire(1101) && vault.state() == S3VaultState::Failed,
+          "unclaimed arm window did not fail closed");
+
   printf("s3 firmware vault policy scenarios passed\n");
 }

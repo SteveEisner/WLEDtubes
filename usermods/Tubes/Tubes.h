@@ -130,6 +130,7 @@ class TubesUsermod : public Usermod {
       status.isFollowing = controller.node.isFollowing();
       status.radioReady = espnowBroadcast.isStarted();
       status.powerSave = controller.power_save;
+      status.canForceNext = controller.can_force_next();
       status.role = static_cast<uint8_t>(controller.role);
       status.radioChannel = WiFi.channel();
       status.patternId = controller.current_state.pattern_id;
@@ -146,8 +147,8 @@ class TubesUsermod : public Usermod {
       status.currentPalettePhrase = controller.current_state.palette_phrase;
       status.nextPalettePhrase = controller.next_state.palette_phrase;
       status.nextPaletteId = controller.next_state.palette_id;
-      status.peerCount = controller.node.peerTelemetry.count();
       const uint32_t now = millis();
+      status.peerCount = controller.node.peerTelemetry.freshCount(now, 60000);
       fillS3ChannelStatus(status.beatChannel, BeatChannel, now);
       fillS3ChannelStatus(status.patternChannel, PatternChannel, now);
       fillS3ChannelStatus(status.paletteChannel, PaletteChannel, now);
@@ -186,7 +187,13 @@ class TubesUsermod : public Usermod {
       return true;
     }
 
-    void s3ForceNext() { controller.force_next(true); }
+    bool s3ForceNext() { return controller.force_next_if_authoritative(); }
+    bool s3BroadcastFleetOffer(const FleetUpdateOffer &offer) {
+      return controller.broadcastFleetUpdateOffer(offer);
+    }
+    bool s3RequestDeviceReport(const uint8_t mac[6], uint32_t nonce) {
+      return controller.requestDeviceReport(mac, nonce);
+    }
     // AI: end
 
     void setup() {

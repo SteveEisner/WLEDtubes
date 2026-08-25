@@ -115,6 +115,7 @@ public:
 class S3FirmwareVaultPolicy {
 public:
   static constexpr uint32_t DEFAULT_OBSERVATION_MAX_AGE_MS = 30000;
+  static constexpr uint32_t DEFAULT_ARM_TIMEOUT_MS = 60000;
   static constexpr uint32_t DEFAULT_CLAIM_TIMEOUT_MS = 90000;
 
   void arm(uint32_t nonce, uint16_t release, uint32_t nowMs) {
@@ -131,6 +132,8 @@ public:
     resetClaim();
     state_ = S3VaultState::Idle;
   }
+
+  void fail() { state_ = S3VaultState::Failed; }
 
   S3VaultDecision claim(
       const S3VaultRequest& request,
@@ -187,7 +190,9 @@ public:
   }
 
   bool expire(uint32_t nowMs) {
-    if ((state_ == S3VaultState::Claimed
+    if ((state_ == S3VaultState::Armed
+         && elapsed(nowMs, armedAtMs_) > armTimeoutMs_)
+        || (state_ == S3VaultState::Claimed
          && elapsed(nowMs, claimedAtMs_) > claimTimeoutMs_)
         || (state_ == S3VaultState::AwaitingFreshReport
             && elapsed(nowMs, bodyCompletedAtMs_) > claimTimeoutMs_)) {
@@ -207,6 +212,7 @@ public:
   uint16_t release() const { return release_; }
   const uint8_t* claimedMac() const { return claimedMac_; }
   void setObservationMaxAgeMs(uint32_t value) { observationMaxAgeMs_ = value; }
+  void setArmTimeoutMs(uint32_t value) { armTimeoutMs_ = value; }
   void setClaimTimeoutMs(uint32_t value) { claimTimeoutMs_ = value; }
 
 private:
@@ -236,5 +242,6 @@ private:
   uint32_t claimedAtMs_ = 0;
   uint32_t bodyCompletedAtMs_ = 0;
   uint32_t observationMaxAgeMs_ = DEFAULT_OBSERVATION_MAX_AGE_MS;
+  uint32_t armTimeoutMs_ = DEFAULT_ARM_TIMEOUT_MS;
   uint32_t claimTimeoutMs_ = DEFAULT_CLAIM_TIMEOUT_MS;
 };

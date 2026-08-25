@@ -67,6 +67,9 @@ enum class FieldScreen : uint8_t {
   Home,
   Conductor,
   Surveyor,
+#ifdef TUBES_S3_FIRMWARE_CARRIER
+  Carrier,
+#endif
   Status
 };
 
@@ -77,6 +80,7 @@ private:
   FieldScreen screen = FieldScreen::Home;
   uint32_t lastPreviewDraw = 0;
   uint32_t lastTelemetryDraw = 0;
+  bool nextSendFailed = false;
 
   static constexpr uint16_t COLOR_BACKGROUND = 0x0863;
   static constexpr uint16_t COLOR_SURFACE = 0x10E7;
@@ -120,14 +124,36 @@ private:
     display.setCursor(25, 51);
     display.println(F("The flock stays live wherever you go"));
     button(20, 84, 210, 164, COLOR_PRIMARY, F("Conductor"));
-    button(250, 84, 210, 76, COLOR_SURFACE_RAISED, F("Surveyor"));
+    button(250, 84, 210,
+#ifdef TUBES_S3_FIRMWARE_CARRIER
+           48,
+#else
+           76,
+#endif
+           COLOR_SURFACE_RAISED, F("Surveyor"));
+#ifdef TUBES_S3_FIRMWARE_CARRIER
+    button(250, 142, 210, 48, COLOR_SURFACE_RAISED, F("Carrier"));
+    button(250, 200, 210, 48, COLOR_SURFACE_RAISED, F("Status"));
+#else
     button(250, 172, 210, 76, COLOR_SURFACE_RAISED, F("Status"));
+#endif
     display.setTextColor(RGB565_WHITE);
     display.setTextSize(1);
     display.setCursor(36, 199);
     display.println(F("Run the show"));
-    display.setCursor(266, 143); display.println(F("Nearby Tubes"));
+    display.setCursor(266,
+#ifdef TUBES_S3_FIRMWARE_CARRIER
+                      128
+#else
+                      143
+#endif
+    ); display.println(F("Nearby Tubes"));
+#ifdef TUBES_S3_FIRMWARE_CARRIER
+    display.setCursor(266, 186); display.println(F("Pass updates"));
+    display.setCursor(266, 244); display.println(F("Read-only health"));
+#else
     display.setCursor(266, 231); display.println(F("Read-only health"));
+#endif
   }
 
   void drawBack() {
@@ -189,7 +215,12 @@ private:
     drawBack();
     drawConductorTelemetry(status);
     stripComponent.draw(31, 156, 420, 138);
-    button(150, 328, 180, 70, COLOR_PRIMARY, F("Next"));
+    if (!status.canForceNext)
+      button(120, 328, 240, 70, COLOR_MUTED, F("Next unavailable"));
+    else if (nextSendFailed)
+      button(120, 328, 240, 70, RGB565_RED, F("Next failed"));
+    else
+      button(150, 328, 180, 70, COLOR_PRIMARY, F("Next"));
     lastPreviewDraw = millis();
     lastTelemetryDraw = millis();
   }
@@ -269,12 +300,44 @@ private:
     display.setCursor(24, 220); display.println(F("Read-only public Tubes state"));
   }
 
+#ifdef TUBES_S3_FIRMWARE_CARRIER
+  void drawCarrier() {
+    title(F("Carrier"));
+    drawBack();
+    button(20, 70, 150, 50, COLOR_PRIMARY, F("Scan"));
+    TubesS3CarrierStatus carrier;
+    tubesS3ReadCarrierStatus(carrier);
+    display.setTextSize(1);
+    display.setTextColor(COLOR_MUTED);
+    display.setCursor(190, 88);
+    display.printf("state %u  release %u\n", carrier.state, carrier.release);
+    const size_t count = tubesS3CarrierTargetCount();
+    display.setTextColor(RGB565_WHITE);
+    for (size_t index = 0; index < count && index < 7; index++) {
+      TubesS3CarrierTarget target;
+      if (!tubesS3ReadCarrierTarget(index, target)) continue;
+      const int16_t y = 140 + index * 44;
+      display.fillRoundRect(20, y, 440, 36, 8, COLOR_SURFACE_RAISED);
+      display.setCursor(32, y + 12);
+      display.printf("%02X%02X%02X%02X%02X%02X  %s  v%u\n",
+          target.mac[0], target.mac[1], target.mac[2], target.mac[3],
+          target.mac[4], target.mac[5],
+          target.family == 1 ? "Dig2Go" : "Athom C3",
+          target.release);
+    }
+    lastTelemetryDraw = millis();
+  }
+#endif
+
   void draw() {
     if (!displayReady) return;
     switch (screen) {
       case FieldScreen::Home: drawHome(); break;
       case FieldScreen::Conductor: drawConductor(); break;
       case FieldScreen::Surveyor: drawSurveyor(); break;
+#ifdef TUBES_S3_FIRMWARE_CARRIER
+      case FieldScreen::Carrier: drawCarrier(); break;
+#endif
       case FieldScreen::Status: drawStatus(); break;
     }
   }
@@ -285,10 +348,32 @@ private:
     } else if (screen == FieldScreen::Home) {
       if (y >= 84 && y < 250) {
         if (x < 240) screen = FieldScreen::Conductor;
-        else screen = y < 166 ? FieldScreen::Surveyor : FieldScreen::Status;
+        else if (y <
+#ifdef TUBES_S3_FIRMWARE_CARRIER
+                 137
+#else
+                 166
+#endif
+        ) screen = FieldScreen::Surveyor;
+#ifdef TUBES_S3_FIRMWARE_CARRIER
+        else if (y < 195) screen = FieldScreen::Carrier;
+#endif
+        else screen = FieldScreen::Status;
       }
+#ifdef TUBES_S3_FIRMWARE_CARRIER
+    } else if (screen == FieldScreen::Carrier) {
+      if (y >= 70 && y <= 125) tubesS3ScanCarrierTargets();
+      else if (y >= 140) {
+        size_t index = (y - 140) / 44;
+        TubesS3CarrierTarget target;
+        if (tubesS3ReadCarrierTarget(index, target))
+          tubesS3ArmCarrier(target.mac, target.family, target.variant, target.release);
+      }
+#endif
     } else if (screen == FieldScreen::Conductor && y >= 315 && y <= 415) {
-      tubesS3ForceNext();
+      TubesS3FieldStatus status;
+      tubesS3ReadStatus(status);
+      if (status.canForceNext) nextSendFailed = !tubesS3ForceNext();
     }
     draw();
   }
@@ -344,6 +429,10 @@ public:
         lastTelemetryDraw = now;
       } else if (screen == FieldScreen::Surveyor) {
         drawSurveyor();
+#ifdef TUBES_S3_FIRMWARE_CARRIER
+      } else if (screen == FieldScreen::Carrier) {
+        drawCarrier();
+#endif
       }
     }
   }
