@@ -1,8 +1,15 @@
 # Remote upgrade procedure
 
 Remote upgrades use ESP-NOW to select one physical device and verify it after
-reboot. Firmware and configuration still travel over the selected device's
-direct Wi-Fi access point; firmware is never carried over the mesh.
+reboot. Firmware and configuration travel over Wi-Fi, either through one selected
+device's direct access point or the shared parallel-pull network; firmware is never
+carried over the mesh.
+
+Release 22 and newer also support a canary-first parallel pull from one local HTTP
+server. That path removes per-device Wi-Fi association and is the preferred workflow
+after the one-time migration. See
+[`docs/FLEET_PULL_UPDATE.md`](docs/FLEET_PULL_UPDATE.md) for network requirements,
+measured results, safety gates, and the fleet command.
 
 ## Fast fleet workflow
 

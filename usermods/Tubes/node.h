@@ -65,6 +65,18 @@ class MessageReceiver {
         const MeshNodeHeader& transportSender,
         MessageRecipients recipients
     ) = 0;
+    virtual bool isValidV3ChannelV2(
+        uint8_t channel,
+        const TubesChannelMessageV2& message,
+        const MeshNodeHeader& transportSender,
+        MessageRecipients recipients
+    ) const = 0;
+    virtual bool onV3ChannelV2(
+        uint8_t channel,
+        const TubesChannelMessageV2& message,
+        const MeshNodeHeader& transportSender,
+        MessageRecipients recipients
+    ) = 0;
     virtual void onV2PacketObserved(const NodeMessage& message) = 0;
     virtual bool onButton(uint8_t button_id) = 0;
 };
@@ -225,6 +237,15 @@ class LightNode {
             Serial.printf("TOPIC-%02X", message->command);
         else
             Serial.print(command_name(message->command));
+        if (message->header.version == TUBES_PROTOCOL_V3 && isKnownTubesChannel(message->command)) {
+            const TubesChannelPayload& payload = *reinterpret_cast<const TubesChannelPayload*>(message->data);
+            Serial.printf("[%04X/%04X k%u s%u]",
+                payload.envelope.channelId,
+                payload.envelope.sourceControlId,
+                payload.envelope.messageKind,
+                payload.envelope.sequence
+            );
+        }
         if (message->recipients == RECIPIENTS_ROOT)
             Serial.printf(":ROOT");
         if (rssi)
@@ -366,6 +387,83 @@ class LightNode {
             broadcastMessage(&msg, true);
         }
     }
+
+    // Validate, apply, and relay one variable-length generation-1 channel snapshot.
+    // The Wi-Fi-task prefix filter has already rejected malformed lengths and framing.
+    void onPeerChannelV2(
+        const uint8_t* address,
+        const TubesChannelMessageV2* message,
+        uint8_t len,
+        signed int rssi,
+        bool broadcast
+    ) {
+        (void)address;
+        (void)broadcast;
+        if (!receiver->isValidV3ChannelV2(
+                message->command,
+                *message,
+                message->header,
+                message->recipients))
+            return;
+
+        lastRssi = rssi;
+        onPeerPing(message->header);
+
+        NodeMessage routeMessage;
+        routeMessage.header = message->header;
+        routeMessage.recipients = message->recipients;
+        routeMessage.command = message->command;
+        MeshNodeHeader routeHeader = nativeHeader();
+        MeshRoutePlan route = planMeshRoute(
+            routeHeader, isFollowing(), isLeading(), routeMessage);
+        if (!route.accepted)
+            return;
+
+        if (route.applyLocally) {
+            if (serialTraceEnabled()) {
+                Serial.printf(
+                    "  >> %04X/%04X v3 CHANNEL2-%02X[%04X/%04X k%u s%u] %ddB %uB ",
+                    message->header.id,
+                    message->header.uplinkId,
+                    message->command,
+                    message->envelope.channelId,
+                    message->envelope.sourceControlId,
+                    message->envelope.messageKind,
+                    message->envelope.sequence,
+                    rssi,
+                    len
+                );
+            }
+            if (!receiver->onV3ChannelV2(
+                    message->command,
+                    *message,
+                    message->header,
+                    message->recipients))
+                return;
+            if (serialTraceEnabled())
+                Serial.println();
+            if (route.synchronizeClock) {
+                uint32_t newTimebase = message->timebase - millis() + 3;
+                int32_t difference = newTimebase - strip.timebase;
+                if (difference < -10 || difference > 10)
+                    strip.timebase = newTimebase;
+            }
+        }
+
+        if (route.relay) {
+            TubesChannelMessageV2 relayed;
+            memcpy(&relayed, message, len);
+            relayed.header = routeHeader;
+            if (!isFollowing()) {
+                relayed.recipients = RECIPIENTS_ALL;
+                relayed.envelope.messageKind = ChannelDeclaration;
+            }
+            relayed.timebase = strip.timebase + millis();
+            if (isValidChannelMessageV2Prefix(
+                    reinterpret_cast<const uint8_t*>(&relayed), len))
+                espnowBroadcast.send(reinterpret_cast<const uint8_t*>(&relayed), len);
+        }
+    }
     // AI: end
 
     void broadcastMessage(NodeMessage *message, bool is_rebroadcast=false) {
@@ -489,6 +587,30 @@ class LightNode {
         memcpy(message.data, &payload, sizeof(payload));
         broadcastMessage(&message);
         return true;
+    }
+
+    // Send one variable-length channel snapshot after the complete packet has
+    // passed the same ingress validation used by receivers.
+    bool sendV3ChannelV2(uint8_t channel, TubesChannelMessageV2& message) {
+        message.header = nativeHeader();
+        message.command = channel;
+        if (message.envelope.messageKind == ChannelDeclaration) {
+            if (isFollowing())
+                return false;
+            message.recipients = RECIPIENTS_ALL;
+        } else if (message.envelope.messageKind == ChannelRequest && isFollowing()) {
+            message.recipients = RECIPIENTS_ROOT;
+        } else {
+            return false;
+        }
+        message.timebase = strip.timebase + millis();
+        size_t length = channelMessageV2WireSize(message.envelope.bodyLength);
+        if (!isValidChannelMessageV2Prefix(
+                reinterpret_cast<const uint8_t*>(&message), length)) {
+            Serial.printf("Invalid variable v3 channel: %02X\n", channel);
+            return false;
+        }
+        return espnowBroadcast.send(reinterpret_cast<const uint8_t*>(&message), length);
     }
     // AI: end
 
@@ -631,6 +753,14 @@ protected:
         if (msg) {
             if(len == sizeof(NodeMessage)) {
                 instance->onPeerData(address, (const NodeMessage*)msg, len, rssi, true);
+            } else if (isValidChannelMessageV2Prefix(msg, len)) {
+                instance->onPeerChannelV2(
+                    address,
+                    reinterpret_cast<const TubesChannelMessageV2*>(msg),
+                    len,
+                    rssi,
+                    true
+                );
             } else if(len == sizeof(wizmote_message)) {
                 instance->onWizmote(address, (const wizmote_message*)msg, len);
             } else {
@@ -644,6 +774,8 @@ protected:
     static bool onEspNowFilter(const uint8_t *address, const uint8_t *msg, uint8_t len, int8_t rssi) {
         (void)address;
         (void)rssi;
+        if (isValidChannelMessageV2Prefix(msg, len))
+            return true;
         if (len == sizeof(NodeMessage)) {
             const NodeMessage& message = *reinterpret_cast<const NodeMessage*>(msg);
             if (message.recipients != RECIPIENTS_ALL

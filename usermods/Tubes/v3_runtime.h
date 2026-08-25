@@ -186,6 +186,14 @@ class V3ProtocolRuntime {
     void setup(DeviceId nodeId, uint32_t session) {
       localId = nodeId;
       localSession = session ? session : 1;
+      authorities.clear();
+      palettes.clear();
+      positionPeers.clear();
+      counters = V3ProtocolCounters();
+      positionFrame = V3PositionFramePayload();
+      hasPositionFrame = false;
+      for (V3PublisherState& publisher : publishers)
+        publisher = V3PublisherState();
     }
 
     void setLocalId(DeviceId nodeId) {

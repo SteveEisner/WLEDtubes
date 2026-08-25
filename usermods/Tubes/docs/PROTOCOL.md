@@ -234,6 +234,7 @@ The deployed implementation uses:
 | `0x40` | `Info` | `InfoPayload` | 41 | Human-readable status/info. |
 | `0x50` | `Beats` | `BeatsPayload` | 2 | BPM request. |
 | `0xE0` | `Upgrade` | `UpgradePayload` | variable | Update offer. Not reliable in current v2 implementation. |
+| `0xE1` | `FleetUpgrade` | `FleetUpdateOffer` | 44 | Gen1-only LAN pull offer; old firmware ignores it and the existing `0xE0` migration path remains unchanged. |
 | `0xF0` | `Reset` | none | 0 | Reserved/defined, not currently handled. |
 
 Unknown command IDs must be ignored. They should not change visible output.
@@ -912,6 +913,24 @@ flowchart LR
 Topic leases are intentionally independent. Loss of a beat authority does not
 release the palette authority, and a debug claim does not alter pattern leadership.
 
+### Activation boundaries
+
+Persistent visual operations are plans, not immediate mutations. Pattern, sync,
+effect, palette, and sound-program requests set their `next` entry to the next whole
+phrase, derived from the shared BPM clock. Authorities may schedule later phrases,
+but must not publish a newly requested visual operation with phrase zero or the
+already-partially-rendered current phrase.
+
+The `current` entry is different: it describes state whose boundary has already
+passed. A late receiver applies that snapshot immediately to catch up, then activates
+`next` only when its effective phrase arrives. Beat clock correction and genuine
+audio transients also apply on receipt because they synchronize or describe the beat
+that is happening now; persistent Beat-channel sound programs remain phrase-bound.
+
+The operator `n` command moves the earliest pending visual operation to the next
+phrase and shifts the other pending phrases by the same amount, preserving their
+relative timing. An unscheduled `UINT16_MAX` entry remains unscheduled.
+
 ### Presence and capabilities
 
 `Presence` uses `Info` routing and a fixed 12-byte state body:
@@ -981,40 +1000,42 @@ Palette is the color-master protocol. A palette authority can transmit colors th
 are not compiled into the Tubes palette registry. Literal palettes are runtime state,
 not persistent WLED custom-palette files, so frequent changes do not write flash.
 
-The initial formats are:
+The canonical gen1 representation is the same 16-entry RGB palette WLED renders.
+Positions are implicit and evenly indexed, so all 48 RGB bytes fill one Palette
+definition packet without approximation. A separate schedule packet references the
+current and next definition sequence numbers and carries two entries of
+`palettePhrase:u16, legacyPaletteId:u8`.
 
-| Format | Encoding | Use |
-|---|---|---|
-| `Palette16` | Sixteen RGB888 colors, exactly 48 body bytes. | Exact FastLED/WLED runtime palette. |
-| `GradientStops` | One-byte count plus eight fixed `(position, R, G, B)` slots, exactly 33 body bytes. | Compact arbitrary gradients normalized atomically to `Palette16`. |
-| `LegacyId` | Existing v2 palette ID. | No literal definition required. |
+An authority sends current definition, next definition, then schedule. Receivers
+cache both definitions and apply the schedule only when both references resolve, so
+packet loss cannot expose a partial palette. The next definition becomes visible only
+at its phrase boundary. Periodic publication renews the authority lease and repairs a
+late join or a dropped definition.
 
-Because a `Palette16` consumes the entire 48-byte topic body, definition and
-activation are separate messages:
+All three packets retain the normal channel request/declaration message kind. Their
+body lengths distinguish definitions from schedules, so Palette authority election,
+upward forwarding, and downward relaying use exactly the same path as every other
+application channel.
 
-1. `Definition` carries one palette. The tuple `(authorityId, authoritySession,
-   sequence)` is its definition key.
-2. Receivers validate and cache the definition in a fixed two-entry current/next
-   cache.
-3. `Schedule` references the definition sequence, supplies an effective phrase,
-   transition duration, and `legacyPaletteId`.
-4. A receiver activates only a complete cached definition. A missing definition
-   leaves the current palette unchanged and causes later repeated definitions to heal
-   the state.
+After the full schedule, the authority also sends the earlier ID-only Palette state.
+Receivers that predate literal gradients reject the new body lengths and apply this
+fallback declaration. Current receivers remember that the same authority and boot
+session supplied a complete schedule, so they relay the ID-only declaration for older
+descendants without replacing their runtime gradient. A changed authority or boot
+session clears that memory and makes the ID-only state authoritative again.
 
-The authority sends a new definition in a short jittered burst, follows it with the
-schedule, and periodically repeats current and next definitions at low cadence for
-late joiners. The schedule is sent before the activation phrase with enough lead time
-for intermittent reception. Receivers never display a partially received palette.
+For a predefined palette, the 16 RGB entries are copied directly from WLED's runtime
+palette and `legacyPaletteId` is that exact built-in ID. For a generated gradient, the
+Palette owner expands it once with WLED's palette rules, sends the resulting 16 RGB
+entries, and computes the closest fixed palette ID by squared RGB error. The Control
+root copies the fallback IDs into its ordinary generation-0 `State`, so gen0 poles
+follow the same schedule with the closest colors they can represent. The fallback ID
+does not replace literal colors on receivers that accepted the complete gradient
+schedule.
 
-Every literal palette schedule must include a stable v2 `legacyPaletteId`. On
-compatibility entry, upgraded and legacy devices all use that fallback ID at the next
-palette boundary. The fallback may be approximate, but it prevents upgraded devices
-from retaining colors that old devices cannot reproduce.
-
-The fixed eight-byte schedule body is `definitionSequence:u16`,
-`effectivePhrase:u16`, `transitionMs:u16`, `legacyPaletteId:u8`, and
-`paletteFormat:u8`, all little-endian where wider than one byte.
+Palette authority uses the normal per-channel `(channelId, controlId)` ordering. The
+local `g` command sets the Palette channel's local value to `0xFFF`, making that pole
+the Palette Master; a tie is resolved by the higher Control ID as usual.
 
 ### Effect authority
 
@@ -1341,9 +1362,11 @@ version preservation, and atomic gradient expansion. Stage 6, real v2 capture
 validation, queue-pressure testing, and the position estimator are still required
 before fleet rollout.
 
-The current operator surface is the existing WLED JSON-state request. `palette16`
-accepts exactly 16 integer `0xRRGGBB` values, with optional `legacyPalette`,
-`palettePhrase`, and `paletteTransition`. `positionFrame` establishes a namespace,
+The current operator surface includes the existing WLED JSON-state request. `palette16`
+accepts exactly 16 integer `0xRRGGBB` values and samples them into eight transmitted
+gradient stops, with optional `legacyPalette`, `palettePhrase`, and
+`paletteTransition`. Without `legacyPalette`, the sender chooses the nearest fixed
+fallback. `positionFrame` establishes a namespace,
 epoch, and anchor IDs; `position` supplies validated Q8.8 coordinates and quality;
 `debugMask` and `debugVerbosity` update the independent Debug topic. These are
 runtime controls and do not persist literal palettes to flash.
@@ -1456,21 +1479,42 @@ activate field diagnostics as soon as it connects.
 |---|---|
 | `b###` | Request/set BPM. Followers send `Beats`; roots update and broadcast `State`. |
 | `s` | Start phrase and broadcast `State`. |
-| `n` | Force next scheduled change and broadcast `State`. |
-| `p###` | Set next pattern ID and broadcast `State`. |
-| `m###` | Set next sync mode and broadcast `State`. |
-| `c###` | Set next palette ID and broadcast `State`. |
-| `e###` | Set next effect from the WLED `gEffects` table and broadcast `State`. |
-| `%###` | Set effect chance and broadcast `State`. |
-| `U`, `V`, `*`, `(`, `)`, `@`, `G`, `A`, `W`, `X`, `F`, `R`, `M` | Broadcast `Action`. |
+| `n` | Move the earliest scheduled change to the next phrase boundary and broadcast state. |
+| `p###` | Schedule the pattern ID for the next phrase boundary. |
+| `m###` | Schedule the sync mode for the next phrase boundary. |
+| `c###` | Schedule the palette ID for the next phrase boundary. |
+| `g` | Make the connected pole Palette Master and immediately publish its current/next gradients. |
+| `g0:RRGGBB,...,255:RRGGBB` | Make the connected pole Palette Master and schedule a custom two-to-eight-stop gradient at the next phrase; the nearest fixed legacy fallback is selected automatically. |
+| `e###` | Schedule the next effect from the WLED `gEffects` table at the next phrase boundary. |
+| `%###` | Schedule the effect chance at the next phrase boundary. |
+| `D0`, `D1` | Broadcast a selected-scope `Action` that explicitly disables or enables debugging. Generation-0 poles ignore the unknown `D` key. |
+| `f###`, `F###` | Flash the connected pole or selected poles with the requested palette/color value. New firmware transports selected `F` as additive action key `H`; generation-0 poles ignore `H`, while incoming legacy `F` retains its original flash-everyone meaning. |
+| `U`, `V`, `*`, `(`, `)`, `@`, `G`, `A`, `W`, `X`, `R`, `M` | Broadcast `Action`. |
 | `z` | Request a nonce-bound report from every visible gen1 device. Reports include stable MAC, Device ID and uplink, firmware release/hash, hardware family/variant, role, mesh state, uptime, LED count, bus count, first pin, and first bus type. |
 | `z############` | Request the same report from one stable 12-digit MAC. |
 | `y####` | Route an update-selection request to one four-digit hexadecimal Device ID. The matching device reports its stable MAC, then starts `WLED-UPDATE` without physical selection. |
-| `O` | Broadcast sound-overlay `Action`. |
-| `P` | Broadcasts an action key that current `onAction()` does not handle. |
+| `Y<release>,<IPv4>,<port>,<window>,<target>,<nonce>,<SSID>,<password>` | Emit one gen1 parallel-pull offer. `target=0000` addresses every compatible pole; normal operation uses `fleet_pull_update.py` so secrets are not printed. |
+| `O`, `O0`, `O1` | Locally ask the connected Beat owner to schedule toggle, disable, or rotating sound-overlay behavior. The resulting Beat state is the only wire message. |
+| `j0`, `j1` | Disable or enable local microphone tempo tracking. Only the current Beat owner applies estimates; this command emits no new wire action. |
+| `P` | Toggle power saving, then broadcast the legacy-compatible explicit `@0` or `@1` action. |
 
-Local-only commands include debug toggle, local reboot, local role set, local AP
-control, and local ID reset.
+`d0` and `d1` explicitly disable or enable debugging only on the USB-connected pole.
+The legacy lowercase `d` wire action remains accepted with its existing explicit
+boolean argument, but new serial input never emits it. Other local-only commands
+include sound-overlay selection, local reboot, local role set, local AP control, and
+local ID reset.
+The JSON operation surface uses the same local `d` and selected `F` defaults as
+serial unless its explicit `to` field overrides the scope.
+
+Generation-0 `Options` combines brightness and debugging in one payload, so legacy
+brightness broadcasts still carry both fields as required by the deployed layout.
+Generation-1 receivers apply only the brightness portion of that compatibility
+payload and retain their independently targeted Debug state.
+
+Automatic tempo tracking is off after every boot. When enabled, it changes the
+ordinary Beat state produced by the local Beat owner, so receivers of every
+generation continue to consume their existing BPM and beat-frame representation.
+See [`TEMPO_TRACKING.md`](TEMPO_TRACKING.md) for the estimator and its test boundary.
 
 The bare `z` request uses the all-zero MAC as its explicit wildcard. Responders
 derive a bounded delay from their Device ID so a neighborhood does not answer in one

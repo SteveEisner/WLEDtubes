@@ -24,4 +24,7 @@ compile_and_run() {
 compile_and_run mesh_routing_test
 compile_and_run device_report_protocol_test
 compile_and_run deferred_bpm_broadcast_test
+compile_and_run rubber_band_beat_clock_test
+compile_and_run downbeat_tracker_test
+compile_and_run effect_chance_test
 compile_and_run v3_protocol_test

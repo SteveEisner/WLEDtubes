@@ -3,6 +3,7 @@
 #include "util.h"
 #include "particle.h"
 #include "virtual_strip.h"
+#include "effect_chance.h"
 
 void addGlitter(CRGB color=CRGB::White, PenMode pen=Draw)
 {
@@ -63,7 +64,7 @@ class Effects {
   void update(VirtualStrip *strip, BeatFrame_24_8 beat_frame, BeatPulse beat_pulse) {
     if (!beat || beat_pulse & beat) {
 
-      if (random8() <= chance) {
+      if (effectChanceAccepts(chance, random8())) {
         CRGB color = strip->palette_color(random8());
 
         switch (effect) {

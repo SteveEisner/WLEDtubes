@@ -30,6 +30,11 @@ by a Control action. A channel authority is compared lexicographically as
 Only Control IDs require collision detection; equal channel IDs are resolved by
 the higher Control ID.
 
+If a pole's Control ID changes at runtime, every channel that still equals the old
+Control ID inherits the new value. A channel that was explicitly assigned a
+different value remains independent. This preserves the default relationship
+without erasing deliberate per-channel ownership.
+
 The initial firmware exposes local serial operations `B`, `K`, and `C` for changing
 the Beat, Pattern, and Palette Channel IDs. They use the same displayed-ID notation
 as the existing `i` Control-ID operation, so `B255` assigns Beat Channel ID `FF0`.
@@ -59,10 +64,68 @@ higher effective ID. It resumes requests after the channel lease expires. The fi
 implementation uses the deployed V2 20-second uplink timeout for all three channels;
 later channel versions may tune the leases independently.
 
-Beat declarations contain only current timing. Pattern and Palette declarations
+Output suppression does not stop local schedule generation. After each Pattern,
+Palette, or Effect boundary, every pole generates and retains a speculative next
+entry. A winning declaration overwrites that local entry. If the authority becomes
+unreachable, the winner in each remaining partition can publish the schedule it
+already holds, preserving the failover behavior of the legacy `UPDATE` protocol.
+
+The original Beat body contains only current timing. Pattern and Palette declarations
 retain V2's current-and-next look-ahead. A newly accepted winner sends a complete
 snapshot immediately and refreshes it on the deployed V2 status cadence even when
 the state has not changed.
+
+The first Beat extension uses otherwise-zero bytes after the original six-byte body.
+A magic value, extension version, and extension length precede `current` and `next`
+sound-program entries. Each entry carries an effective phrase, enabled flag, raw WLED
+effect ID, palette, speed, intensity, three custom sliders, three checkbox options,
+blend mode, and opacity. The channel carries visual control parameters, never
+microphone samples. This intentionally avoids a protocol registry: the Beat owner
+may choose from a local candidate table while receivers execute the complete WLED
+program sent on the wire.
+
+The remaining eight bytes form an optional transient trailer. It carries a marker,
+version, wrapping event sequence, and one-byte kick, snare, and broad-music onset
+strengths. The Beat owner derives these values from positive per-bin spectral change:
+kick uses WLED FFT bands 0-2 and snare uses bands 9-13. It compares each focused
+transient with broad spectral flux so concentrated electronic percussion receives a
+strong accent while uncertain full-spectrum activity contributes at only 15% strength.
+Total volume never opens the layer. Sustained sound does not keep an overlay visible
+because only a rising spectral transient creates a new event. The owner sends that
+compact event immediately, and receivers fade kick, snare, and broad activity over
+240, 180, and 600 ms respectively while the selected WLED effect keeps rendering
+behind it. This keeps the poles synchronized without putting microphone samples on
+the mesh.
+
+The optional local tempo tracker follows the same boundary: the Beat owner analyzes
+WLED's completed 16-band FFT frames and publishes only the resulting ordinary BPM
+and beat frame. It neither extends the Beat-channel packet nor changes what older
+receivers interpret. Losing Beat ownership stops local analysis from driving the
+channel; the last accepted clock continues free-running as before.
+
+Each known Beat overlay also has the same inclusive `0`-`255` chance used by regular
+Tubes effects. Every pole independently rolls once for each accepted transient, so
+the selected fraction varies across the fleet without synchronizing a full-fleet
+flash. The chance is derived from the overlay effect ID and does not change the wire
+entry; unknown or explicitly selected raw WLED effects retain the all-poles default.
+
+The rotating policy resolves each candidate's palette to the Beat owner's current
+palette when it schedules the entry. Its candidate table deliberately mixes centered,
+traveling, frequency-colored, and sparse effects with additive, screen, overlay,
+hard-light, soft-light, lighten, and stencil composition. The opacity in the program
+is the peak opacity for a transient rather than a continuously visible layer. The
+resolved packet still contains ordinary WLED palette, blend, and opacity values;
+receivers do not need to know the local selection policy.
+
+The envelope version and body length remain unchanged, so older generation-1
+firmware accepts and relays the entire packet while ignoring the extension bytes.
+Updated firmware recognizes each marker and validates the extension before applying
+it. Older generation-1 firmware ignores the transient trailer while relaying all 64
+bytes unchanged. A Beat declaration without the sound-program marker means that sound programming is disabled.
+The sound segment remains active over both WLED-backed and custom Tubes patterns.
+Custom Tubes rendering occurs outside WLED's native segment composition and may
+overwrite the sound segment on the final LEDs; the sound program continues running
+so it is immediately available when a WLED-backed pattern becomes current again.
 
 ## Mixed V2 and V3 components
 
