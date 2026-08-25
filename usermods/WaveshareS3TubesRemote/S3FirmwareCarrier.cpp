@@ -1,3 +1,4 @@
+// Dig2Go and Athom C3 update carrier for the Waveshare S3 Tubes Remote.
 #if defined(WAVESHARE_S3_TUBES_REMOTE) && defined(TUBES_S3_FIRMWARE_CARRIER)
 
 #include "wled.h"

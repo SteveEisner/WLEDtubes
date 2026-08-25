@@ -588,8 +588,8 @@ REGISTER_USERMOD(waveshareS3PeripheralSmoke);
 #endif
 } // namespace
 
-// Kept as a forced-link anchor for the board-specific PlatformIO environment.
-extern "C" void waveshareS3PeripheralCompileCanary() {}
+// Forced-link anchor for the board-specific PlatformIO environment.
+extern "C" void waveshareS3TubesRemoteLinkAnchor() {}
 // AI: end
 
 #endif

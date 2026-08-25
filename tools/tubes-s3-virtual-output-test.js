@@ -61,7 +61,7 @@ test('compiled host proof preserves a nonuniform 60-pixel null-bus frame', () =>
 });
 
 test('AMOLED strand reads the canonical WLED framebuffer, not the geometry-only bus', () => {
-  const ui = read('usermods/WaveshareS3CompileCanary/WaveshareS3CompileCanary.cpp');
+  const ui = read('usermods/WaveshareS3TubesRemote/WaveshareS3TubesRemote.cpp');
   assert.match(ui, /::strip\.getLengthTotal\(\) >= 60/);
   assert.match(ui, /::strip\.getPixelColor\(i\)/);
   assert.doesNotMatch(ui, /BusManager::getBus|addressed->getPixelColor/);

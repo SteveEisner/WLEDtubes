@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const ui = fs.readFileSync('usermods/WaveshareS3CompileCanary/WaveshareS3CompileCanary.cpp','utf8');
+const ui = fs.readFileSync('usermods/WaveshareS3TubesRemote/WaveshareS3TubesRemote.cpp','utf8');
 const tubes = fs.readFileSync('usermods/Tubes/Tubes.h','utf8');
 const bridge = fs.readFileSync('usermods/Tubes/Tubes.cpp','utf8');
 

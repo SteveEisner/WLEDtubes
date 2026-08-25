@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const source = fs.readFileSync(path.resolve(__dirname, '..',
-  'usermods/WaveshareS3CompileCanary/WaveshareS3CompileCanary.cpp'), 'utf8');
+  'usermods/WaveshareS3TubesRemote/WaveshareS3TubesRemote.cpp'), 'utf8');
 
 it('offers scan and exact target arming from Update without touching Conductor controls', () => {
   assert.match(source, /FieldScreen::Update/);

@@ -7,7 +7,7 @@ const path = require('node:path');
 
 const repository = path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(repository,
-  'usermods/WaveshareS3CompileCanary/S3FirmwareCarrier.cpp'), 'utf8');
+  'usermods/WaveshareS3TubesRemote/S3FirmwareCarrier.cpp'), 'utf8');
 
 it('serves the exact fleet pull endpoint with integrity headers', () => {
   assert.match(source, /"\/tubes\/firmware\.bin"/);

@@ -2,7 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const api = fs.readFileSync('usermods/Tubes/s3_field_api.h', 'utf8');
 const tubes = fs.readFileSync('usermods/Tubes/Tubes.h', 'utf8');
-const ui = fs.readFileSync('usermods/WaveshareS3CompileCanary/WaveshareS3CompileCanary.cpp', 'utf8');
+const ui = fs.readFileSync('usermods/WaveshareS3TubesRemote/WaveshareS3TubesRemote.cpp', 'utf8');
 
 
 assert.match(api, /currentPatternPhrase/);
