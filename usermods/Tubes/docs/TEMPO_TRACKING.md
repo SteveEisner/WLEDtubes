@@ -5,6 +5,10 @@ It is disabled at boot and can be enabled on the connected Beat owner with `j1`;
 `j0` disables it. Disabling or losing Beat ownership leaves the last accepted clock
 running and stops microphone estimates from changing it.
 
+Sound overlays and the audio workshop also start disabled, regardless of persisted
+AudioReactive configuration. A `MASTER` build claims Beat-channel ownership during
+startup, but it still starts with microphone tracking and visual overlays disabled.
+
 ## Signal path
 
 AudioReactive continues to own microphone capture and its 512-sample FFT at
