@@ -21,3 +21,16 @@ The `waveshare_s3_tubes_remote` environment builds the base field OS. The explic
 `waveshare_s3_tubes_carrier` environment adds the two validated carrier payloads.
 Both use the 60-pixel geometry-only null output and participate normally in the
 Tubes mesh; neither owns or drives a physical LED output pin.
+
+## Tubes integration boundaries
+
+This usermod is a board adapter over the shared Tubes implementation. It uses the
+existing release-40 `ChannelWinnerTable` admission rules, `FleetUpdateOffer` wire
+format, device-report probe/reply messages, fleet firmware identity, pull URL, and
+`x-MD5` verification contract. It does not define a second channel protocol or a
+second receiver-side updater.
+
+The S3-specific code is limited to capabilities the shared implementation does
+not provide: the AMOLED/touch interface, a read-only nearby-device view, embedded
+Dig2Go/C3 artifact selection, a one-client baton policy, and a temporary access
+point plus HTTP response that lets the existing fleet updater pull those bytes.

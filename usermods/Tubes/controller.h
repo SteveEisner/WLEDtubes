@@ -4182,18 +4182,13 @@ class PatternController : public MessageReceiver {
     sendV3ControlCommand(COMMAND_ACTION, &action, sizeof(Action));
   }
 
-  bool ownsVisualChannel(uint8_t channel, uint32_t now) {
-    const ChannelWinner &winner = channelWinners.get(channel, now);
-    if (!winner.active) return true;
-    return winner.authority.channelId == localChannelId(channel)
-        && winner.authority.controlId == node.header.id;
-  }
-
   bool can_force_next() {
     if (node.isFollowing()) return false;
     const uint32_t now = millis();
-    return ownsVisualChannel(PatternChannel, now)
-        && ownsVisualChannel(PaletteChannel, now);
+    return channelWinners.localMayRequest(
+               PatternChannel, localChannelId(PatternChannel), node.header.id, now)
+        && channelWinners.localMayRequest(
+               PaletteChannel, localChannelId(PaletteChannel), node.header.id, now);
   }
 
   bool force_next_if_authoritative() {
