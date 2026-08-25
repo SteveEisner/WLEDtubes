@@ -6,6 +6,7 @@
 #include "legacy_projection.h"
 #include "v3_channels.h"
 #include "v3_protocol.h"
+#include "peer_telemetry.h"
 
 // #define NODE_DEBUGGING
 // #define RELAY_DEBUGGING
@@ -88,6 +89,7 @@ class LightNode {
     MessageReceiver *receiver;
     MeshNodeHeader header;
     int8_t lastRssi = 0;
+    PeerTelemetry peerTelemetry;
 
     typedef enum{
         NODE_STATUS_QUIET=0,
@@ -266,6 +268,9 @@ class LightNode {
             if (!receiver->isValidV2Command(message->command, message->data))
                 return;
             receiver->onV2PacketObserved(*message);
+            // Legacy devices remain visible to Surveyor without joining native v3 topology.
+            peerTelemetry.observe(message->header.id, message->header.uplinkId,
+                LEGACY_PROTOCOL_GENERATION, static_cast<int8_t>(rssi), millis());
         } else if (isKnownTubesChannel(message->command)) {
             const TubesChannelPayload& payload = *reinterpret_cast<const TubesChannelPayload*>(message->data);
             if (!receiver->isValidV3Channel(
@@ -296,6 +301,8 @@ class LightNode {
                 || isKnownV3Topic(message->command))) {
             lastRssi = rssi;
             onPeerPing(message->header);
+            peerTelemetry.observe(message->header.id, message->header.uplinkId,
+                incomingGeneration, static_cast<int8_t>(rssi), millis());
         } else if (legacyPacket) {
             // V2 nodes never participate in native V3 Control election. They can still
             // make this V3 node relay for them through its translated legacy identity.
@@ -408,6 +415,8 @@ class LightNode {
 
         lastRssi = rssi;
         onPeerPing(message->header);
+        peerTelemetry.observe(message->header.id, message->header.uplinkId,
+            protocolGenerationFromId(message->header.id), static_cast<int8_t>(rssi), millis());
 
         NodeMessage routeMessage;
         routeMessage.header = message->header;

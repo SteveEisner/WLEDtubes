@@ -66,6 +66,7 @@ XPowersPMU pmu;
 enum class FieldScreen : uint8_t {
   Home,
   Conductor,
+  Surveyor,
   Status
 };
 
@@ -119,13 +120,14 @@ private:
     display.setCursor(25, 51);
     display.println(F("The flock stays live wherever you go"));
     button(20, 84, 210, 164, COLOR_PRIMARY, F("Conductor"));
-    button(250, 84, 210, 164, COLOR_SURFACE_RAISED, F("Status"));
+    button(250, 84, 210, 76, COLOR_SURFACE_RAISED, F("Surveyor"));
+    button(250, 172, 210, 76, COLOR_SURFACE_RAISED, F("Status"));
     display.setTextColor(RGB565_WHITE);
     display.setTextSize(1);
     display.setCursor(36, 199);
     display.println(F("Run the show"));
-    display.setCursor(266, 199);
-    display.println(F("Read-only health"));
+    display.setCursor(266, 143); display.println(F("Nearby Tubes"));
+    display.setCursor(266, 231); display.println(F("Read-only health"));
   }
 
   void drawBack() {
@@ -187,8 +189,67 @@ private:
     drawBack();
     drawConductorTelemetry(status);
     stripComponent.draw(31, 156, 420, 138);
+    button(150, 328, 180, 70, COLOR_PRIMARY, F("Next"));
     lastPreviewDraw = millis();
     lastTelemetryDraw = millis();
+  }
+
+  static bool surveyorBefore(const TubesS3PeerStatus &candidate, const TubesS3PeerStatus &prior) {
+    if (candidate.rssiKnown != prior.rssiKnown) return candidate.rssiKnown;
+    if (candidate.rssiKnown && candidate.latestRssi != prior.latestRssi)
+      return candidate.latestRssi > prior.latestRssi;
+    return candidate.nodeId < prior.nodeId;
+  }
+
+  void drawChannelRow(int16_t y, const char *name, const TubesS3ChannelStatus &channel) {
+    display.setCursor(24, y);
+    if (channel.active)
+      display.printf("%s %03X by %03X  %lus\n", name, channel.ownerChannelId,
+          channel.ownerControlId, channel.leaseRemainingMs / 1000);
+    else
+      display.printf("%s local %03X  unclaimed\n", name, channel.localChannelId);
+  }
+
+  void drawSurveyor() {
+    TubesS3FieldStatus status;
+    tubesS3ReadStatus(status);
+    title(F("Surveyor"));
+    drawBack();
+    display.setTextSize(1);
+    display.setTextColor(COLOR_MUTED);
+    drawChannelRow(72, "BEAT", status.beatChannel);
+    drawChannelRow(90, "PAT ", status.patternChannel);
+    drawChannelRow(108, "PAL ", status.paletteChannel);
+
+    TubesS3PeerStatus sorted[7];
+    size_t shown = 0;
+    const uint32_t now = millis();
+    for (size_t i = 0; i < status.peerCount; i++) {
+      TubesS3PeerStatus candidate;
+      if (!tubesS3ReadPeer(i, candidate) || candidate.nodeId == status.localNodeId
+          || now - candidate.lastSeenMs > 60000) continue;
+      if (shown == 7 && !surveyorBefore(candidate, sorted[6])) continue;
+      size_t position = shown < 7 ? shown++ : 6;
+      while (position > 0 && surveyorBefore(candidate, sorted[position - 1])) {
+        if (position < 7) sorted[position] = sorted[position - 1];
+        position--;
+      }
+      if (position < 7) sorted[position] = candidate;
+    }
+    display.setTextColor(RGB565_WHITE);
+    display.setCursor(24, 142);
+    display.printf("LOCAL %03X  follows %03X\n", status.localNodeId, status.uplinkId);
+    for (size_t i = 0; i < shown; i++) {
+      const TubesS3PeerStatus &peer = sorted[i];
+      display.setCursor(24, 172 + i * 30);
+      if (peer.rssiKnown)
+        display.printf("%03X -> %03X  gen%u  %ddB  age %lus\n", peer.nodeId, peer.uplinkId,
+            peer.protocolGeneration, peer.latestRssi, (now - peer.lastSeenMs) / 1000);
+      else
+        display.printf("%03X -> %03X  gen%u  RSSI --  age %lus\n", peer.nodeId, peer.uplinkId,
+            peer.protocolGeneration, (now - peer.lastSeenMs) / 1000);
+    }
+    lastTelemetryDraw = now;
   }
 
   void drawStatus() {
@@ -213,6 +274,7 @@ private:
     switch (screen) {
       case FieldScreen::Home: drawHome(); break;
       case FieldScreen::Conductor: drawConductor(); break;
+      case FieldScreen::Surveyor: drawSurveyor(); break;
       case FieldScreen::Status: drawStatus(); break;
     }
   }
@@ -221,7 +283,12 @@ private:
     if (screen != FieldScreen::Home && x >= 360 && y <= 75) {
       screen = FieldScreen::Home;
     } else if (screen == FieldScreen::Home) {
-      if (y >= 90 && y < 250) screen = x < 240 ? FieldScreen::Conductor : FieldScreen::Status;
+      if (y >= 84 && y < 250) {
+        if (x < 240) screen = FieldScreen::Conductor;
+        else screen = y < 166 ? FieldScreen::Surveyor : FieldScreen::Status;
+      }
+    } else if (screen == FieldScreen::Conductor && y >= 315 && y <= 415) {
+      tubesS3ForceNext();
     }
     draw();
   }
@@ -275,6 +342,8 @@ public:
         tubesS3ReadStatus(status);
         drawConductorTelemetry(status);
         lastTelemetryDraw = now;
+      } else if (screen == FieldScreen::Surveyor) {
+        drawSurveyor();
       }
     }
   }

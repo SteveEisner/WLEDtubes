@@ -19,10 +19,10 @@ assert.match(ui, /Production colors stay RGB888/);
 assert.match(ui, /rgb565\(color\)/);
 // Accepted full-strand/master-compaction bypass remains byte-for-source.
 assert.match(ui, /stripComponent\.draw\(31, 156, 420, 138\)/);
-assert(!/Surveyor/.test(ui), 'Surveyor must be absent from the production surface');
+assert.match(ui, /Surveyor/);
 assert.match(ui, /Local S3 %03X/);
 assert.match(ui, /status\.radioChannel/);
 assert.match(ui, /status\.preview\[0\]/);
-assert.doesNotMatch(ui, /peerCount|uplink|syncSource|receivedPacket|lastPacket|synchronizedPacket|lastSync|transmittedPacket|lastTransmit|Waiting for sync|last RX|TX [0-9]/);
-assert(!/button\([^\n]+(Next|Previous|Master|Update|Settings)/.test(ui), 'mutating controls must be absent');
+assert.match(ui, /status\.peerCount/);
+assert(!/button\([^\n]+(Previous|Master|Update|Settings)/.test(ui), 'unsupported mutating controls must be absent');
 console.log('S3 conductor information contract passed');
