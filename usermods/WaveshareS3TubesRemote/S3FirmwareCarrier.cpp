@@ -15,8 +15,8 @@ namespace {
 constexpr char FIRMWARE_PATH[] = "/tubes/firmware.bin";
 constexpr char ARM_PATH[] = "/tubes/carrier/arm";
 constexpr uint16_t CARRIER_RELEASE = S3_VAULT_RELEASE;
-constexpr char CARRIER_SSID[] = "Tubes40";
-constexpr char CARRIER_PASSWORD[] = "baton4040";
+constexpr char CARRIER_SSID[] = "TubesOTA";
+constexpr char CARRIER_PASSWORD[] = "tubes-baton";
 static_assert(sizeof(CARRIER_SSID) - 1 + sizeof(CARRIER_PASSWORD) - 1
               <= FLEET_UPDATE_CREDENTIAL_BYTES,
               "carrier credentials exceed FleetUpdateOffer capacity");

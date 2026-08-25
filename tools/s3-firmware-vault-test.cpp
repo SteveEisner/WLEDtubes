@@ -23,7 +23,7 @@ static S3VaultObservedDevice observed(uint8_t family, uint16_t release, uint32_t
 static S3VaultRequest requestFor(const S3VaultObservedDevice& device) {
   S3VaultRequest request;
   request.nonce = 0x1234abcd;
-  request.release = 40;
+  request.release = 47;
   request.family = device.family;
   request.variant = device.variant;
   memcpy(request.mac, device.mac, 6);
@@ -33,32 +33,32 @@ static S3VaultRequest requestFor(const S3VaultObservedDevice& device) {
 int main() {
   S3VaultArtifact dig2goArtifact;
   dig2goArtifact.family = TubeHardwareDig2Go;
-  dig2goArtifact.tubesVersion = 40;
+  dig2goArtifact.tubesVersion = 47;
   dig2goArtifact.size = 1300000;
   strcpy(dig2goArtifact.md5, "0123456789abcdef0123456789abcdef");
   S3VaultArtifact c3Artifact = dig2goArtifact;
   c3Artifact.family = TubeHardwareAthomC3;
   S3FirmwareVaultCatalog catalog;
-  require(catalog.configure(dig2goArtifact, c3Artifact, 40), "exact catalog was rejected");
-  require(catalog.select(TubeHardwareDig2Go, TubeVariantStandard, 40) != nullptr,
+  require(catalog.configure(dig2goArtifact, c3Artifact, 47), "exact catalog was rejected");
+  require(catalog.select(TubeHardwareDig2Go, TubeVariantStandard, 47) != nullptr,
           "Dig2Go artifact was not selected");
-  require(catalog.select(TubeHardwareAthomC3, TubeVariantStandard, 40) != nullptr,
+  require(catalog.select(TubeHardwareAthomC3, TubeVariantStandard, 47) != nullptr,
           "Athom C3 artifact was not selected");
-  require(catalog.select(TubeHardwareGledopto, TubeVariantStandard, 40) == nullptr,
+  require(catalog.select(TubeHardwareGledopto, TubeVariantStandard, 47) == nullptr,
           "third family was selected");
   require(catalog.select(TubeHardwareDig2Go, TubeVariantStandard, 39) == nullptr,
           "stale release was selected");
 
   FleetUpdateOffer offer;
   const uint8_t address[4] = {192, 168, 4, 1};
-  require(S3VaultOfferFactory::make(offer, 0x1234abcd, 40, address, 8080,
+  require(S3VaultOfferFactory::make(offer, 0x1234abcd, 47, address, 8080,
                                     "TubesOTA", "update1234"),
           "valid wildcard baton offer was rejected");
   require(offer.targetDeviceId == 0 && isValidFleetUpdateOffer(offer),
           "offer factory emitted an invalid or targeted offer");
 
   S3FirmwareVaultPolicy vault;
-  vault.arm(0x1234abcd, 40, 1000);
+  vault.arm(0x1234abcd, 47, 1000);
   auto dig2go = observed(TubeHardwareDig2Go, 22, 1010);
   auto request = requestFor(dig2go);
   require(vault.claim(request, &dig2go, 1020) == S3VaultDecision::Accepted,
@@ -74,14 +74,14 @@ int main() {
   require(vault.bodyCompleted(dig2go.mac, 2000), "body completion was rejected");
   require(vault.state() == S3VaultState::AwaitingFreshReport,
           "body completion was incorrectly treated as success");
-  dig2go.tubesVersion = 40;
+  dig2go.tubesVersion = 47;
   dig2go.observedAtMs = 5000;
   require(vault.acceptFreshReport(dig2go), "fresh target report was rejected");
   require(vault.state() == S3VaultState::Complete, "fresh report did not complete baton");
 
   vault.disarm();
-  vault.arm(0x1234abcd, 40, 0);
-  auto current = observed(TubeHardwareDig2Go, 40, 10);
+  vault.arm(0x1234abcd, 47, 0);
+  auto current = observed(TubeHardwareDig2Go, 47, 10);
   require(vault.claim(requestFor(current), &current, 20) == S3VaultDecision::DeviceAlreadyCurrent,
           "current device was allowed to claim");
   auto unsupported = observed(TubeHardwareGledopto, 22, 10);
@@ -94,7 +94,7 @@ int main() {
 
   vault.disarm();
   vault.setArmTimeoutMs(100);
-  vault.arm(0x1234abcd, 40, 1000);
+  vault.arm(0x1234abcd, 47, 1000);
   require(!vault.expire(1100), "arm expired at its inclusive deadline");
   require(vault.expire(1101) && vault.state() == S3VaultState::Failed,
           "unclaimed arm window did not fail closed");
