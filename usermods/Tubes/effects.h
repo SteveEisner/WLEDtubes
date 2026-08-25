@@ -55,6 +55,8 @@ class Effects {
     uint8_t chance;
 
   void load(EffectParameters &params) {
+    if (effect != params.effect || pen != params.pen)
+      numParticles = 0;
     effect = params.effect;
     pen = params.pen;
     beat = params.beat;
@@ -101,8 +103,7 @@ class Effects {
   }
 
   void animate(BeatFrame_24_8 frame, uint8_t beat_pulse) {
-    unsigned int len = numParticles;
-    for (unsigned i=len; i > 0; --i) {
+    for (uint8_t i = numParticles; i-- > 0;) {
       Particle& particle = particles[i];
       particle.update(frame);
       if (particle.age > particle.lifetime) {

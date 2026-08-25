@@ -39,6 +39,13 @@ class RubberBandBeatClock {
       if (!initialized)
         return reset(bpmQ8, beatFrame);
 
+      // Phrase counters depend on boot history, but adding or removing a complete
+      // 16-beat phrase cannot change any rendered beat phase. Rebase that invisible
+      // offset immediately so phrase-keyed channel schedules share one number line;
+      // the remaining within-phrase error still converges only through rate slewing.
+      int32_t error = int32_t(beatFrame - localFrame);
+      int32_t phraseShift = error / int32_t(PHRASE_FRAME);
+      localFrame += phraseShift * int32_t(PHRASE_FRAME);
       goalBpmQ8 = bpmQ8;
       goalFrame = beatFrame;
       goalRemainder = 0;
@@ -112,6 +119,7 @@ class RubberBandBeatClock {
   private:
     static constexpr uint32_t MICROS_PER_MINUTE = 60000000U;
     static constexpr uint32_t MICROS_PER_SECOND = 1000000U;
+    static constexpr BeatFrame PHRASE_FRAME = 16U << 8;
     static constexpr uint8_t PHASE_SETTLE_SECONDS = 4;
     static constexpr uint8_t MAXIMUM_PHASE_RATE_DIVISOR = 8;
     static constexpr uint16_t MINIMUM_RUNNING_BPM_Q8 = 1U << 8;

@@ -67,6 +67,15 @@ constexpr uint8_t SOUND_CHANCE_EIGHTH = 32;
 static const SoundProgramDefinition gSoundPrograms[] = {
   // Low-band hits emit a filtered stream of persistent particles; this was the strongest live test preset.
   {FX_MODE_PS1DSONICSTREAM, SOUND_PROGRAM_CURRENT_PALETTE, 115, 170, 96, 120, 2, 6, 10, 210, SOUND_CHANCE_ALL},
+  // A fixed-center, filtered burst works well for taps and hard isolated impacts.
+  {FX_MODE_PS1DSONICBOOM, SOUND_PROGRAM_CURRENT_PALETTE, 220, 190, 96, 63, 2, 6, 16, 230, SOUND_CHANCE_ALL},
+  // Live-approved preset (2026-08-25): low-band excitation bends a smeared spring chain
+  // without turning broad volume into a flash. Preserve this complete tuple when tuning.
+  {FX_MODE_PS1DSPRINGY, SOUND_PROGRAM_CURRENT_PALETTE, 135, 125, 105, 112, 4, 5, 16, 235, SOUND_CHANCE_ALL},
+  // Sparse peak-driven shapes leave most of the base visible between percussion events.
+  {FX_MODE_RIPPLEPEAK, SOUND_PROGRAM_CURRENT_PALETTE, 118, 105, 2, 24, 1, 0, 10, 220, SOUND_CHANCE_HALF},
+  {FX_MODE_PUDDLEPEAK, SOUND_PROGRAM_CURRENT_PALETTE, 112, 76, 1, 22, 1, 0, 16, 225, SOUND_CHANCE_HALF},
+  {FX_MODE_WATERFALL, SOUND_PROGRAM_CURRENT_PALETTE, 150, 148, 2, 22, 1, 0, 10, 215, SOUND_CHANCE_HALF},
 
   // Centered shapes work as bright accents without erasing motion in the base layer.
   {FX_MODE_GRAVCENTER,  SOUND_PROGRAM_CURRENT_PALETTE, 72,  150, 0,   0,   0, 0, 10, 210, SOUND_CHANCE_HALF},
@@ -208,19 +217,6 @@ struct PaletteChannelDefinitionCacheEntry {
   PaletteGradient16 palette;
 };
 
-struct PaletteChannelModernSource {
-  bool valid = false;
-  DeviceId channelId = 0;
-  DeviceId controlId = 0;
-  uint32_t session = 0;
-
-  bool matches(const TubesChannelEnvelope& envelope) const {
-    return valid
-        && channelId == envelope.channelId
-        && controlId == envelope.sourceControlId
-        && session == envelope.sourceSession;
-  }
-};
 // AI: end
 
 #define TUBE_COMMAND(command, operation, scope) \
@@ -399,10 +395,14 @@ class PatternController : public MessageReceiver {
     PaletteGradient16 activePalette16;
     bool activePalette16Valid = false;
     bool nextPalette16Valid = false;
+    bool paletteScheduleHeld = false;
+    uint16_t currentPaletteHoldPhrases = 1;
+    uint16_t nextPaletteHoldPhrases = 1;
     uint16_t nextPalette16Phrase = 0;
     uint8_t nextPalette16Fallback = 0;
     PaletteChannelDefinitionCacheEntry paletteDefinitionCache[2];
-    PaletteChannelModernSource modernPaletteSource;
+    ChannelModernSource modernPatternSource;
+    ChannelModernSource modernPaletteSource;
     bool v3PalettePending = false;
     V3PaletteSchedulePayload v3PendingPaletteSchedule;
     V3Palette16Definition v3PendingPaletteDefinition;
@@ -412,6 +412,11 @@ class PatternController : public MessageReceiver {
     uint8_t lastObservedBeat = UINT8_MAX;
     uint16_t lastPublishedBeatPhrase = UINT16_MAX;
     uint16_t lastPublishedBeatPhraseV1 = UINT16_MAX;
+    PatternProgramEntry currentPatternProgram;
+    PatternProgramEntry nextPatternProgram;
+    bool currentPatternProgramValid = false;
+    bool nextPatternProgramValid = false;
+    bool patternScheduleHeld = false;
     SoundProgramEntry currentSoundProgram;
     SoundProgramEntry nextSoundProgram;
     BeatTransientExtension currentBeatTransient;
@@ -424,6 +429,9 @@ class PatternController : public MessageReceiver {
     bool soundOverlaySegmentInitialized = false;
     uint32_t lastSoundOverlayFailureTrace = 0;
     bool soundProgramRequested = false;
+    bool audioWorkshopMode = false;
+    uint8_t audioWorkshopIndex = 0;
+    int8_t audioWorkshopVotes[gSoundProgramCount] = {0};
     bool autoTempoClockLocked = false;
     V3PositionAdvertisementPayload v3LocalPosition;
     bool hasV3LocalPosition = false;
@@ -712,14 +720,14 @@ class PatternController : public MessageReceiver {
 
     // Every pole keeps a speculative schedule. Authority controls publication,
     // so a partition can continue from local state without competing declarations.
-    if (next_state.pattern_phrase == UINT16_MAX) {
+    if (next_state.pattern_phrase == UINT16_MAX && !patternScheduleHeld) {
       publishPattern = scheduleSpeculativeChannelChange(
           phrase, next_state.pattern_phrase, mayPublishPatternChannel, [this, phrase]() {
             set_next_pattern(phrase);
             return 1;
           });
     }
-    if (next_state.palette_phrase == UINT16_MAX) {
+    if (next_state.palette_phrase == UINT16_MAX && !paletteScheduleHeld) {
       publishPalette = scheduleSpeculativeChannelChange(
           phrase, next_state.palette_phrase, mayPublishPaletteChannel, [this, phrase]() {
             set_next_palette(phrase);
@@ -743,13 +751,36 @@ class PatternController : public MessageReceiver {
 #ifdef IDENTIFY_STUCK_PATTERNS
       Serial.println("Time to change pattern");
 #endif
-      load_pattern(next_state);
-      publishPattern = scheduleSpeculativeChannelChange(
-          phrase, next_state.pattern_phrase, mayPublishPatternChannel,
-          [this, phrase]() { return set_next_pattern(phrase); });
-      // Keep independently scheduled visual changes on distinct phrases.
-      while (next_state.pattern_phrase == next_state.palette_phrase || next_state.pattern_phrase == next_state.effect_phrase)
-        next_state.pattern_phrase += random8(1,3);
+      if (!nextPatternProgramValid)
+        nextPatternProgram = tablePatternProgram(
+            next_state.pattern_id, next_state.pattern_phrase, 1);
+      nextPatternProgram.effectivePhrase = next_state.pattern_phrase;
+      nextPatternProgram.fallbackPatternId = next_state.pattern_id;
+      nextPatternProgram.syncMode = next_state.pattern_sync_id;
+      load_pattern(next_state, &nextPatternProgram);
+      if (!currentPatternProgram.holdPhrases) {
+        patternScheduleHeld = true;
+        next_state.pattern_phrase = UINT16_MAX;
+        next_state.pattern_id = current_state.pattern_id;
+        next_state.pattern_sync_id = current_state.pattern_sync_id;
+        nextPatternProgram = currentPatternProgram;
+        nextPatternProgram.effectivePhrase = UINT16_MAX;
+        nextPatternProgramValid = true;
+        publishPattern = mayPublishPatternChannel;
+      } else {
+        uint16_t holdPhrases = currentPatternProgram.holdPhrases;
+        publishPattern = scheduleSpeculativeChannelChange(
+            phrase, next_state.pattern_phrase, mayPublishPatternChannel,
+            [this, phrase, holdPhrases]() {
+              set_next_pattern(phrase);
+              return holdPhrases;
+            });
+        nextPatternProgram.effectivePhrase = next_state.pattern_phrase;
+        // Keep independently scheduled visual changes on distinct phrases.
+        while (next_state.pattern_phrase == next_state.palette_phrase || next_state.pattern_phrase == next_state.effect_phrase)
+          next_state.pattern_phrase += random8(1,3);
+        nextPatternProgram.effectivePhrase = next_state.pattern_phrase;
+      }
       changed = true;
     }
     if (phrase >= next_state.palette_phrase) {
@@ -757,11 +788,30 @@ class PatternController : public MessageReceiver {
       Serial.println("Time to change palette");
 #endif
       load_palette(next_state);
-      publishPalette = scheduleSpeculativeChannelChange(
-          phrase, next_state.palette_phrase, mayPublishPaletteChannel,
-          [this, phrase]() { return set_next_palette(phrase); });
-      while (next_state.palette_phrase == next_state.pattern_phrase || next_state.palette_phrase == next_state.effect_phrase)
-        next_state.palette_phrase += random8(1,3);
+      currentPaletteHoldPhrases = nextPaletteHoldPhrases;
+      if (!currentPaletteHoldPhrases) {
+        paletteScheduleHeld = true;
+        next_state.palette_phrase = UINT16_MAX;
+        next_state.palette_id = current_state.palette_id;
+        nextPalette16 = activePalette16;
+        nextPalette16Phrase = UINT16_MAX;
+        nextPalette16Fallback = current_state.palette_id;
+        nextPalette16Valid = activePalette16Valid;
+        nextPaletteHoldPhrases = 0;
+        publishPalette = mayPublishPaletteChannel;
+      } else {
+        uint16_t holdPhrases = currentPaletteHoldPhrases;
+        publishPalette = scheduleSpeculativeChannelChange(
+            phrase, next_state.palette_phrase, mayPublishPaletteChannel,
+            [this, phrase, holdPhrases]() {
+              set_next_palette(phrase);
+              return holdPhrases;
+            });
+        nextPalette16Phrase = next_state.palette_phrase;
+        while (next_state.palette_phrase == next_state.pattern_phrase || next_state.palette_phrase == next_state.effect_phrase)
+          next_state.palette_phrase += random8(1,3);
+        nextPalette16Phrase = next_state.palette_phrase;
+      }
       changed = true;
     }
     if (phrase >= next_state.effect_phrase) {
@@ -1183,6 +1233,81 @@ class PatternController : public MessageReceiver {
     return state;
   }
 
+  // AI: below section was generated by an AI
+  static uint8_t modeDefault(uint8_t mode, const char* key, uint8_t fallback) {
+    int16_t value = extractModeDefaults(mode, key);
+    return value >= 0 ? uint8_t(value) : fallback;
+  }
+
+  PatternProgramEntry tablePatternProgram(
+      uint8_t patternId,
+      uint16_t effectivePhrase,
+      uint16_t holdPhrases
+  ) {
+    patternId %= gPatternCount;
+    const PatternDef& definition = gPatterns[patternId];
+    PatternProgramEntry program;
+    program.effectivePhrase = effectivePhrase;
+    program.holdPhrases = holdPhrases;
+    program.fallbackPatternId = patternId;
+    program.syncMode = next_state.pattern_sync_id;
+    program.renderer = patternId < numInternalPatterns
+        ? PatternRendererTubes
+        : PatternRendererWled;
+    program.renderId = program.renderer == PatternRendererTubes
+        ? patternId
+        : definition.wled_fx_id;
+    program.speed = modeParameter(definition.wled_fx_id);
+    program.intensity = program.speed;
+    program.custom1 = modeDefault(definition.wled_fx_id, "c1", DEFAULT_C1);
+    program.custom2 = modeDefault(definition.wled_fx_id, "c2", DEFAULT_C2);
+    program.custom3 = modeDefault(definition.wled_fx_id, "c3", DEFAULT_C3);
+    program.optionMask = 0x07;
+    if (modeDefault(definition.wled_fx_id, "o1", 0)) program.optionValues |= PatternRenderCheck1;
+    if (modeDefault(definition.wled_fx_id, "o2", 0)) program.optionValues |= PatternRenderCheck2;
+    if (modeDefault(definition.wled_fx_id, "o3", 0)) program.optionValues |= PatternRenderCheck3;
+    program.optionValues = (program.optionValues & ~definition.renderOptions.checkMask)
+        | (definition.renderOptions.checkValues & definition.renderOptions.checkMask);
+    return program;
+  }
+
+  static bool samePatternProgram(
+      const PatternProgramEntry& first,
+      const PatternProgramEntry& second
+  ) {
+    return memcmp(&first, &second, sizeof(first)) == 0;
+  }
+
+  PatternChannelSnapshot currentPatternChannelSnapshot() {
+    PatternChannelSnapshot snapshot;
+    snapshot.state = currentPatternChannelState();
+    snapshot.transitionMs = transitionDelay;
+    if (!currentPatternProgramValid)
+      currentPatternProgram = tablePatternProgram(
+          snapshot.state.current.patternId,
+          snapshot.state.current.patternPhrase,
+          1
+      );
+    currentPatternProgramValid = true;
+    if (!nextPatternProgramValid)
+      nextPatternProgram = tablePatternProgram(
+          snapshot.state.next.patternId,
+          snapshot.state.next.patternPhrase,
+          1
+      );
+    nextPatternProgramValid = true;
+    currentPatternProgram.effectivePhrase = snapshot.state.current.patternPhrase;
+    currentPatternProgram.fallbackPatternId = snapshot.state.current.patternId;
+    currentPatternProgram.syncMode = snapshot.state.current.syncMode;
+    nextPatternProgram.effectivePhrase = snapshot.state.next.patternPhrase;
+    nextPatternProgram.fallbackPatternId = snapshot.state.next.patternId;
+    nextPatternProgram.syncMode = snapshot.state.next.syncMode;
+    snapshot.currentProgram = currentPatternProgram;
+    snapshot.nextProgram = nextPatternProgram;
+    return snapshot;
+  }
+  // AI: end
+
   PaletteChannelState currentPaletteChannelState() const {
     PaletteChannelState state;
     state.current.palettePhrase = current_state.palette_phrase;
@@ -1290,6 +1415,8 @@ class PatternController : public MessageReceiver {
   bool makePaletteChannelSnapshot(PaletteChannelSnapshot& snapshot) {
     snapshot.state = currentPaletteChannelState();
     snapshot.transitionMs = transitionDelay;
+    snapshot.currentHoldPhrases = currentPaletteHoldPhrases;
+    snapshot.nextHoldPhrases = nextPaletteHoldPhrases;
     if (v3RuntimePaletteActive) {
       CRGBPalette16* runtimePalette = runtimeV3Palette();
       if (!runtimePalette)
@@ -1337,7 +1464,7 @@ class PatternController : public MessageReceiver {
       snapshot.transient = currentBeatTransient;
       prepared = prepareChannelMessageV2(channel, ChannelRequest, snapshot, message);
     } else if (channel == PatternChannel) {
-      PatternChannelState snapshot = currentPatternChannelState();
+      PatternChannelSnapshot snapshot = currentPatternChannelSnapshot();
       prepared = prepareChannelMessageV2(channel, ChannelRequest, snapshot, message);
     } else if (channel == PaletteChannel) {
       PaletteChannelSnapshot snapshot;
@@ -1482,6 +1609,8 @@ class PatternController : public MessageReceiver {
       publishControlBeacon();
 
     if (paletteChannelRefreshTimer.every(PALETTE_CHANNEL_REFRESH_PERIOD)) {
+      publishApplicationChannel(PatternChannel);
+      publishApplicationChannel(PaletteChannel);
       publishApplicationChannelV1(PatternChannel);
       publishApplicationChannelV1(PaletteChannel);
     }
@@ -1919,11 +2048,25 @@ class PatternController : public MessageReceiver {
   }
   // AI: end
 
-  void load_pattern(TubeState &tube_state) {
+  void load_pattern(
+      TubeState &tube_state,
+      const PatternProgramEntry* exactProgram = nullptr
+  ) {
+    PatternProgramEntry program = exactProgram
+        ? *exactProgram
+        : tablePatternProgram(tube_state.pattern_id, tube_state.pattern_phrase, 1);
+    program.effectivePhrase = tube_state.pattern_phrase;
+    program.fallbackPatternId = tube_state.pattern_id % gPatternCount;
+    program.syncMode = tube_state.pattern_sync_id;
+    bool programChanged = !currentPatternProgramValid
+        || !samePatternProgram(currentPatternProgram, program);
     bool unchanged = hasLoadedPattern
         && current_state.pattern_id == tube_state.pattern_id
-        && current_state.pattern_sync_id == tube_state.pattern_sync_id;
+        && current_state.pattern_sync_id == tube_state.pattern_sync_id
+        && !programChanged;
     current_state.pattern_phrase = tube_state.pattern_phrase;
+    currentPatternProgram = program;
+    currentPatternProgramValid = true;
     if (unchanged)
       return;
 
@@ -1932,12 +2075,30 @@ class PatternController : public MessageReceiver {
     hasLoadedPattern = true;
     isBoring = gPatterns[current_state.pattern_id].control.energy == Boring;
 
-    if (node.serialTraceEnabled())
+    if (node.serialTraceEnabled()) {
+      Serial.printf(
+          "PATTERN_PROGRAM applied renderer=%u id=%u fallback=%u sync=%u speed=%u intensity=%u c=%u/%u/%u options=%u/%u hold=%u\n",
+          program.renderer,
+          program.renderId,
+          program.fallbackPatternId,
+          program.syncMode,
+          program.speed,
+          program.intensity,
+          program.custom1,
+          program.custom2,
+          program.custom3,
+          program.optionMask,
+          program.optionValues,
+          program.holdPhrases
+      );
       Serial.print(F("Change pattern "));
+    }
     background_changed();
   }
 
   bool isShowingWled() const {
+    if (currentPatternProgramValid)
+      return currentPatternProgram.renderer == PatternRendererWled;
     return current_state.pattern_id >= numInternalPatterns;
   }
 
@@ -1967,6 +2128,17 @@ class PatternController : public MessageReceiver {
     return random8(0, gPatternCount);
   }
 
+  uint16_t randomPatternDuration(const PatternDef& definition) const {
+    switch (definition.control.duration) {
+      case ExtraShortDuration: return random8(2, 6);
+      case ShortDuration: return random8(5,15);
+      case MediumDuration: return random8(15,25);
+      case LongDuration: return random8(20,40);
+      case ExtraLongDuration: return random8(25, 60);
+    }
+    return 5;
+  }
+
   // Choose the pattern to display at the next pattern cycle
   // Return the number of phrases until the next pattern cycle
   uint16_t set_next_pattern(uint16_t phrase) {
@@ -1990,14 +2162,12 @@ class PatternController : public MessageReceiver {
     next_state.pattern_id = pattern_id;
     next_state.pattern_sync_id = randomSyncMode();
 
-    switch (def.control.duration) {
-      case ExtraShortDuration: return random8(2, 6);
-      case ShortDuration: return random8(5,15);
-      case MediumDuration: return random8(15,25);
-      case LongDuration: return random8(20,40);
-      case ExtraLongDuration: return random8(25, 60);
-    }
-    return 5;
+    uint16_t holdPhrases = randomPatternDuration(def);
+    nextPatternProgram = tablePatternProgram(pattern_id, phrase + holdPhrases, holdPhrases);
+    nextPatternProgram.syncMode = next_state.pattern_sync_id;
+    nextPatternProgramValid = true;
+    patternScheduleHeld = false;
+    return holdPhrases;
   }
 
   void load_palette(TubeState &tube_state) {
@@ -2067,6 +2237,8 @@ class PatternController : public MessageReceiver {
     if (isBoring) {
       phrases /= 2;
     }
+    nextPaletteHoldPhrases = phrases;
+    paletteScheduleHeld = false;
     return phrases;
   }
 
@@ -2349,7 +2521,8 @@ class PatternController : public MessageReceiver {
     bool currentChanged = !sameSoundProgram(currentSoundProgram, current);
     currentSoundProgram = current;
     nextSoundProgram = next;
-    soundProgramRequested = soundProgramEnabled(current) || soundProgramEnabled(next);
+    // Rotation is the local Beat owner's policy. Inferring it from an enabled
+    // received program would make exact O/workshop selections start changing.
     if (currentChanged) {
       refreshSoundProgramLayer();
       traceSoundProgramSchedule();
@@ -2462,6 +2635,241 @@ class PatternController : public MessageReceiver {
     return true;
   }
 
+  // AI: below section was generated by an AI
+  // Parses a fixed number of bounded decimal fields without accepting partial input.
+  static bool parseDecimalFields(
+      const char* text,
+      uint16_t* values,
+      uint8_t count,
+      uint16_t maximum
+  ) {
+    const char* cursor = text;
+    for (uint8_t index = 0; index < count; index++) {
+      if (!cursor || *cursor < '0' || *cursor > '9')
+        return false;
+      char* end = nullptr;
+      unsigned long value = strtoul(cursor, &end, 10);
+      if (end == cursor || value > maximum)
+        return false;
+      values[index] = uint16_t(value);
+      if (index + 1 < count) {
+        if (*end != ',')
+          return false;
+        cursor = end + 1;
+      } else if (*end) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // Parses pW and pT extended programs while retaining p### as the legacy table selector.
+  bool parsePatternProgramEntry(const char* arguments, PatternProgramEntry& program) const {
+    if (!arguments || (arguments[0] != 'W' && arguments[0] != 'T') || arguments[1] != ',')
+      return false;
+    program = PatternProgramEntry();
+    if (arguments[0] == 'W') {
+      static constexpr uint8_t VALUE_COUNT = 11;
+      uint16_t values[VALUE_COUNT] = {0};
+      if (!parseDecimalFields(arguments + 2, values, VALUE_COUNT, 1024))
+        return false;
+      if (values[0] >= strip.getModeCount()
+          || values[1] > UINT8_MAX
+          || values[2] > UINT8_MAX
+          || values[3] > UINT8_MAX
+          || values[4] > UINT8_MAX
+          || values[5] > 31
+          || values[6] > 7
+          || values[7] > 7
+          || (values[7] & ~values[6])
+          || values[8] > SwingDrift
+          || values[9] >= gPatternCount) {
+        return false;
+      }
+      program.renderer = PatternRendererWled;
+      program.renderId = values[0];
+      program.speed = values[1];
+      program.intensity = values[2];
+      program.custom1 = values[3];
+      program.custom2 = values[4];
+      program.custom3 = values[5];
+      program.optionMask = values[6];
+      program.optionValues = values[7];
+      program.syncMode = values[8];
+      program.fallbackPatternId = values[9];
+      program.holdPhrases = values[10];
+      return true;
+    }
+
+    static constexpr uint8_t VALUE_COUNT = 4;
+    uint16_t values[VALUE_COUNT] = {0};
+    if (!parseDecimalFields(arguments + 2, values, VALUE_COUNT, 1024)
+        || values[0] >= numInternalPatterns
+        || values[1] > SwingDrift
+        || values[2] >= gPatternCount)
+      return false;
+    program.renderer = PatternRendererTubes;
+    program.renderId = values[0];
+    program.syncMode = values[1];
+    program.fallbackPatternId = values[2];
+    program.holdPhrases = values[3];
+    program.speed = 128;
+    program.intensity = 128;
+    return true;
+  }
+
+  void configurePatternProgram(PatternProgramEntry program) {
+    becomePatternMaster();
+    program.effectivePhrase = nextPhraseBoundary();
+    nextPatternProgram = program;
+    nextPatternProgramValid = true;
+    patternScheduleHeld = false;
+    next_state.pattern_phrase = program.effectivePhrase;
+    next_state.pattern_id = program.fallbackPatternId;
+    next_state.pattern_sync_id = program.syncMode;
+    broadcast_state(false);
+    Serial.printf(
+        "PATTERN_PROGRAM scheduled phrase=%u hold=%u renderer=%u id=%u fallback=%u sync=%u speed=%u intensity=%u c=%u/%u/%u options=%u/%u\n",
+        program.effectivePhrase,
+        program.holdPhrases,
+        program.renderer,
+        program.renderId,
+        program.fallbackPatternId,
+        program.syncMode,
+        program.speed,
+        program.intensity,
+        program.custom1,
+        program.custom2,
+        program.custom3,
+        program.optionMask,
+        program.optionValues
+    );
+  }
+
+  uint8_t preferredPatternForWledEffect(uint8_t effect) const {
+    for (uint8_t pattern = numInternalPatterns; pattern < gPatternCount; pattern++) {
+      if (gPatterns[pattern].wled_fx_id == effect)
+        return pattern;
+    }
+    return numInternalPatterns;
+  }
+
+  SoundProgramEntry workshopSoundProgram(uint8_t index) const {
+    const SoundProgramDefinition& definition = gSoundPrograms[index % gSoundProgramCount];
+    SoundProgramEntry program;
+    program.flags = SoundProgramEnabled;
+    program.wledEffect = definition.wledEffect;
+    // The diagnostic base palette is black, so use a deliberately independent visible palette.
+    program.palette = definition.palette == SOUND_PROGRAM_CURRENT_PALETTE
+        ? 91
+        : definition.palette;
+    program.speed = definition.speed;
+    program.intensity = definition.intensity;
+    program.custom1 = definition.custom1;
+    program.custom2 = definition.custom2;
+    program.custom3 = definition.custom3;
+    program.options = definition.options;
+    program.blendMode = definition.blendMode;
+    program.opacity = definition.opacity;
+    return program;
+  }
+
+  void scheduleAudioWorkshopProgram(uint8_t index) {
+    if (!audioWorkshopMode)
+      return;
+    audioWorkshopIndex = index % gSoundProgramCount;
+    configureSoundProgramEntry(workshopSoundProgram(audioWorkshopIndex));
+    const SoundProgramDefinition& definition = gSoundPrograms[audioWorkshopIndex];
+    Serial.printf("AUDIO_WORKSHOP index=%u/%u fx=%u vote=%d\n",
+        audioWorkshopIndex + 1,
+        gSoundProgramCount,
+        definition.wledEffect,
+        audioWorkshopVotes[audioWorkshopIndex]);
+  }
+
+  void configureAudioWorkshop(bool enabled) {
+    if (enabled) {
+      audioWorkshopMode = true;
+      becomeBeatMaster();
+
+      uint8_t fallback = preferredPatternForWledEffect(FX_MODE_FLOW);
+      PatternProgramEntry base = tablePatternProgram(
+          fallback, nextPhraseBoundary(), 0);
+      base.renderer = PatternRendererWled;
+      base.renderId = FX_MODE_FLOW;
+      base.fallbackPatternId = fallback;
+      base.syncMode = All;
+      base.holdPhrases = 0;
+      configurePatternProgram(base);
+
+      PaletteGradient16 black;
+      memset(&black, 0, sizeof(black));
+      schedulePalette16(black, nearestPaletteFallback(black), nextPhraseBoundary(), 0);
+      scheduleAudioWorkshopProgram(audioWorkshopIndex);
+      Serial.println(F("AUDIO_WORKSHOP enabled; J+/J- vote and advance, J>/J< browse, J0 exits"));
+      return;
+    }
+
+    audioWorkshopMode = false;
+    configureSoundProgram(false);
+
+    uint8_t patternId = get_valid_next_pattern();
+    uint16_t patternHold = randomPatternDuration(gPatterns[patternId]);
+    PatternProgramEntry pattern = tablePatternProgram(
+        patternId, nextPhraseBoundary(), patternHold);
+    configurePatternProgram(pattern);
+
+    set_next_palette(currentPhrase());
+    PaletteGradient16 palette;
+    if (makePalette16(next_state.palette_id, palette))
+      schedulePalette16(
+          palette,
+          next_state.palette_id,
+          nextPhraseBoundary(),
+          nextPaletteHoldPhrases);
+    Serial.println(F("AUDIO_WORKSHOP disabled"));
+  }
+
+  bool handleAudioWorkshopCommand(const char* command) {
+    if (command[0] == 'J' && command[1] == '1' && command[2] == '\0') {
+      configureAudioWorkshop(true);
+      return true;
+    }
+    if (command[0] == 'J' && command[1] == '0' && command[2] == '\0') {
+      configureAudioWorkshop(false);
+      return true;
+    }
+    if (!audioWorkshopMode || command[0] != 'J' || command[2])
+      return false;
+    if (command[1] == '+' || command[1] == '-') {
+      int16_t vote = audioWorkshopVotes[audioWorkshopIndex]
+          + (command[1] == '+' ? 1 : -1);
+      audioWorkshopVotes[audioWorkshopIndex] = constrain(vote, INT8_MIN, INT8_MAX);
+      scheduleAudioWorkshopProgram(audioWorkshopIndex + 1);
+      return true;
+    }
+    if (command[1] == '>') {
+      scheduleAudioWorkshopProgram(audioWorkshopIndex + 1);
+      return true;
+    }
+    if (command[1] == '<') {
+      scheduleAudioWorkshopProgram(
+          audioWorkshopIndex ? audioWorkshopIndex - 1 : gSoundProgramCount - 1);
+      return true;
+    }
+    if (command[1] == '?') {
+      const SoundProgramDefinition& definition = gSoundPrograms[audioWorkshopIndex];
+      Serial.printf("AUDIO_WORKSHOP index=%u/%u fx=%u vote=%d\n",
+          audioWorkshopIndex + 1,
+          gSoundProgramCount,
+          definition.wledEffect,
+          audioWorkshopVotes[audioWorkshopIndex]);
+      return true;
+    }
+    return false;
+  }
+  // AI: end
+
   void updateSoundProgramSchedule() {
     uint16_t phrase = currentPhrase();
     if (nextSoundProgram.effectivePhrase == UINT16_MAX) {
@@ -2528,10 +2936,22 @@ class PatternController : public MessageReceiver {
 
   void update_background() {
     Background background;
-    background.animate = gPatterns[current_state.pattern_id].backgroundFn;
-    background.wled_fx_id = gPatterns[current_state.pattern_id].wled_fx_id;
+    const PatternDef& fallback = gPatterns[current_state.pattern_id];
+    background.animate = fallback.backgroundFn;
+    background.wled_fx_id = fallback.wled_fx_id;
+    if (currentPatternProgramValid) {
+      if (currentPatternProgram.renderer == PatternRendererTubes) {
+        background.animate = gPatterns[currentPatternProgram.renderId].backgroundFn;
+        background.wled_fx_id = 0;
+      } else {
+        background.animate = draw_wled_fx;
+        background.wled_fx_id = currentPatternProgram.renderId;
+      }
+    }
     background.palette_id = current_state.palette_id;
-    background.sync = (SyncMode)current_state.pattern_sync_id;
+    background.sync = SyncMode(currentPatternProgramValid
+        ? currentPatternProgram.syncMode
+        : current_state.pattern_sync_id);
 
     // Use one of the virtual strips to render the patterns.
     // A WLED-based pattern exists on the virtual strip, but causes
@@ -2543,9 +2963,13 @@ class PatternController : public MessageReceiver {
     vstrips[next_vstrip]->load(background, DEFAULT_FADE_SPEED);
     next_vstrip = (next_vstrip + 1) % NUM_VSTRIPS;
 
-    const PatternRenderOptions& renderOptions = gPatterns[current_state.pattern_id].renderOptions;
-    uint8_t param = modeParameter(background.wled_fx_id);
-    set_wled_pattern(background.wled_fx_id, param, param, renderOptions);
+    if (currentPatternProgramValid)
+      set_wled_pattern(currentPatternProgram);
+    else {
+      const PatternRenderOptions& renderOptions = fallback.renderOptions;
+      uint8_t param = modeParameter(background.wled_fx_id);
+      set_wled_pattern(background.wled_fx_id, param, param, renderOptions);
+    }
     set_wled_palette(background.palette_id);
     refreshSoundProgramLayer();
   }
@@ -2598,6 +3022,37 @@ class PatternController : public MessageReceiver {
       seg.check3 = (nextRenderMask & renderOptions.checkValues & PatternRenderCheck3) != 0;
     activePatternRenderMask = nextRenderMask;
     // AI: end
+
+    stateChanged = true;
+    stateUpdated(CALL_MODE_DIRECT_CHANGE);
+  }
+
+  // Applies a complete Pattern-channel WLED program without inheriting stale sliders or checkboxes.
+  void set_wled_pattern(const PatternProgramEntry& program) {
+    if (!shouldRenderTubes())
+      return;
+
+    uint8_t patternId = program.renderer == PatternRendererWled ? program.renderId : DEFAULT_WLED_FX;
+    if (patternOverride)
+      patternId = patternOverride;
+
+    Segment& segment = strip.getMainSegment();
+    segment.speed = program.speed;
+    segment.intensity = program.intensity;
+    segment.custom1 = program.custom1;
+    segment.custom2 = program.custom2;
+    segment.custom3 = program.custom3;
+    segment.setMode(patternId);
+
+    uint8_t nextMask = patternOverride ? 0 : program.optionMask;
+    uint8_t changedMask = activePatternRenderMask | nextMask;
+    if (changedMask & PatternRenderCheck1)
+      segment.check1 = (nextMask & program.optionValues & PatternRenderCheck1) != 0;
+    if (changedMask & PatternRenderCheck2)
+      segment.check2 = (nextMask & program.optionValues & PatternRenderCheck2) != 0;
+    if (changedMask & PatternRenderCheck3)
+      segment.check3 = (nextMask & program.optionValues & PatternRenderCheck3) != 0;
+    activePatternRenderMask = nextMask;
 
     stateChanged = true;
     stateUpdated(CALL_MODE_DIRECT_CHANGE);
@@ -2805,8 +3260,8 @@ class PatternController : public MessageReceiver {
 
   void printHelp() const {
     // AI: below section was generated by an AI
-    Serial.println(F("b###.# - set bpm\ns - start phrase\n\np### - patterns\nm### - sync mode\nc### - colors\ne### - effects\nn - force next\n\ni### - set Control ID\nB/K/C### - set Beat/Pattern/Palette Channel ID\ng - become Palette Master\ng0:RRGGBB,...,255:RRGGBB - become Palette Master and schedule a custom gradient\nd0/1 - set local debugging\nD0/1 - set debugging on selected devices\nl### - brightness"));
-    Serial.println(F("@ - set power saving mode\nU - begin auto-update\nP - toggle all power saves\nO - locally schedule sound toggle on Beat owner\nO0 - locally schedule sound off\nO1 - locally schedule rotating sound programs\nO### - locally schedule raw WLED effect on Beat owner\nO<fx>,<pal>,<speed>,<intensity>,<c1>,<c2>,<c3>,<checks>,<blend>,<opacity> - locally schedule all overlay settings\nj0/1 - local automatic microphone tempo off/on\n==== wifi ====\na - turn on access point\nq - turn off access point\nt0/1 - Tubes mode off/on"));
+    Serial.println(F("b###.# - set bpm\ns - start phrase\n\np### - preferred table pattern\npW,<fx>,<speed>,<intensity>,<c1>,<c2>,<c3>,<mask>,<values>,<sync>,<fallback>,<hold>\npT,<tubes>,<sync>,<fallback>,<hold>\nm### - sync mode\nc### - colors\nc<id>,<hold> - timed/held built-in palette\ne### - effects\nn - force next\n\ni### - set Control ID\nB/K/C### - set Beat/Pattern/Palette Channel ID\ng - become Palette Master\ng0:RRGGBB,...,255:RRGGBB - schedule a custom gradient\ngH,<hold>,0:RRGGBB,...,255:RRGGBB - timed/held gradient\nd0/1 - set local debugging\nD0/1 - set debugging on selected devices\nl### - brightness"));
+    Serial.println(F("@ - set power saving mode\nU - begin auto-update\nP - toggle all power saves\nO - locally schedule sound toggle on Beat owner\nO0 - locally schedule sound off\nO1 - locally schedule rotating sound programs\nO### - locally schedule raw WLED effect on Beat owner\nO<fx>,<pal>,<speed>,<intensity>,<c1>,<c2>,<c3>,<checks>,<blend>,<opacity> - locally schedule all overlay settings\nJ1/J0 - enter/exit audio workshop; J+/J- vote, J>/J< browse\nj0/1 - local automatic microphone tempo off/on\n==== wifi ====\na - turn on access point\nq - turn off access point\nt0/1 - Tubes mode off/on"));
     Serial.println(F("==== selected actions ====\nD0/1 - set debugging\nU - begin auto-update\nX - restart\nf### - flash connected device\nF### - flash selected devices\nr/R### - set local/selected role\n==== mesh actions ====\n* - enter select mode (double-click to Ready)\nA - turn on access point (Ready to update)\nW - forget WiFi client\nV### - auto-upgrade to version\nz - report all visible devices\nz############ - probe a device by MAC\nyhhhh - select one hexadecimal Device ID for update\n(hhhh/)hhhh - select/unselect a Device ID\nM - cancel manual pattern override"));
     // AI: end
   }
@@ -2879,28 +3334,48 @@ class PatternController : public MessageReceiver {
       case StartPhraseOperation:
         beats.start_phrase();
         update_beat();
-        if (share)
+        if (share) {
+          publishApplicationChannel(BeatChannel);
           send_update();
+        }
         return true;
       case NextOperation:
         force_next(share);
         return true;
       case PatternOperation:
         next_state.pattern_phrase = nextPhraseBoundary();
-        next_state.pattern_id = argument;
+        next_state.pattern_id = argument % gPatternCount;
         next_state.pattern_sync_id = All;
+        nextPatternProgram = tablePatternProgram(
+            next_state.pattern_id,
+            next_state.pattern_phrase,
+            randomPatternDuration(gPatterns[next_state.pattern_id])
+        );
+        nextPatternProgram.syncMode = next_state.pattern_sync_id;
+        nextPatternProgramValid = true;
+        patternScheduleHeld = false;
         if (share) broadcast_state();
         return true;
       case SyncModeOperation:
         next_state.pattern_phrase = nextPhraseBoundary();
         next_state.pattern_id = current_state.pattern_id;
         next_state.pattern_sync_id = argument;
+        nextPatternProgram = currentPatternProgramValid
+            ? currentPatternProgram
+            : tablePatternProgram(next_state.pattern_id, next_state.pattern_phrase, 1);
+        nextPatternProgram.effectivePhrase = next_state.pattern_phrase;
+        nextPatternProgram.fallbackPatternId = next_state.pattern_id;
+        nextPatternProgram.syncMode = next_state.pattern_sync_id;
+        nextPatternProgramValid = true;
+        patternScheduleHeld = false;
         if (share) broadcast_state();
         return true;
       case PaletteOperation:
         next_state.palette_phrase = nextPhraseBoundary();
         next_state.palette_id = argument;
         nextPalette16Valid = false;
+        nextPaletteHoldPhrases = random8(MIN_COLOR_CHANGE_PHRASES, MAX_COLOR_CHANGE_PHRASES);
+        paletteScheduleHeld = false;
         v3PalettePending = false;
         if (share) broadcast_state();
         return true;
@@ -3386,12 +3861,29 @@ class PatternController : public MessageReceiver {
     channelWinners.clear(PaletteChannel);
   }
 
+  void becomePatternMaster() {
+    channelIds[channelIndex(PatternChannel)] = makeDeviceId(
+        CURRENT_PROTOCOL_GENERATION,
+        PROTOCOL_LOCAL_VALUE_MASK
+    );
+    channelWinners.clear(PatternChannel);
+  }
+
+  void becomeBeatMaster() {
+    channelIds[channelIndex(BeatChannel)] = makeDeviceId(
+        CURRENT_PROTOCOL_GENERATION,
+        PROTOCOL_LOCAL_VALUE_MASK
+    );
+    channelWinners.clear(BeatChannel);
+  }
+
   bool schedulePalette16(
       const PaletteGradient16& definition,
       uint8_t fallback,
-      uint16_t effectivePhrase
+      uint16_t effectivePhrase,
+      uint16_t holdPhrases = 1
   ) {
-    if (fallback >= gLegacyPaletteIdLimit)
+    if (fallback >= gLegacyPaletteIdLimit || holdPhrases > 1024)
       return false;
     becomePaletteMaster();
     next_state.palette_phrase = effectivePhrase;
@@ -3400,6 +3892,8 @@ class PatternController : public MessageReceiver {
     nextPalette16Phrase = effectivePhrase;
     nextPalette16Fallback = fallback;
     nextPalette16Valid = true;
+    nextPaletteHoldPhrases = holdPhrases;
+    paletteScheduleHeld = false;
     bool published = publishApplicationChannel(PaletteChannel);
     if (published && !node.isFollowing())
       publishV2Projection();
@@ -3409,15 +3903,16 @@ class PatternController : public MessageReceiver {
   bool scheduleCustomGradient(
       const PaletteGradientDefinition& gradient,
       uint8_t fallback,
-      uint16_t effectivePhrase
+      uint16_t effectivePhrase,
+      uint16_t holdPhrases = 1
   ) {
     PaletteGradient16 expanded;
     if (!expandPaletteGradient(gradient, expanded))
       return false;
-    return schedulePalette16(expanded, fallback, effectivePhrase);
+    return schedulePalette16(expanded, fallback, effectivePhrase, holdPhrases);
   }
 
-  void configureCustomGradient(const char* text) {
+  void configureCustomGradient(const char* text, uint16_t holdPhrases = UINT16_MAX) {
     PaletteGradientDefinition gradient;
     PaletteGradient16 expanded;
     if (!parseCustomGradient(text, gradient) || !expandPaletteGradient(gradient, expanded)) {
@@ -3426,7 +3921,13 @@ class PatternController : public MessageReceiver {
     }
 
     uint8_t fallback = nearestPaletteFallback(gradient);
-    if (!scheduleCustomGradient(gradient, fallback, nextPhraseBoundary())) {
+    if (holdPhrases == UINT16_MAX)
+      holdPhrases = random8(MIN_COLOR_CHANGE_PHRASES, MAX_COLOR_CHANGE_PHRASES);
+    if (!scheduleCustomGradient(
+            gradient,
+            fallback,
+            nextPhraseBoundary(),
+            holdPhrases)) {
       Serial.println(F("PALETTE_GRADIENT could not be published"));
       return;
     }
@@ -3448,7 +3949,11 @@ class PatternController : public MessageReceiver {
       return;
     }
     uint8_t fallback = nearestPaletteFallback(definition);
-    if (!schedulePalette16(definition, fallback, nextPhraseBoundary())) {
+    if (!schedulePalette16(
+            definition,
+            fallback,
+            nextPhraseBoundary(),
+            random8(MIN_COLOR_CHANGE_PHRASES, MAX_COLOR_CHANGE_PHRASES))) {
       Serial.println(F("PALETTE_SOURCE could not be published"));
       return;
     }
@@ -3466,6 +3971,12 @@ class PatternController : public MessageReceiver {
     if (!key)
       return;
 
+    if (key == 'J') {
+      if (!handleAudioWorkshopCommand(command))
+        Serial.println(F("AUDIO_WORKSHOP rejected"));
+      return;
+    }
+
     if (key == DEVICE_REPORT_ACTION_KEY) {
       requestDeviceReport(command + 1);
       return;
@@ -3482,13 +3993,52 @@ class PatternController : public MessageReceiver {
     // AI: end
     // AI: below section was generated by an AI
     if (key == 'g') {
-      if (command[1]) {
+      if (command[1] == 'H' && command[2] == ',') {
+        char* end = nullptr;
+        unsigned long holdPhrases = strtoul(command + 3, &end, 10);
+        if (end == command + 3 || holdPhrases > 1024 || *end != ',') {
+          Serial.println(F("PALETTE_GRADIENT rejected: expected gH,<hold>,<gradient>"));
+          return;
+        }
+        configureCustomGradient(end + 1, uint16_t(holdPhrases));
+      } else if (command[1]) {
         configureCustomGradient(command + 1);
       } else {
         becomePaletteMaster();
         publishApplicationChannel(PaletteChannel);
         Serial.printf("PALETTE_MASTER ID=%04X\n", localChannelId(PaletteChannel));
       }
+      return;
+    }
+    // AI: end
+    // AI: below section was generated by an AI
+    if (key == 'p' && (command[1] == 'W' || command[1] == 'T')) {
+      PatternProgramEntry program;
+      if (!parsePatternProgramEntry(command + 1, program)) {
+        Serial.println(F("PATTERN_PROGRAM rejected"));
+        return;
+      }
+      configurePatternProgram(program);
+      return;
+    }
+    if (key == 'c' && strchr(command + 1, ',')) {
+      uint16_t values[2] = {0};
+      PaletteGradient16 definition;
+      if (!parseDecimalFields(command + 1, values, 2, 1024)
+          || values[0] >= gBuiltInPaletteCount
+          || !makePalette16(uint8_t(values[0]), definition)) {
+        Serial.println(F("PALETTE_PROGRAM rejected: expected c<id>,<hold>"));
+        return;
+      }
+      uint8_t fallback = values[0] < gLegacyPaletteIdLimit
+          ? uint8_t(values[0])
+          : nearestPaletteFallback(definition);
+      if (!schedulePalette16(definition, fallback, nextPhraseBoundary(), values[1])) {
+        Serial.println(F("PALETTE_PROGRAM could not be published"));
+        return;
+      }
+      Serial.printf("PALETTE_PROGRAM source=%u fallback=%u hold=%u phrase=%u\n",
+          values[0], fallback, values[1], next_state.palette_phrase);
       return;
     }
     // AI: end
@@ -4015,7 +4565,12 @@ class PatternController : public MessageReceiver {
     v3RuntimePaletteActive = false;
     activePalette16Valid = false;
     nextPalette16Valid = false;
+    paletteScheduleHeld = false;
+    currentPatternProgramValid = false;
+    nextPatternProgramValid = false;
+    patternScheduleHeld = false;
     modernPaletteSource.valid = false;
+    modernPatternSource.valid = false;
     load_pattern(state);
     load_palette(state);
     load_effect(state);
@@ -4157,6 +4712,38 @@ class PatternController : public MessageReceiver {
         && futureOrJustReached(state.next.effectPhrase, state.current.effectPhrase);
   }
 
+  bool isValidPatternProgramEntry(
+      const PatternProgramEntry& program,
+      const PatternChannelEntry& projection
+  ) const {
+    bool rendererValid = (program.renderer == PatternRendererWled
+            && program.renderId < strip.getModeCount()
+            && strncmp_P("RSVD", strip.getModeData(program.renderId), 4) != 0)
+        || (program.renderer == PatternRendererTubes
+            && program.renderId < numInternalPatterns);
+    return rendererValid
+        && program.effectivePhrase == projection.patternPhrase
+        && program.fallbackPatternId == projection.patternId
+        && program.syncMode == projection.syncMode
+        && program.holdPhrases <= 1024
+        && program.fallbackPatternId < gPatternCount
+        && program.syncMode <= SwingDrift
+        && program.custom3 <= 31
+        && !(program.optionMask & ~uint8_t(0x07))
+        && !(program.optionValues & ~program.optionMask);
+  }
+
+  bool isValidPatternChannelSnapshot(const PatternChannelSnapshot& snapshot) const {
+    return snapshot.magic == PATTERN_PROGRAM_MAGIC
+        && snapshot.version == PATTERN_PROGRAM_VERSION_1
+        && snapshot.length == sizeof(PatternProgramEntry) * 2
+        && snapshot.reserved[0] == 0
+        && snapshot.reserved[1] == 0
+        && isValidPatternChannelState(snapshot.state)
+        && isValidPatternProgramEntry(snapshot.currentProgram, snapshot.state.current)
+        && isValidPatternProgramEntry(snapshot.nextProgram, snapshot.state.next);
+  }
+
   bool isValidPaletteChannelState(const PaletteChannelState& state) const {
     if (state.current.paletteId >= gLegacyPaletteIdLimit
         || state.next.paletteId >= gLegacyPaletteIdLimit)
@@ -4284,14 +4871,26 @@ class PatternController : public MessageReceiver {
           && snapshot.transient.reserved == 0;
     }
     if (channel == PatternChannel) {
-      PatternChannelState snapshot;
+      if (message.envelope.bodyLength == sizeof(PatternChannelState)) {
+        PatternChannelState snapshot;
+        return readChannelMessageV2Body(message, snapshot)
+            && isValidPatternChannelState(snapshot);
+      }
+      PatternChannelSnapshot snapshot;
       return readChannelMessageV2Body(message, snapshot)
-          && isValidPatternChannelState(snapshot);
+          && isValidPatternChannelSnapshot(snapshot);
     }
     if (channel == PaletteChannel) {
+      if (message.envelope.bodyLength == sizeof(PaletteChannelSnapshotV1)) {
+        PaletteChannelSnapshotV1 snapshot;
+        return readChannelMessageV2Body(message, snapshot)
+            && isValidPaletteChannelState(snapshot.state);
+      }
       PaletteChannelSnapshot snapshot;
       return readChannelMessageV2Body(message, snapshot)
-          && isValidPaletteChannelState(snapshot.state);
+          && isValidPaletteChannelState(snapshot.state)
+          && snapshot.currentHoldPhrases <= 1024
+          && snapshot.nextHoldPhrases <= 1024;
     }
     return false;
   }
@@ -4315,7 +4914,8 @@ class PatternController : public MessageReceiver {
       if (!readChannelMessageV2Body(message, snapshot))
         return false;
       acceptSoundProgramSchedule(
-          snapshot.soundProgram.current, snapshot.soundProgram.next);
+          snapshot.soundProgram.current,
+          snapshot.soundProgram.next);
       acceptBeatTransient(
           message.envelope.sourceControlId,
           message.envelope.sourceSession,
@@ -4325,8 +4925,56 @@ class PatternController : public MessageReceiver {
       applied = true;
     } else if (channel == PatternChannel) {
       PatternChannelState snapshot;
-      if (!readChannelMessageV2Body(message, snapshot))
+      PatternProgramEntry exactCurrent;
+      bool hasExactProgram = false;
+      if (message.envelope.bodyLength == sizeof(PatternChannelSnapshot)) {
+        PatternChannelSnapshot fullSnapshot;
+        if (!readChannelMessageV2Body(message, fullSnapshot))
+          return false;
+        snapshot = fullSnapshot.state;
+        exactCurrent = fullSnapshot.currentProgram;
+        uint16_t phrase = currentPhrase();
+        bool nextPatternDue = tubesPatternPhraseReached(
+            phrase, snapshot.next.patternPhrase);
+        if (nextPatternDue) {
+          snapshot.current.patternPhrase = snapshot.next.patternPhrase;
+          snapshot.current.patternId = snapshot.next.patternId;
+          snapshot.current.syncMode = snapshot.next.syncMode;
+          exactCurrent = fullSnapshot.nextProgram;
+          snapshot.next.patternPhrase = UINT16_MAX;
+          nextPatternProgram = exactCurrent;
+          nextPatternProgram.effectivePhrase = UINT16_MAX;
+          patternScheduleHeld = exactCurrent.holdPhrases == 0;
+        } else {
+          nextPatternProgram = fullSnapshot.nextProgram;
+          patternScheduleHeld = fullSnapshot.nextProgram.effectivePhrase == UINT16_MAX
+              && fullSnapshot.currentProgram.holdPhrases == 0;
+        }
+        nextPatternProgramValid = true;
+        bool nextEffectDue = tubesPatternPhraseReached(
+            phrase, snapshot.next.effectPhrase);
+        if (nextEffectDue) {
+          snapshot.current.effectPhrase = snapshot.next.effectPhrase;
+          snapshot.current.effect = snapshot.next.effect;
+          snapshot.current.pen = snapshot.next.pen;
+          snapshot.current.beat = snapshot.next.beat;
+          snapshot.current.chance = snapshot.next.chance;
+          snapshot.next.effectPhrase = UINT16_MAX;
+        }
+        transitionDelay = fullSnapshot.transitionMs;
+        strip.setTransition(transitionDelay);
+        modernPatternSource.valid = true;
+        modernPatternSource.channelId = message.envelope.channelId;
+        modernPatternSource.controlId = message.envelope.sourceControlId;
+        modernPatternSource.session = message.envelope.sourceSession;
+        hasExactProgram = true;
+      } else if (!readChannelMessageV2Body(message, snapshot)) {
         return false;
+      } else if (modernPatternSource.matches(message.envelope)) {
+        return true;
+      } else {
+        modernPatternSource.valid = false;
+      }
       TubeState current = current_state;
       current.pattern_phrase = snapshot.current.patternPhrase;
       current.pattern_id = snapshot.current.patternId;
@@ -4346,13 +4994,35 @@ class PatternController : public MessageReceiver {
           PenMode(snapshot.next.pen),
           BeatPulse(snapshot.next.beat),
           snapshot.next.chance);
-      load_pattern(current);
+      if (!hasExactProgram) {
+        currentPatternProgramValid = false;
+        nextPatternProgramValid = false;
+        patternScheduleHeld = false;
+      }
+      load_pattern(current, hasExactProgram ? &exactCurrent : nullptr);
       load_effect(current);
       applied = true;
     } else if (channel == PaletteChannel) {
       PaletteChannelSnapshot snapshot;
-      if (!readChannelMessageV2Body(message, snapshot))
+      if (message.envelope.bodyLength == sizeof(PaletteChannelSnapshotV1)) {
+        PaletteChannelSnapshotV1 legacySnapshot;
+        if (!readChannelMessageV2Body(message, legacySnapshot))
+          return false;
+        snapshot.state = legacySnapshot.state;
+        snapshot.transitionMs = legacySnapshot.transitionMs;
+        snapshot.currentDefinition = legacySnapshot.currentDefinition;
+        snapshot.nextDefinition = legacySnapshot.nextDefinition;
+      } else if (!readChannelMessageV2Body(message, snapshot)) {
         return false;
+      }
+      if (tubesPatternPhraseReached(
+              currentPhrase(), snapshot.state.next.palettePhrase)) {
+        snapshot.state.current = snapshot.state.next;
+        snapshot.currentDefinition = snapshot.nextDefinition;
+        snapshot.currentHoldPhrases = snapshot.nextHoldPhrases;
+        snapshot.state.next.palettePhrase = UINT16_MAX;
+        snapshot.nextDefinition = snapshot.currentDefinition;
+      }
       modernPaletteSource.valid = true;
       modernPaletteSource.channelId = message.envelope.channelId;
       modernPaletteSource.controlId = message.envelope.sourceControlId;
@@ -4366,6 +5036,10 @@ class PatternController : public MessageReceiver {
       nextPalette16Phrase = snapshot.state.next.palettePhrase;
       nextPalette16Fallback = snapshot.state.next.paletteId;
       nextPalette16Valid = true;
+      paletteScheduleHeld = snapshot.state.next.palettePhrase == UINT16_MAX
+          && snapshot.currentHoldPhrases == 0;
+      currentPaletteHoldPhrases = snapshot.currentHoldPhrases;
+      nextPaletteHoldPhrases = snapshot.nextHoldPhrases;
       applied = true;
     }
     if (applied && !node.isFollowing())
@@ -4379,7 +5053,9 @@ class PatternController : public MessageReceiver {
       if (!readChannelBody(payload, state)) return false;
       BeatSoundProgramExtension extension;
       if (readBeatSoundProgramExtension(payload, extension)) {
-        acceptSoundProgramSchedule(extension.current, extension.next);
+        acceptSoundProgramSchedule(
+            extension.current,
+            extension.next);
       } else {
         SoundProgramEntry disabled = disabledSoundProgram(state.beatFrame >> 12);
         acceptSoundProgramSchedule(disabled, disabledSoundProgram(UINT16_MAX));
@@ -4397,6 +5073,12 @@ class PatternController : public MessageReceiver {
     if (channel == PatternChannel) {
       PatternChannelState state;
       if (!readChannelBody(payload, state)) return false;
+      if (modernPatternSource.matches(payload.envelope))
+        return true;
+      modernPatternSource.valid = false;
+      currentPatternProgramValid = false;
+      nextPatternProgramValid = false;
+      patternScheduleHeld = false;
       TubeState current = current_state;
       current.pattern_phrase = state.current.patternPhrase;
       current.pattern_id = state.current.patternId;
@@ -4451,6 +5133,7 @@ class PatternController : public MessageReceiver {
         nextPalette16Phrase = schedule.state.next.palettePhrase;
         nextPalette16Fallback = schedule.state.next.paletteId;
         nextPalette16Valid = true;
+        paletteScheduleHeld = schedule.state.next.palettePhrase == UINT16_MAX;
         return true;
       }
       PaletteChannelState state;
@@ -4465,6 +5148,7 @@ class PatternController : public MessageReceiver {
       current.palette_id = state.current.paletteId;
       next_state.palette_phrase = state.next.palettePhrase;
       next_state.palette_id = state.next.paletteId;
+      paletteScheduleHeld = false;
       load_palette(current);
       return true;
     }

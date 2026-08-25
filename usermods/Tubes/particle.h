@@ -177,7 +177,7 @@ void removeParticle(uint8_t i) {
     return;
 
   // coalesce current particle list
-  int rest = numParticles - i;
+  uint8_t rest = numParticles - i - 1;
   if (rest > 0) {
     memmove(&particles[i], &particles[i+1], sizeof(particles[0]) * rest);
   }

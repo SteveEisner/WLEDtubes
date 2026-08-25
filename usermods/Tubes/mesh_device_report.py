@@ -139,9 +139,9 @@ def report_mismatch(
             f"expects {expected_master_behavior}"
         )
 
-    if not expected_master_behavior:
-        if not report.mesh & MESH_FOLLOWING or report.uplink == 0:
-            return "non-master device has not joined an uplink"
+    is_following = bool(report.mesh & MESH_FOLLOWING)
+    if is_following != (report.uplink != 0):
+        return "mesh follower flag and Control uplink disagree"
     return None
 
 

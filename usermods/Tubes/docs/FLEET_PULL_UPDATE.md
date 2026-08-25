@@ -109,6 +109,15 @@ it. Other hosts prompt securely; automation can provide
 runs the canary, opens the five-second fleet wave, and verifies stable MACs after
 the mesh reforms.
 
+Use `--canary-mac` with the stable MAC of a USB-connected pole when diagnosing the
+network path. The transfer policy is unchanged, but its local serial log then exposes
+association and HTTP failures before any other device is offered the update.
+
+When the Ethernet host is already reachable from every pole's stored Wi-Fi profile,
+replace `--ssid TubesOTA` with `--stored-network`. The offer then contains no
+credentials and every device reconnects with its own persisted profile; this avoids
+both Keychain dependency and temporary credential changes.
+
 If any visible candidate reports a release below 22, the tool refuses the parallel
 wave and lists the MACs requiring the one-time existing updater. That migration gate
 prevents an old Control owner or relay from silently partitioning the additive offer.

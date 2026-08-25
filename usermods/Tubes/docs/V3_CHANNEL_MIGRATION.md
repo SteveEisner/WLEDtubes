@@ -72,8 +72,22 @@ already holds, preserving the failover behavior of the legacy `UPDATE` protocol.
 
 The original Beat body contains only current timing. Pattern and Palette declarations
 retain V2's current-and-next look-ahead. A newly accepted winner sends a complete
-snapshot immediately and refreshes it on the deployed V2 status cadence even when
-the state has not changed.
+snapshot immediately and refreshes it every five seconds even when the state has not
+changed, so late joiners recover the exact program instead of waiting for a rotation.
+
+Pattern v2 extends that snapshot with complete current and next programs. Each entry
+carries its renderer (`WLED` or `Tubes`), raw render ID, WLED speed, intensity, three
+custom sliders, checkbox mask and values, sync mode, effective phrase, hold duration,
+and a generation-0 fallback pattern ID. A zero hold pauses automatic rotation. The
+same owner also emits Pattern v1 and projects the fallback IDs into `UPDATE`, so older
+gen1 and generation-0 receivers continue to follow default table programs exactly.
+Unknown renderers or out-of-range parameters reject the entire snapshot and leave the
+current display intact.
+
+Palette v2 uses the same current/next hold convention. Its canonical colors remain a
+complete 16-entry WLED palette plus an exact or nearest generation-0 fallback ID; a
+zero hold pauses automatic palette rotation without changing how that palette is
+rendered.
 
 The first Beat extension uses otherwise-zero bytes after the original six-byte body.
 A magic value, extension version, and extension length precede `current` and `next`

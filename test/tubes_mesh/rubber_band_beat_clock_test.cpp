@@ -97,13 +97,28 @@ void forward_phase_goal_closes_without_a_discontinuity() {
       + std::to_string(clock.phaseError()));
 }
 
+// Whole-phrase counter differences are invisible to renderers and must be removed
+// immediately so phrase-keyed channel operations refer to the same boundary.
+void whole_phrase_offsets_rebase_without_changing_visible_phase() {
+  RubberBandBeatClock clock;
+  constexpr uint32_t phrase = 16U * ONE_BEAT;
+  constexpr uint32_t visiblePhase = 5U * ONE_BEAT + 73U;
+  expect(clock.reset(BPM_120, 207U * phrase + visiblePhase), "initial clock was rejected");
+
+  expect(clock.setGoal(BPM_120, 82U * phrase + visiblePhase), "remote clock was rejected");
+  expect(clock.frame() == 82U * phrase + visiblePhase, "whole-phrase offset was not rebased");
+  expect((clock.frame() % phrase) == visiblePhase, "visible beat phase changed during rebase");
+  expect(clock.phaseError() == 0, "exact phrase rebase left a phase error");
+}
+
 } // namespace
 
 int main() {
-  const std::array<std::pair<const char*, void (*)()>, 3> tests = {{
+  const std::array<std::pair<const char*, void (*)()>, 4> tests = {{
       {"tempo change slews without repositioning", tempo_change_slews_without_repositioning},
       {"backward phase goal keeps local frame monotonic", backward_phase_goal_keeps_local_frame_monotonic},
       {"forward phase goal closes without a discontinuity", forward_phase_goal_closes_without_a_discontinuity},
+      {"whole phrase offsets rebase without changing visible phase", whole_phrase_offsets_rebase_without_changing_visible_phase},
   }};
 
   for (const auto& test : tests) {

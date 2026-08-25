@@ -296,6 +296,92 @@ void variable_palette_snapshot_is_atomic() {
       "wrong variable-channel magic passed ingress validation");
 }
 
+// A modern Pattern snapshot carries exact WLED/Tubes render programs while its
+// embedded legacy state remains a complete fallback for older receivers.
+void variable_pattern_snapshot_preserves_program_and_fallback() {
+  TubesChannelMessageV2 message;
+  message.header.id = 0x1FF0;
+  message.header.version = TUBES_PROTOCOL_V3;
+  message.recipients = RECIPIENTS_ALL;
+  message.command = PatternChannel;
+  message.envelope.messageKind = ChannelDeclaration;
+  message.envelope.channelId = 0x1FF0;
+  message.envelope.sourceControlId = 0x1FF0;
+  message.envelope.sourceSession = 0x12345678;
+  message.envelope.sequence = 10;
+
+  PatternChannelSnapshot snapshot;
+  snapshot.state.current = {80, 61, 0, 78, 0, 0, 0, 0};
+  snapshot.state.next = {UINT16_MAX, 61, 0, 84, 1, 2, 4, 40};
+  snapshot.transitionMs = 8000;
+  snapshot.currentProgram = {
+      80, 0, PatternRendererWled, 61, 0, 214, 115, 170, 96, 120, 2, 7, 6};
+  snapshot.nextProgram = snapshot.currentProgram;
+  snapshot.nextProgram.effectivePhrase = UINT16_MAX;
+
+  expect(writeChannelMessageV2Body(message, snapshot), "Pattern snapshot did not fit");
+  size_t wireLength = channelMessageV2WireSize(message.envelope.bodyLength);
+  expect(isValidChannelMessageV2Prefix(reinterpret_cast<const uint8_t*>(&message), wireLength),
+      "valid variable Pattern snapshot failed ingress validation");
+  PatternChannelSnapshot decoded;
+  expect(readChannelMessageV2Body(message, decoded), "Pattern snapshot did not decode");
+  expect(memcmp(&snapshot, &decoded, sizeof(snapshot)) == 0,
+      "Pattern program changed on the wire");
+  expect(decoded.state.current.patternId == 61
+          && decoded.currentProgram.fallbackPatternId == 61,
+      "Pattern snapshot lost its exact legacy fallback");
+  expect(decoded.currentProgram.renderId == 214,
+      "Pattern snapshot lost the raw WLED effect");
+
+  PatternChannelState legacy = snapshot.state;
+  expect(writeChannelMessageV2Body(message, legacy),
+      "legacy Pattern snapshot was no longer accepted");
+  expect(isValidChannelMessageV2Prefix(
+      reinterpret_cast<const uint8_t*>(&message),
+      channelMessageV2WireSize(message.envelope.bodyLength)),
+      "legacy Pattern snapshot failed compatibility validation");
+}
+
+// A complete snapshot can arrive after its advertised next boundary. Receivers
+// must promote next immediately instead of flashing the obsolete current entry.
+void delayed_pattern_snapshot_promotes_next() {
+  expect(!tubesPatternPhraseReached(62, 63),
+      "future Pattern phrase was treated as due");
+  expect(tubesPatternPhraseReached(63, 63),
+      "Pattern phrase was not due at its boundary");
+  expect(tubesPatternPhraseReached(64, 63),
+      "late Pattern snapshot did not promote next");
+  expect(!tubesPatternPhraseReached(64, UINT16_MAX),
+      "held Pattern schedule was treated as due");
+  expect(tubesPatternPhraseReached(0, UINT16_MAX - 1),
+      "Pattern phrase wrap was not handled");
+}
+
+// Once a complete snapshot arrives, its same-source compatibility packet must
+// remain recognizable so a modern receiver can relay it without applying it.
+void modern_source_recognizes_both_channel_envelopes() {
+  ChannelModernSource source;
+  source.valid = true;
+  source.channelId = 0x1FFF;
+  source.controlId = 0x1FF0;
+  source.session = 0x12345678;
+
+  TubesChannelEnvelope legacy;
+  legacy.channelId = source.channelId;
+  legacy.sourceControlId = source.controlId;
+  legacy.sourceSession = source.session;
+  expect(source.matches(legacy), "same-source v1 fallback was not recognized");
+
+  TubesChannelEnvelopeV2 modern;
+  modern.channelId = source.channelId;
+  modern.sourceControlId = source.controlId;
+  modern.sourceSession = source.session;
+  expect(source.matches(modern), "same-source v2 snapshot was not recognized");
+
+  legacy.sourceSession++;
+  expect(!source.matches(legacy), "different-session fallback matched modern source");
+}
+
 // User-triggered visual changes move to the next phrase without collapsing the
 // relative timing of later changes or turning the unscheduled sentinel into work.
 void channel_operations_schedule_on_phrase_boundaries() {
@@ -362,7 +448,7 @@ void position_peers_expire() {
 } // namespace
 
 int main() {
-  const std::array<std::pair<const char*, void (*)()>, 14> tests = {{
+  const std::array<std::pair<const char*, void (*)()>, 17> tests = {{
       {"wire validation rejects malformed lengths", wire_validation_rejects_malformed_lengths},
       {"topic authorities remain independent", topic_authorities_remain_independent},
       {"projection marker distinguishes master output", projection_marker_distinguishes_master_output},
@@ -373,6 +459,9 @@ int main() {
       {"Palette expansion matches WLED fixed-point rounding", palette_expansion_matches_wled_fixed_point_rounding},
       {"Palette channel carries full definition and fallback", palette_channel_carries_full_definition_and_fallback},
       {"variable Palette snapshot is atomic", variable_palette_snapshot_is_atomic},
+      {"variable Pattern snapshot preserves program and fallback", variable_pattern_snapshot_preserves_program_and_fallback},
+      {"delayed Pattern snapshot promotes next", delayed_pattern_snapshot_promotes_next},
+      {"modern source recognizes both channel envelopes", modern_source_recognizes_both_channel_envelopes},
       {"channel operations schedule on phrase boundaries", channel_operations_schedule_on_phrase_boundaries},
       {"Beat clock publishes only on measure downbeat", beat_clock_publishes_only_on_measure_downbeat},
       {"followers keep speculative channel schedules", followers_keep_speculative_channel_schedules},

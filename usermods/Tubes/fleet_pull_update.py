@@ -214,10 +214,11 @@ def run_wave(args: argparse.Namespace) -> int:
         for mac, device in expected.items()
     }
     images = load_images(args.firmware_dir, candidates)
-    network_password = load_network_password(args.ssid)
-    if len(args.ssid.encode("utf-8")) + len(network_password.encode("utf-8")) > 22:
+    network_ssid = "" if args.stored_network else args.ssid
+    network_password = "" if args.stored_network else load_network_password(network_ssid)
+    if len(network_ssid.encode("utf-8")) + len(network_password.encode("utf-8")) > 22:
         raise RuntimeError("SSID and password exceed the protocol's combined 22-byte limit")
-    if "," in args.ssid or "," in network_password:
+    if "," in network_ssid or "," in network_password:
         raise RuntimeError("SSID and password cannot contain commas in protocol version 1")
     nonce = secrets.randbits(32) or 1
     update_server = server_module.FleetUpdateHTTPServer(
@@ -228,12 +229,21 @@ def run_wave(args: argparse.Namespace) -> int:
     actual_port = int(update_server.server_address[1])
     started_at = time.monotonic()
     try:
-        canary = min(candidates, key=lambda device: str(device["mac"]))
+        if args.canary_mac:
+            requested_canary = mesh_device_report.normalize_mac(args.canary_mac)
+            canary = next(
+                (device for device in candidates if str(device["mac"]) == requested_canary),
+                None,
+            )
+            if canary is None:
+                raise RuntimeError(f"canary {requested_canary} is not an eligible visible device")
+        else:
+            canary = min(candidates, key=lambda device: str(device["mac"]))
         canary_mac = str(canary["mac"])
         print(f"Canary {canary_mac}: Device ID 0x{int(canary['node']):04X}")
         send_offer(
             args.serial, release, args.advertise, actual_port, 0,
-            int(canary["node"]), nonce, args.ssid, network_password,
+            int(canary["node"]), nonce, network_ssid, network_password,
         )
         if not update_server.ledger.wait_for({canary_mac}, args.transfer_timeout):
             raise RuntimeError(f"canary {canary_mac} did not complete its firmware download")
@@ -247,7 +257,7 @@ def run_wave(args: argparse.Namespace) -> int:
             send_offer(
                 args.serial, release, args.advertise, actual_port,
                 args.start_window_ms, 0, nonce,
-                args.ssid, network_password,
+                network_ssid, network_password,
             )
             if not update_server.ledger.wait_for(set(expected), args.transfer_timeout):
                 completed = set(update_server.ledger.snapshot())
@@ -273,10 +283,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("serial", type=pathlib.Path)
     parser.add_argument("--advertise", required=True, help="LAN IPv4 address reachable by every pole")
-    parser.add_argument("--ssid", required=True, help="temporary 2.4 GHz update network")
+    network = parser.add_mutually_exclusive_group(required=True)
+    network.add_argument("--ssid", help="temporary 2.4 GHz update network")
+    network.add_argument(
+        "--stored-network",
+        action="store_true",
+        help="use each pole's already-configured Wi-Fi network",
+    )
     parser.add_argument("--bind", default="0.0.0.0", help="local server bind address")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--start-window-ms", type=int, default=5000)
+    parser.add_argument("--canary-mac", help="use one visible stable MAC as the canary")
     parser.add_argument("--transfer-timeout", type=float, default=180.0)
     parser.add_argument("--verify-timeout", type=float, default=90.0)
     parser.add_argument("--firmware-dir", type=pathlib.Path, default=DEFAULT_FIRMWARE_DIR)

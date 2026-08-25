@@ -84,6 +84,23 @@ struct TubesChannelEnvelopeV2 {
   uint16_t leaseDeciseconds = TUBES_CHANNEL_LEASE_DECISECONDS;
 };
 
+// Remembers which authority/session supplied a complete modern snapshot so an
+// immediately following compatibility packet can be relayed without reapplying it.
+struct ChannelModernSource {
+  bool valid = false;
+  DeviceId channelId = 0;
+  DeviceId controlId = 0;
+  uint32_t session = 0;
+
+  template<typename Envelope>
+  bool matches(const Envelope& envelope) const {
+    return valid
+        && channelId == envelope.channelId
+        && controlId == envelope.sourceControlId
+        && session == envelope.sourceSession;
+  }
+};
+
 struct BeatChannelState {
   uint16_t bpm = 0;
   uint32_t beatFrame = 0;
@@ -155,6 +172,47 @@ struct PatternChannelState {
   PatternChannelEntry next;
 };
 
+enum PatternRenderer : uint8_t {
+  PatternRendererWled = 1,
+  PatternRendererTubes = 2,
+};
+
+struct PatternProgramEntry {
+  uint16_t effectivePhrase = 0;
+  uint16_t holdPhrases = 0;
+  uint8_t renderer = PatternRendererWled;
+  uint8_t fallbackPatternId = 0;
+  uint8_t syncMode = 0;
+  uint8_t renderId = 0;
+  uint8_t speed = 0;
+  uint8_t intensity = 0;
+  uint8_t custom1 = 0;
+  uint8_t custom2 = 0;
+  uint8_t custom3 = 0;
+  uint8_t optionMask = 0;
+  uint8_t optionValues = 0;
+};
+
+constexpr uint32_t PATTERN_PROGRAM_MAGIC = 0x31544E50; // "PNT1" little-endian.
+constexpr uint8_t PATTERN_PROGRAM_VERSION_1 = 1;
+
+struct PatternChannelSnapshot {
+  uint32_t magic = PATTERN_PROGRAM_MAGIC;
+  uint8_t version = PATTERN_PROGRAM_VERSION_1;
+  uint8_t length = sizeof(PatternProgramEntry) * 2;
+  uint8_t reserved[2] = {0};
+  PatternChannelState state;
+  uint16_t transitionMs = 0;
+  PatternProgramEntry currentProgram;
+  PatternProgramEntry nextProgram;
+};
+
+// True once a scheduled phrase has arrived, including across uint16_t wrap.
+inline bool tubesPatternPhraseReached(uint16_t currentPhrase, uint16_t scheduledPhrase) {
+  return scheduledPhrase != UINT16_MAX
+      && int16_t(currentPhrase - scheduledPhrase) >= 0;
+}
+
 struct PaletteChannelEntry {
   uint16_t palettePhrase = 0;
   uint8_t paletteId = 0;
@@ -193,11 +251,20 @@ struct BeatChannelSnapshot {
   BeatTransientExtension transient;
 };
 
+struct PaletteChannelSnapshotV1 {
+  PaletteChannelState state;
+  uint16_t transitionMs = 0;
+  PaletteGradient16 currentDefinition;
+  PaletteGradient16 nextDefinition;
+};
+
 struct PaletteChannelSnapshot {
   PaletteChannelState state;
   uint16_t transitionMs = 0;
   PaletteGradient16 currentDefinition;
   PaletteGradient16 nextDefinition;
+  uint16_t currentHoldPhrases = 1;
+  uint16_t nextHoldPhrases = 1;
 };
 
 struct ControlChannelBody {
@@ -244,16 +311,22 @@ static_assert(sizeof(BeatChannelState) <= TUBES_CHANNEL_BODY_SIZE, "Beat state e
 static_assert(sizeof(BeatChannelState) + sizeof(BeatSoundProgramExtension) + sizeof(BeatTransientExtension)
               == TUBES_CHANNEL_BODY_SIZE, "Beat extensions must fill the channel body");
 static_assert(sizeof(PatternChannelState) <= TUBES_CHANNEL_BODY_SIZE, "Pattern state exceeds channel body");
+static_assert(sizeof(PatternProgramEntry) == 15, "Pattern program wire size changed");
+static_assert(sizeof(PatternChannelSnapshot) == 60, "Pattern snapshot wire size changed");
 static_assert(sizeof(PaletteChannelState) <= TUBES_CHANNEL_BODY_SIZE, "Palette state exceeds channel body");
 static_assert(sizeof(PaletteGradientDefinition) == 33, "Palette gradient wire size changed");
 static_assert(sizeof(PaletteGradient16) == TUBES_CHANNEL_BODY_SIZE,
               "Palette16 definition must fill one channel body");
 static_assert(sizeof(PaletteChannelSchedule) == 10, "Palette schedule wire size changed");
 static_assert(sizeof(BeatChannelSnapshot) == 48, "Beat snapshot wire size changed");
-static_assert(sizeof(PaletteChannelSnapshot) == 104, "Palette snapshot wire size changed");
+static_assert(sizeof(PaletteChannelSnapshotV1) == 104, "legacy Palette snapshot wire size changed");
+static_assert(sizeof(PaletteChannelSnapshot) == 108, "Palette snapshot wire size changed");
 static_assert(offsetof(TubesChannelMessageV2, body) + sizeof(PaletteChannelSnapshot)
               <= TUBES_ESPNOW_MAX_MESSAGE_SIZE,
               "Palette snapshot exceeds one ESP-NOW packet");
+static_assert(offsetof(TubesChannelMessageV2, body) + sizeof(PatternChannelSnapshot)
+              <= TUBES_ESPNOW_MAX_MESSAGE_SIZE,
+              "Pattern snapshot exceeds one ESP-NOW packet");
 
 inline bool isKnownTubesChannel(uint8_t channel) {
   return channel >= ControlChannel && channel <= PaletteChannel;
@@ -323,10 +396,20 @@ inline bool isValidChannelEnvelope(const TubesChannelEnvelopeV2& envelope) {
 inline uint8_t expectedChannelSnapshotBodyLength(uint8_t channel) {
   switch (channel) {
     case BeatChannel: return sizeof(BeatChannelSnapshot);
-    case PatternChannel: return sizeof(PatternChannelState);
+    case PatternChannel: return sizeof(PatternChannelSnapshot);
     case PaletteChannel: return sizeof(PaletteChannelSnapshot);
     default: return 0;
   }
+}
+
+inline bool isExpectedChannelSnapshotBodyLength(uint8_t channel, uint8_t bodyLength) {
+  if (channel == PatternChannel)
+    return bodyLength == sizeof(PatternChannelSnapshot)
+        || bodyLength == sizeof(PatternChannelState);
+  if (channel == PaletteChannel)
+    return bodyLength == sizeof(PaletteChannelSnapshot)
+        || bodyLength == sizeof(PaletteChannelSnapshotV1);
+  return bodyLength == expectedChannelSnapshotBodyLength(channel);
 }
 
 inline size_t channelMessageV2WireSize(uint8_t bodyLength) {
@@ -354,7 +437,7 @@ inline bool isValidChannelMessageV2Prefix(const uint8_t* data, size_t length) {
   TubesChannelEnvelopeV2 envelope;
   memcpy(&envelope, data + envelopeOffset, sizeof(envelope));
   if (!isValidChannelEnvelope(envelope)
-      || envelope.bodyLength != expectedChannelSnapshotBodyLength(data[commandOffset])
+      || !isExpectedChannelSnapshotBodyLength(data[commandOffset], envelope.bodyLength)
       || channelMessageV2WireSize(envelope.bodyLength) != length)
     return false;
 
@@ -370,7 +453,7 @@ inline bool isValidChannelMessageV2Prefix(const uint8_t* data, size_t length) {
 template<typename Body>
 inline bool writeChannelMessageV2Body(TubesChannelMessageV2& message, const Body& body) {
   static_assert(sizeof(Body) <= sizeof(message.body), "channel snapshot exceeds ESP-NOW body");
-  if (sizeof(Body) != expectedChannelSnapshotBodyLength(message.command))
+  if (!isExpectedChannelSnapshotBodyLength(message.command, sizeof(Body)))
     return false;
   memcpy(message.body, &body, sizeof(body));
   message.envelope.bodyLength = sizeof(body);
@@ -380,7 +463,7 @@ inline bool writeChannelMessageV2Body(TubesChannelMessageV2& message, const Body
 template<typename Body>
 inline bool readChannelMessageV2Body(const TubesChannelMessageV2& message, Body& body) {
   if (message.envelope.bodyLength != sizeof(Body)
-      || sizeof(Body) != expectedChannelSnapshotBodyLength(message.command))
+      || !isExpectedChannelSnapshotBodyLength(message.command, sizeof(Body)))
     return false;
   memcpy(&body, message.body, sizeof(body));
   return true;
