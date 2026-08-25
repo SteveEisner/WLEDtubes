@@ -25,3 +25,10 @@ test('Surveyor is bounded, fresh, read-only, and exposes modern channel winners'
   assert.match(ui, /status\.patternChannel/);
   assert.match(ui, /status\.paletteChannel/);
 });
+
+test('channel ownership has a dedicated reserved workspace', () => {
+  assert.match(ui, /FieldScreen::Channels/);
+  assert.match(ui, /void drawChannels\(\)/);
+  assert.match(ui, /Channel interactions will live here/);
+  assert.doesNotMatch(ui, /FieldScreen::Status/);
+});

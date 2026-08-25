@@ -67,10 +67,8 @@ enum class FieldScreen : uint8_t {
   Home,
   Conductor,
   Surveyor,
-#ifdef TUBES_S3_FIRMWARE_CARRIER
-  Carrier,
-#endif
-  Status
+  Update,
+  Channels
 };
 
 class WaveshareS3FieldOs : public Usermod {
@@ -123,37 +121,10 @@ private:
     display.setTextSize(1);
     display.setCursor(25, 51);
     display.println(F("The flock stays live wherever you go"));
-    button(20, 84, 210, 164, COLOR_PRIMARY, F("Conductor"));
-    button(250, 84, 210,
-#ifdef TUBES_S3_FIRMWARE_CARRIER
-           48,
-#else
-           76,
-#endif
-           COLOR_SURFACE_RAISED, F("Surveyor"));
-#ifdef TUBES_S3_FIRMWARE_CARRIER
-    button(250, 142, 210, 48, COLOR_SURFACE_RAISED, F("Carrier"));
-    button(250, 200, 210, 48, COLOR_SURFACE_RAISED, F("Status"));
-#else
-    button(250, 172, 210, 76, COLOR_SURFACE_RAISED, F("Status"));
-#endif
-    display.setTextColor(RGB565_WHITE);
-    display.setTextSize(1);
-    display.setCursor(36, 199);
-    display.println(F("Run the show"));
-    display.setCursor(266,
-#ifdef TUBES_S3_FIRMWARE_CARRIER
-                      128
-#else
-                      143
-#endif
-    ); display.println(F("Nearby Tubes"));
-#ifdef TUBES_S3_FIRMWARE_CARRIER
-    display.setCursor(266, 186); display.println(F("Pass updates"));
-    display.setCursor(266, 244); display.println(F("Read-only health"));
-#else
-    display.setCursor(266, 231); display.println(F("Read-only health"));
-#endif
+    button(20, 84, 210, 150, COLOR_PRIMARY, F("Conductor"));
+    button(250, 84, 210, 150, COLOR_SURFACE_RAISED, F("Surveyor"));
+    button(20, 250, 210, 150, COLOR_SURFACE_RAISED, F("Update"));
+    button(250, 250, 210, 150, COLOR_SURFACE_RAISED, F("Channels"));
   }
 
   void drawBack() {
@@ -248,10 +219,6 @@ private:
     drawBack();
     display.setTextSize(1);
     display.setTextColor(COLOR_MUTED);
-    drawChannelRow(72, "BEAT", status.beatChannel);
-    drawChannelRow(90, "PAT ", status.patternChannel);
-    drawChannelRow(108, "PAL ", status.paletteChannel);
-
     TubesS3PeerStatus sorted[7];
     size_t shown = 0;
     const uint32_t now = millis();
@@ -268,11 +235,11 @@ private:
       if (position < 7) sorted[position] = candidate;
     }
     display.setTextColor(RGB565_WHITE);
-    display.setCursor(24, 142);
+    display.setCursor(24, 82);
     display.printf("LOCAL %03X  follows %03X\n", status.localNodeId, status.uplinkId);
     for (size_t i = 0; i < shown; i++) {
       const TubesS3PeerStatus &peer = sorted[i];
-      display.setCursor(24, 172 + i * 30);
+      display.setCursor(24, 116 + i * 42);
       if (peer.rssiKnown)
         display.printf("%03X -> %03X  gen%u  %ddB  age %lus\n", peer.nodeId, peer.uplinkId,
             peer.protocolGeneration, peer.latestRssi, (now - peer.lastSeenMs) / 1000);
@@ -283,27 +250,32 @@ private:
     lastTelemetryDraw = now;
   }
 
-  void drawStatus() {
+  void drawChannels() {
     TubesS3FieldStatus status;
     tubesS3ReadStatus(status);
-    title(F("Status"));
+    title(F("Channels"));
     drawBack();
-    display.setTextColor(RGB565_WHITE);
-    display.setTextSize(2);
-    display.setCursor(24, 92);
-    display.printf("Local S3 %03X\n", status.localNodeId);
     display.setTextSize(1);
     display.setTextColor(COLOR_MUTED);
-    display.setCursor(24, 140); display.printf("Role: %s  |  radio: %s\n", status.isMaster ? "leading" : status.isFollowing ? "following" : "unlinked", status.radioReady ? "ready" : "offline");
-    display.setCursor(24, 164); display.printf("Channel %u\n", status.radioChannel);
-    display.setCursor(24, 188); display.printf("Output: 60 pixels  |  %s\n", status.preview[0] || status.preview[59] ? "active" : "ready");
-    display.setCursor(24, 220); display.println(F("Read-only public Tubes state"));
+    display.setCursor(24, 76);
+    display.println(F("Beat / Pattern / Palette authority"));
+    display.setTextColor(RGB565_WHITE);
+    drawChannelRow(116, "BEAT", status.beatChannel);
+    drawChannelRow(152, "PAT ", status.patternChannel);
+    drawChannelRow(188, "PAL ", status.paletteChannel);
+    display.setTextColor(COLOR_MUTED);
+    display.setCursor(24, 252);
+    display.printf("Pattern %u -> %u\n", status.patternId, status.nextPatternId);
+    display.setCursor(24, 278);
+    display.printf("Palette %u -> %u\n", status.paletteId, status.nextPaletteId);
+    display.setCursor(24, 336);
+    display.println(F("Channel interactions will live here."));
   }
 
-#ifdef TUBES_S3_FIRMWARE_CARRIER
-  void drawCarrier() {
-    title(F("Carrier"));
+  void drawUpdate() {
+    title(F("Update"));
     drawBack();
+#ifdef TUBES_S3_FIRMWARE_CARRIER
     button(20, 70, 150, 50, COLOR_PRIMARY, F("Scan"));
     TubesS3CarrierStatus carrier;
     tubesS3ReadCarrierStatus(carrier);
@@ -326,8 +298,16 @@ private:
           target.release);
     }
     lastTelemetryDraw = millis();
-  }
+#else
+    display.setTextColor(COLOR_MUTED);
+    display.setTextSize(2);
+    display.setCursor(36, 120);
+    display.println(F("Carrier build required"));
+    display.setTextSize(1);
+    display.setCursor(36, 166);
+    display.println(F("This base firmware does not carry device images."));
 #endif
+  }
 
   void draw() {
     if (!displayReady) return;
@@ -335,10 +315,8 @@ private:
       case FieldScreen::Home: drawHome(); break;
       case FieldScreen::Conductor: drawConductor(); break;
       case FieldScreen::Surveyor: drawSurveyor(); break;
-#ifdef TUBES_S3_FIRMWARE_CARRIER
-      case FieldScreen::Carrier: drawCarrier(); break;
-#endif
-      case FieldScreen::Status: drawStatus(); break;
+      case FieldScreen::Update: drawUpdate(); break;
+      case FieldScreen::Channels: drawChannels(); break;
     }
   }
 
@@ -347,21 +325,12 @@ private:
       screen = FieldScreen::Home;
     } else if (screen == FieldScreen::Home) {
       if (y >= 84 && y < 250) {
-        if (x < 240) screen = FieldScreen::Conductor;
-        else if (y <
-#ifdef TUBES_S3_FIRMWARE_CARRIER
-                 137
-#else
-                 166
-#endif
-        ) screen = FieldScreen::Surveyor;
-#ifdef TUBES_S3_FIRMWARE_CARRIER
-        else if (y < 195) screen = FieldScreen::Carrier;
-#endif
-        else screen = FieldScreen::Status;
+        screen = x < 240 ? FieldScreen::Conductor : FieldScreen::Surveyor;
+      } else if (y >= 250 && y < 400) {
+        screen = x < 240 ? FieldScreen::Update : FieldScreen::Channels;
       }
 #ifdef TUBES_S3_FIRMWARE_CARRIER
-    } else if (screen == FieldScreen::Carrier) {
+    } else if (screen == FieldScreen::Update) {
       if (y >= 70 && y <= 125) tubesS3ScanCarrierTargets();
       else if (y >= 140) {
         size_t index = (y - 140) / 44;
@@ -429,10 +398,10 @@ public:
         lastTelemetryDraw = now;
       } else if (screen == FieldScreen::Surveyor) {
         drawSurveyor();
-#ifdef TUBES_S3_FIRMWARE_CARRIER
-      } else if (screen == FieldScreen::Carrier) {
-        drawCarrier();
-#endif
+      } else if (screen == FieldScreen::Update) {
+        drawUpdate();
+      } else if (screen == FieldScreen::Channels) {
+        drawChannels();
       }
     }
   }
