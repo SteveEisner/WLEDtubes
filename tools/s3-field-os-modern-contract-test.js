@@ -19,7 +19,7 @@ test('Field OS offers Next but no Previous or authority mutation', () => {
   assert.match(ui, /Next failed/);
 });
 test('Surveyor is bounded, fresh, read-only, and exposes modern channel winners', () => {
-  assert.match(ui, /TubesS3PeerStatus sorted\[7\]/);
+  assert.match(ui, /TubesS3PeerStatus sorted\[4\]/);
   assert.match(ui, /now - candidate\.lastSeenMs > 60000/);
   assert.match(ui, /status\.beatChannel/);
   assert.match(ui, /status\.patternChannel/);

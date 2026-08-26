@@ -90,6 +90,18 @@ private:
     const __FlashStringHelper *label;
   };
 
+  struct DeviceCard {
+    uint16_t id;
+    uint16_t version;
+    uint16_t uplinkId;
+    uint32_t ageSeconds;
+    const char *kind;
+
+    DeviceCard(uint16_t id, uint16_t version, uint16_t uplinkId,
+               uint32_t ageSeconds, const char *kind)
+        : id(id), version(version), uplinkId(uplinkId), ageSeconds(ageSeconds), kind(kind) {}
+  };
+
   bool displayReady = false;
   bool touchReady = false;
   bool nextSendFailed = false;
@@ -171,22 +183,20 @@ private:
   Strip stripComponent;
 
   void drawConductorTelemetry(const TubesS3FieldStatus &status) {
-    display.fillRect(20, 68, 440, 87, COLOR_BACKGROUND);
+    display.fillRect(20, 68, 440, 108, COLOR_BACKGROUND);
+    drawDeviceCard(68, {status.localNodeId, status.tubesVersion, status.uplinkId,
+                       UINT32_MAX, "S3"}, COLOR_PRIMARY);
     display.setTextColor(RGB565_WHITE);
-    display.setTextSize(3);
-    display.setCursor(22, 70);
+    display.setTextSize(2);
+    display.setCursor(24, 132);
     display.printf("%s\n", status.patternName);
-    display.setTextColor(COLOR_PRIMARY);
-    display.setTextSize(1);
-    display.setCursor(350, 76);
-    display.printf("S3 %03X", status.localNodeId);
     display.setTextColor(COLOR_MUTED);
     display.setTextSize(1);
-    display.setCursor(24, 106);
+    display.setCursor(24, 154);
     display.printf("%s  |  %u BPM  |  beat %u\n",
                    status.isMaster ? "LEADING" : status.isFollowing ? "FOLLOWING" : "UNLINKED",
                    status.bpm, status.beat + 1);
-    display.setCursor(24, 125);
+    display.setCursor(260, 154);
     if (!status.radioReady) {
       display.setTextColor(RGB565_RED);
       display.printf("Radio offline  |  channel %u\n", status.radioChannel);
@@ -210,7 +220,7 @@ private:
     TubesS3FieldStatus status;
     tubesS3ReadStatus(status);
     drawConductorTelemetry(status);
-    stripComponent.draw(31, 156, 420, 138, full);
+    stripComponent.draw(31, 178, 420, 110, full);
     if (!status.canForceNext)
       drawButton({{120, 328, 240, 70}, COLOR_MUTED, F("Next unavailable")});
     else if (nextSendFailed)
@@ -230,21 +240,23 @@ private:
     return (value ^ field) * 16777619UL;
   }
 
-  void drawDeviceIdentityRow(int16_t y, uint16_t nodeId, uint16_t tubesVersion,
-                             uint16_t uplinkId, uint32_t ageSeconds,
-                             uint16_t color = COLOR_SURFACE_RAISED) {
-    display.fillRoundRect(20, y, 440, 40, 8, color);
-    display.setTextColor(RGB565_WHITE);
-    display.setTextSize(1);
-    display.setCursor(32, y + 8);
-    if (tubesVersion)
-      display.printf("ID %03X   v%u   uplink %03X\n", nodeId, tubesVersion, uplinkId);
+  void drawDeviceCard(int16_t y, const DeviceCard &device,
+                      uint16_t color = COLOR_SURFACE_RAISED) {
+    display.fillRoundRect(20, y, 440, 56, 10, color);
+    display.setTextColor(color == COLOR_PRIMARY ? RGB565_BLACK : RGB565_WHITE);
+    display.setTextSize(2);
+    display.setCursor(34, y + 9);
+    if (device.version)
+      display.printf("%s %04X   v%u\n", device.kind, device.id, device.version);
     else
-      display.printf("ID %03X   v?   uplink %03X\n", nodeId, uplinkId);
-    display.setTextColor(COLOR_MUTED);
-    display.setCursor(32, y + 24);
-    if (ageSeconds == UINT32_MAX) display.println(F("this device"));
-    else display.printf("last heard %lus ago\n", ageSeconds);
+      display.printf("%s %04X   v?\n", device.kind, device.id);
+    display.setTextSize(1);
+    display.setCursor(34, y + 37);
+    if (device.uplinkId) display.printf("UPLINK %04X", device.uplinkId);
+    else display.print(F("UPLINK NONE"));
+    display.setCursor(260, y + 37);
+    if (device.ageSeconds == UINT32_MAX) display.print(F("THIS DEVICE"));
+    else display.printf("HEARD %lus AGO", device.ageSeconds);
   }
 
   void drawChannelRow(int16_t y, const char *name, const TubesS3ChannelStatus &channel,
@@ -263,27 +275,27 @@ private:
     tubesS3ReadStatus(status);
     display.fillRect(20, 70, 440, 370, COLOR_BACKGROUND);
     display.setTextSize(1);
-    TubesS3PeerStatus sorted[7];
+    TubesS3PeerStatus sorted[4];
     size_t shown = 0;
     const uint32_t now = millis();
     for (size_t i = 0; i < status.peerCount; i++) {
       TubesS3PeerStatus candidate;
       if (!tubesS3ReadPeer(i, candidate) || candidate.nodeId == status.localNodeId
           || now - candidate.lastSeenMs > 60000) continue;
-      if (shown == 7 && !surveyorBefore(candidate, sorted[6])) continue;
-      size_t position = shown < 7 ? shown++ : 6;
+      if (shown == 4 && !surveyorBefore(candidate, sorted[3])) continue;
+      size_t position = shown < 4 ? shown++ : 3;
       while (position > 0 && surveyorBefore(candidate, sorted[position - 1])) {
-        if (position < 7) sorted[position] = sorted[position - 1];
+        if (position < 4) sorted[position] = sorted[position - 1];
         position--;
       }
-      if (position < 7) sorted[position] = candidate;
+      if (position < 4) sorted[position] = candidate;
     }
     display.setTextColor(COLOR_MUTED);
     display.setTextSize(1);
     display.setCursor(24, 76);
     display.println(F("THIS S3"));
-    drawDeviceIdentityRow(94, status.localNodeId, status.tubesVersion,
-                          status.uplinkId, UINT32_MAX, COLOR_PRIMARY);
+    drawDeviceCard(94, {status.localNodeId, status.tubesVersion, status.uplinkId,
+                        UINT32_MAX, "S3"}, COLOR_PRIMARY);
     display.setTextColor(COLOR_MUTED);
     display.setCursor(24, 150);
     display.println(F("NEARBY DEVICES"));
@@ -294,8 +306,8 @@ private:
     }
     for (size_t i = 0; i < shown; i++) {
       const TubesS3PeerStatus &peer = sorted[i];
-      drawDeviceIdentityRow(174 + i * 44, peer.nodeId, peer.tubesVersion,
-                            peer.uplinkId, (now - peer.lastSeenMs) / 1000);
+      drawDeviceCard(174 + i * 60, {peer.nodeId, peer.tubesVersion, peer.uplinkId,
+                     (now - peer.lastSeenMs) / 1000, "TUBE"});
     }
   }
 
@@ -304,24 +316,26 @@ private:
     tubesS3ReadStatus(status);
     display.fillRect(20, 70, 440, 370, COLOR_BACKGROUND);
     display.setTextSize(1);
+    drawDeviceCard(72, {status.localNodeId, status.tubesVersion, status.uplinkId,
+                        UINT32_MAX, "S3"}, COLOR_PRIMARY);
     display.setTextColor(COLOR_MUTED);
-    display.setCursor(24, 76);
+    display.setCursor(24, 136);
     display.println(F("Beat / Pattern / Palette authority"));
     display.setTextColor(RGB565_WHITE);
-    display.fillRoundRect(20, 102, 440, 72, 10, COLOR_SURFACE_RAISED);
-    display.fillRoundRect(20, 184, 440, 72, 10, COLOR_SURFACE_RAISED);
-    display.fillRoundRect(20, 266, 440, 72, 10, COLOR_SURFACE_RAISED);
+    display.fillRoundRect(20, 154, 440, 66, 10, COLOR_SURFACE_RAISED);
+    display.fillRoundRect(20, 228, 440, 66, 10, COLOR_SURFACE_RAISED);
+    display.fillRoundRect(20, 302, 440, 66, 10, COLOR_SURFACE_RAISED);
     char beatValue[32];
     char patternValue[32];
     char paletteValue[32];
     snprintf(beatValue, sizeof(beatValue), "%u BPM", status.bpm);
     snprintf(patternValue, sizeof(patternValue), "%u -> %u", status.patternId, status.nextPatternId);
     snprintf(paletteValue, sizeof(paletteValue), "%u -> %u", status.paletteId, status.nextPaletteId);
-    drawChannelRow(116, "BEAT", status.beatChannel, beatValue);
-    drawChannelRow(198, "PATTERN", status.patternChannel, patternValue);
-    drawChannelRow(280, "PALETTE", status.paletteChannel, paletteValue);
+    drawChannelRow(166, "BEAT", status.beatChannel, beatValue);
+    drawChannelRow(240, "PATTERN", status.patternChannel, patternValue);
+    drawChannelRow(314, "PALETTE", status.paletteChannel, paletteValue);
     display.setTextColor(COLOR_MUTED);
-    display.setCursor(24, 366);
+    display.setCursor(24, 390);
     display.println(F("Read-only authority. Interaction controls come next."));
   }
 
@@ -334,8 +348,8 @@ private:
     display.setTextSize(1);
     display.setCursor(24, 72);
     display.println(F("THIS S3 UPDATE CARRIER"));
-    drawDeviceIdentityRow(88, status.localNodeId, status.tubesVersion,
-                          status.uplinkId, UINT32_MAX, COLOR_PRIMARY);
+    drawDeviceCard(88, {status.localNodeId, status.tubesVersion, status.uplinkId,
+                        UINT32_MAX, "S3"}, COLOR_PRIMARY);
     display.setTextColor(COLOR_MUTED);
     display.setCursor(24, 138);
     display.println(F("FIRMWARE AVAILABLE"));
@@ -361,12 +375,13 @@ private:
     display.println(F("NEARBY DEVICES"));
     const size_t count = tubesS3CarrierTargetCount();
     display.setTextColor(RGB565_WHITE);
-    for (size_t index = 0; index < count && index < 7; index++) {
+    for (size_t index = 0; index < count && index < 2; index++) {
       TubesS3CarrierTarget target;
       if (!tubesS3ReadCarrierTarget(index, target)) continue;
       const int16_t y = 310 + index * 44;
-      drawDeviceIdentityRow(y, target.nodeId, target.release, target.uplinkId,
-                            (millis() - target.lastSeenMs) / 1000);
+      drawDeviceCard(y, {target.nodeId, target.release, target.uplinkId,
+                     (millis() - target.lastSeenMs) / 1000,
+                     target.family == 1 ? "DIG2GO" : "C3"});
     }
 #else
     display.setTextColor(COLOR_MUTED);
@@ -448,7 +463,7 @@ private:
     void tick(uint32_t now) override {
       if (now - lastPreviewMs >= PREVIEW_INTERVAL_MS) {
         lastPreviewMs = now;
-        owner.stripComponent.draw(31, 156, 420, 138);
+        owner.stripComponent.draw(31, 178, 420, 110);
       }
       if (now - lastRefreshMs >= SAMPLE_INTERVAL_MS) {
         TubesS3FieldStatus status;
