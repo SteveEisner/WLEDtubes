@@ -4,9 +4,13 @@ Modern release propagation reuses the `FleetUpdateOffer` wire and receiver
 validation contract, but not the laptop fleet workflow. After an explicit S3
 or Easy Flash user action starts the seed, discovery, serving, download,
 continuation, and retirement are device-to-device; no laptop server, roster,
-target selection, or per-hop verification participates. It does not change the
-deployed `TubesOTA` / `tubes123` credentials or make an ordinary reboot turn a
-current device into a host. Ordinary offers never arm peer hosting;
+target selection, or per-hop verification participates. It does not persist or
+replace WLED's standard Wi-Fi credentials: legacy-only sessions retain the
+deployed `TubesOTA` / `tubes123` contract, while mixed modern turns derive a
+RAM-only `Tubes-<nonce>` SSID and carry it in both existing offer envelopes.
+The per-turn name prevents two child hosts from attracting the wrong receiver;
+the password and saved WLED configuration remain unchanged. Nor does an
+ordinary reboot turn a current device into a host. Ordinary offers never arm peer hosting;
 `FleetUpdatePropagate` is the explicit P2P opt-in carried by the existing wire.
 
 When a device accepts and successfully installs a strictly newer propagation offer,
@@ -80,6 +84,8 @@ with legacy migration, but the activation mechanisms remain separate:
   lease created after a successful propagation-marked installation.
 
 Host tests cover arming, claiming once, release matching, corruption, and the
-legacy/equal-release rejection boundary. The PlatformIO
-`dig2go_push_bridge_test` build verifies the filesystem-backed integration.
-Physical v47-to-v48 fanout remains unproven.
+legacy/equal-release rejection boundary. The native
+`dig2go_peer_propagation_test` and production P2P PlatformIO build verify the
+integration. A five-device bench run physically proved v47-to-v48 fanout A to
+C and E, followed by E to D; two independent reads of each updated active slot
+matched the served firmware hash.

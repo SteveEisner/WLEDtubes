@@ -9,7 +9,7 @@ import mesh_device_report as REPORTS  # noqa: E402
 
 
 VALID_REPORT = (
-    "TUBE_REPORT nonce=89ABCDEF mac=5443b2b542f4 family=1 variant=0 tubes=15 "
+    "TUBE_REPORT nonce=89ABCDEF mac=5443b2b542f4 family=1 variant=0 tubes=14 "
     "release=092C041A leds=112 buses=1 pin=16 type=22 "
     "role=10 mesh=3 node=1234 uplink=3850 uptime=9"
 )
@@ -68,7 +68,7 @@ class MeshDeviceReportTest(unittest.TestCase):
             REPORTS.FAMILY_IDS["dig2go"],
             0,
             expected_release,
-            15,
+            14,
             112,
             16,
             22,

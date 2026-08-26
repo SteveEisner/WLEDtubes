@@ -42,7 +42,7 @@ for argument in "$@"; do
     previous="$argument"
     continue
   fi
-  if [[ "$argument" == update=@* ]]; then
+  if [[ "$previous" == "-F" && "$argument" == update=@* ]]; then
     upload=true
   fi
   if [[ "$argument" == http://* ]]; then
@@ -61,7 +61,7 @@ if [[ -f "$TUBES_FAKE_STATE/uploaded" ]]; then
 fi
 case "$url" in
   */json/si) source_file="$TUBES_FAKE_INFO" ;;
-  */json/cfg|*/cfg.json) source_file="$TUBES_FAKE_CONFIG" ;;
+  */json/cfg) source_file="$TUBES_FAKE_CONFIG" ;;
   *) exit 22 ;;
 esac
 if [[ -n "$output_file" ]]; then
@@ -117,11 +117,11 @@ TUBES_FAKE_MESH_LOG="$fake_state/mesh.log" \
 fi
 
 grep -q 'FAST_UPGRADE_OK mac=5443b2b542f4 leds=112' "$workflow_output"
- expected_release="$(sed -n 's/^#define RELEASE_VERSION //p' "$repo_dir/usermods/Tubes/updater.h")"
- grep -q "^verify .*5443b2b542f4 .*--family dig2go .*--variant 0 .*--release DIG2GO_TUBES .*--tubes $expected_release .*--leds 112 .*--pin 16 .*--type 22" "$fake_state/mesh.log"
- jq -e '."5443b2b542f4" == "dig2go"' "$backup_dir/device-inventory.json" >/dev/null
- test -f "$fake_state/uploaded"
- test "$(find "$backup_dir/5443b2b542f4" -type f -name 'cfg-before-upgrade.*' | wc -l | tr -d ' ')" -ge 2
- test "$(grep -E -c '/(json/cfg|cfg.json)$' "$fake_state/http-gets.log")" -eq 1
+expected_release="$(sed -n 's/^#define RELEASE_VERSION //p' "$repo_dir/usermods/Tubes/updater.h")"
+grep -q "^verify .*5443b2b542f4 .*--family dig2go .*--variant 0 .*--release DIG2GO_TUBES .*--tubes $expected_release .*--leds 112 .*--pin 16 .*--type 22" "$fake_state/mesh.log"
+jq -e '."5443b2b542f4" == "dig2go"' "$backup_dir/device-inventory.json" >/dev/null
+test -f "$fake_state/uploaded"
+test "$(find "$backup_dir/5443b2b542f4" -type f -name 'cfg-before-upgrade.*' | wc -l | tr -d ' ')" -ge 2
+test "$(grep -c '/json/cfg$' "$fake_state/http-gets.log")" -eq 1
 
 echo "PASS: one selection reuses one config fetch through upload and mesh verification"

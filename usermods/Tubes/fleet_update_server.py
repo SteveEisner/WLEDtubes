@@ -118,10 +118,6 @@ class FleetUpdateHTTPServer(http.server.ThreadingHTTPServer):
 
     daemon_threads = True
     allow_reuse_address = True
-    # socketserver defaults to a five-entry listen backlog. A 20-50 pole wave
-    # can overflow it before worker threads accept their sockets, producing
-    # connection resets even though response handling itself is concurrent.
-    request_queue_size = 128
 
     def __init__(
         self,

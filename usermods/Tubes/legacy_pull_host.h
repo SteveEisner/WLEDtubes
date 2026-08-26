@@ -332,19 +332,9 @@ public:
     if (!_started) return;
     wifi_sta_list_t stations = {};
     if (esp_wifi_ap_get_sta_list(&stations) != ESP_OK || stations.num == 0) return;
-    if (!LegacyPullTelemetry::stationSeen()) {
-      LegacyPullTelemetry::stationSeen() = true;
-      LegacyPullTelemetry::stationSeenAt() = millis();
-    }
-#if defined(TUBES_DIG2GO_DYNAMIC_ENROLLMENT)
-    for (int index = 0; index < stations.num && index < 2; index++) {
-      LegacyPullTelemetry::admit(stations.sta[index].mac);
-      if (!_hasEnrollment) setEnrolledMac(stations.sta[index].mac);
-    }
-#endif
     if (_lastStationCount != stations.num) {
       _lastStationCount = stations.num;
-      Serial.printf("TUBE_PULL_WIFI stations=%u admitted=%u\n", stations.num,
+      Serial.printf("TUBE_PULL_WIFI associated=%u eligible=%u\n", stations.num,
           LegacyPullTelemetry::admittedCount());
     }
   }
@@ -425,7 +415,10 @@ private:
             _enrolledMac[0], _enrolledMac[1], _enrolledMac[2],
             _enrolledMac[3], _enrolledMac[4], _enrolledMac[5]);
     }
-    LegacyPullTelemetry::stationSeen() = true;
+    if (!LegacyPullTelemetry::stationSeen()) {
+      LegacyPullTelemetry::stationSeen() = true;
+      LegacyPullTelemetry::stationSeenAt() = millis();
+    }
     return LegacyPullTelemetry::admit(stationMac);
   }
 

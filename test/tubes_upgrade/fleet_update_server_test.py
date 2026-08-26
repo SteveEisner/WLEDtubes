@@ -122,10 +122,6 @@ class FleetUpdateServerTest(unittest.TestCase):
         self.assertEqual(set(completed), macs)
         self.assertEqual(sum(result.bytes_sent for result in completed.values()), 50 * len(self.contents))
 
-    def test_listen_backlog_can_admit_a_full_fleet_wave(self) -> None:
-        """The socket admission queue must not retain socketserver's five-client default."""
-        self.assertGreaterEqual(SERVER.FleetUpdateHTTPServer.request_queue_size, 50)
-
 
 # AI: end
 

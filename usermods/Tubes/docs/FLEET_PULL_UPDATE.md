@@ -103,21 +103,6 @@ python3 usermods/Tubes/fleet_pull_update.py \
   --ssid TubesOTA
 ```
 
-This command is ordinary laptop fleet OTA and never creates peer-host leases.
-Peer propagation is a separate, explicitly triggered field workflow; this tool
-does not start it while its canary and fleet wave are active.
-
-An already-current root can be commanded to serve without reinstalling by
-sending the exact-target serial form through a connected Control node:
-
-```text
-P<release>,0.0.0.0,0,0,<target-device-id-hex>,<nonce-hex>,,
-```
-
-The no-server P2P form is valid only for an exact target. The root converts it
-into wildcard, non-forced download offers for genuinely older peers; equal or
-newer peers ignore those offers.
-
 On macOS the tool reads the matching Wi-Fi password from Keychain without printing
 it. Other hosts prompt securely; automation can provide
 `TUBES_FLEET_WIFI_PASSWORD`. The tool validates artifacts before opening the server,
