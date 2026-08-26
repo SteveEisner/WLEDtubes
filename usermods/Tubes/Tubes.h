@@ -154,7 +154,10 @@ class TubesUsermod : public Usermod {
       fillS3ChannelStatus(status.beatChannel, BeatChannel, now);
       fillS3ChannelStatus(status.patternChannel, PatternChannel, now);
       fillS3ChannelStatus(status.paletteChannel, PaletteChannel, now);
-      snprintf(status.patternName, sizeof(status.patternName), "Pattern %u", status.patternId);
+      extractModeName(status.patternId, JSON_mode_names, status.patternName,
+                      sizeof(status.patternName));
+      extractModeName(status.paletteId, JSON_palette_names, status.paletteName,
+                      sizeof(status.paletteName));
       const uint16_t length = strip.getLengthTotal();
       for (size_t i = 0; i < TUBES_S3_PREVIEW_PIXELS; i++) {
         const uint16_t pixel = length == 0 ? 0 : static_cast<uint16_t>((i * length) / TUBES_S3_PREVIEW_PIXELS);

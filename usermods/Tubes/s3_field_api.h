@@ -84,6 +84,7 @@ struct TubesS3FieldStatus {
   TubesS3ChannelStatus paletteChannel;
 
   char patternName[TUBES_S3_PATTERN_NAME_LENGTH] = {};
+  char paletteName[TUBES_S3_PATTERN_NAME_LENGTH] = {};
   uint32_t preview[TUBES_S3_PREVIEW_PIXELS] = {};
 };
 

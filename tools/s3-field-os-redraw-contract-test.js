@@ -16,6 +16,7 @@ test('periodic refreshes update content without clearing whole screens', () => {
   assert.doesNotMatch(loop, /fillScreen|drawSurveyorContent|drawUpdateContent|drawChannelsContent/);
   assert.match(loop, /viewManager\.tick\(millis\(\)\)/);
   assert.match(source, /if \(nextRevision != lastRevision\) render\(false\)/);
+  assert.match(source, /if \(nextRevision != lastTelemetryRevision\)/);
   assert.doesNotMatch(source, /else active->render\(false\)/);
 });
 
