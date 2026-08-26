@@ -93,6 +93,8 @@ void rememberTarget(const DeviceReportMessage& report) {
   targets[slot].variant = report.firmwareVariant;
   targets[slot].release = report.tubesVersion;
   targets[slot].lastSeenMs = millis();
+  targets[slot].nodeId = report.nodeId;
+  targets[slot].uplinkId = report.uplinkId;
 }
 
 class AcknowledgedProgmemResponse : public AsyncProgmemResponse {
@@ -395,6 +397,25 @@ bool tubesS3ReadCarrierTarget(size_t requested, TubesS3CarrierTarget& target) {
   for (size_t index = 0; index < targetCount; index++) {
     if (now - targets[index].lastSeenMs > TARGET_MAX_AGE_MS) continue;
     if (visible++ == requested) { target = targets[index]; return true; }
+  }
+  return false;
+}
+
+size_t tubesS3CarrierArtifactCount() { return 2; }
+
+bool tubesS3ReadCarrierArtifact(size_t index, TubesS3CarrierArtifact& artifact) {
+  artifact = TubesS3CarrierArtifact{};
+  artifact.variant = TubeVariantStandard;
+  artifact.release = CARRIER_RELEASE;
+  if (index == 0) {
+    artifact.family = TubeHardwareDig2Go;
+    artifact.size = S3_VAULT_DIG2GO_SIZE;
+    return true;
+  }
+  if (index == 1) {
+    artifact.family = TubeHardwareAthomC3;
+    artifact.size = S3_VAULT_ATHOM_C3_SIZE;
+    return true;
   }
   return false;
 }

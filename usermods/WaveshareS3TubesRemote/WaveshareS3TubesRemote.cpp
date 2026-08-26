@@ -226,13 +226,36 @@ private:
     return candidate.nodeId < prior.nodeId;
   }
 
-  void drawChannelRow(int16_t y, const char *name, const TubesS3ChannelStatus &channel) {
+  static uint32_t mixRevision(uint32_t value, uint32_t field) {
+    return (value ^ field) * 16777619UL;
+  }
+
+  void drawDeviceIdentityRow(int16_t y, uint16_t nodeId, uint16_t tubesVersion,
+                             uint16_t uplinkId, uint32_t ageSeconds,
+                             uint16_t color = COLOR_SURFACE_RAISED) {
+    display.fillRoundRect(20, y, 440, 40, 8, color);
+    display.setTextColor(RGB565_WHITE);
+    display.setTextSize(1);
+    display.setCursor(32, y + 8);
+    if (tubesVersion)
+      display.printf("ID %03X   v%u   uplink %03X\n", nodeId, tubesVersion, uplinkId);
+    else
+      display.printf("ID %03X   v?   uplink %03X\n", nodeId, uplinkId);
+    display.setTextColor(COLOR_MUTED);
+    display.setCursor(32, y + 24);
+    if (ageSeconds == UINT32_MAX) display.println(F("this device"));
+    else display.printf("last heard %lus ago\n", ageSeconds);
+  }
+
+  void drawChannelRow(int16_t y, const char *name, const TubesS3ChannelStatus &channel,
+                      const char *currentValue) {
     display.setCursor(24, y);
     if (channel.active)
-      display.printf("%s %03X by %03X  %lus\n", name, channel.ownerChannelId,
-          channel.ownerControlId, channel.leaseRemainingMs / 1000);
+      display.printf("%s  %s\n     owner %03X / control %03X\n", name, currentValue,
+          channel.ownerChannelId, channel.ownerControlId);
     else
-      display.printf("%s local %03X  unclaimed\n", name, channel.localChannelId);
+      display.printf("%s  %s\n     local %03X / unclaimed\n", name, currentValue,
+          channel.localChannelId);
   }
 
   void drawSurveyorContent() {
@@ -255,34 +278,24 @@ private:
       }
       if (position < 7) sorted[position] = candidate;
     }
-    display.fillRoundRect(20, 76, 440, 64, 12, COLOR_PRIMARY);
-    display.setTextColor(RGB565_WHITE);
-    display.setTextSize(2);
-    display.setCursor(36, 90);
-    display.println(F("THIS S3"));
-    display.setTextSize(1);
-    display.setCursor(220, 96);
-    display.printf("%03X  %s  ch %u\n", status.localNodeId,
-        status.isMaster ? "LEADING" : status.isFollowing ? "FOLLOWING" : "UNLINKED",
-        status.radioChannel);
     display.setTextColor(COLOR_MUTED);
-    display.setCursor(24, 158);
+    display.setTextSize(1);
+    display.setCursor(24, 76);
+    display.println(F("THIS S3"));
+    drawDeviceIdentityRow(94, status.localNodeId, status.tubesVersion,
+                          status.uplinkId, UINT32_MAX, COLOR_PRIMARY);
+    display.setTextColor(COLOR_MUTED);
+    display.setCursor(24, 150);
     display.println(F("NEARBY DEVICES"));
     if (shown == 0) {
       display.setTextColor(RGB565_WHITE);
-      display.setCursor(24, 194);
+      display.setCursor(24, 180);
       display.println(F("No other Tubes heard in the last 60 seconds."));
     }
     for (size_t i = 0; i < shown; i++) {
       const TubesS3PeerStatus &peer = sorted[i];
-      display.setTextColor(RGB565_WHITE);
-      display.setCursor(24, 194 + i * 34);
-      if (peer.rssiKnown)
-        display.printf("%03X -> %03X  gen%u  %ddB  age %lus\n", peer.nodeId, peer.uplinkId,
-            peer.protocolGeneration, peer.latestRssi, (now - peer.lastSeenMs) / 1000);
-      else
-        display.printf("%03X -> %03X  gen%u  RSSI --  age %lus\n", peer.nodeId, peer.uplinkId,
-            peer.protocolGeneration, (now - peer.lastSeenMs) / 1000);
+      drawDeviceIdentityRow(174 + i * 44, peer.nodeId, peer.tubesVersion,
+                            peer.uplinkId, (now - peer.lastSeenMs) / 1000);
     }
   }
 
@@ -295,44 +308,65 @@ private:
     display.setCursor(24, 76);
     display.println(F("Beat / Pattern / Palette authority"));
     display.setTextColor(RGB565_WHITE);
-    display.fillRoundRect(20, 102, 440, 42, 10, COLOR_SURFACE_RAISED);
-    display.fillRoundRect(20, 154, 440, 42, 10, COLOR_SURFACE_RAISED);
-    display.fillRoundRect(20, 206, 440, 42, 10, COLOR_SURFACE_RAISED);
-    drawChannelRow(116, "BEAT", status.beatChannel);
-    drawChannelRow(168, "PAT ", status.patternChannel);
-    drawChannelRow(220, "PAL ", status.paletteChannel);
+    display.fillRoundRect(20, 102, 440, 72, 10, COLOR_SURFACE_RAISED);
+    display.fillRoundRect(20, 184, 440, 72, 10, COLOR_SURFACE_RAISED);
+    display.fillRoundRect(20, 266, 440, 72, 10, COLOR_SURFACE_RAISED);
+    char beatValue[32];
+    char patternValue[32];
+    char paletteValue[32];
+    snprintf(beatValue, sizeof(beatValue), "%u BPM", status.bpm);
+    snprintf(patternValue, sizeof(patternValue), "%u -> %u", status.patternId, status.nextPatternId);
+    snprintf(paletteValue, sizeof(paletteValue), "%u -> %u", status.paletteId, status.nextPaletteId);
+    drawChannelRow(116, "BEAT", status.beatChannel, beatValue);
+    drawChannelRow(198, "PATTERN", status.patternChannel, patternValue);
+    drawChannelRow(280, "PALETTE", status.paletteChannel, paletteValue);
     display.setTextColor(COLOR_MUTED);
-    display.setCursor(24, 278);
-    display.printf("Pattern %u -> %u\n", status.patternId, status.nextPatternId);
-    display.setCursor(24, 304);
-    display.printf("Palette %u -> %u\n", status.paletteId, status.nextPaletteId);
-    display.setCursor(24, 356);
+    display.setCursor(24, 366);
     display.println(F("Read-only authority. Interaction controls come next."));
   }
 
   void drawUpdateContent() {
     display.fillRect(20, 68, 440, 372, COLOR_BACKGROUND);
 #ifdef TUBES_S3_FIRMWARE_CARRIER
-    drawButton({{20, 70, 150, 50}, COLOR_PRIMARY, F("Scan")});
+    TubesS3FieldStatus status;
+    tubesS3ReadStatus(status);
+    display.setTextColor(COLOR_MUTED);
+    display.setTextSize(1);
+    display.setCursor(24, 72);
+    display.println(F("THIS S3 UPDATE CARRIER"));
+    drawDeviceIdentityRow(88, status.localNodeId, status.tubesVersion,
+                          status.uplinkId, UINT32_MAX, COLOR_PRIMARY);
+    display.setTextColor(COLOR_MUTED);
+    display.setCursor(24, 138);
+    display.println(F("FIRMWARE AVAILABLE"));
+    for (size_t index = 0; index < tubesS3CarrierArtifactCount(); index++) {
+      TubesS3CarrierArtifact artifact;
+      if (!tubesS3ReadCarrierArtifact(index, artifact)) continue;
+      const int16_t y = 154 + index * 38;
+      display.fillRoundRect(20, y, 440, 32, 8, COLOR_SURFACE_RAISED);
+      display.setTextColor(RGB565_WHITE);
+      display.setCursor(32, y + 11);
+      display.printf("%s standard   v%u   %lu KB\n",
+          artifact.family == 1 ? "Dig2Go" : "Athom C3", artifact.release,
+          static_cast<unsigned long>(artifact.size / 1024));
+    }
+    drawButton({{20, 236, 150, 46}, COLOR_PRIMARY, F("Scan")});
     TubesS3CarrierStatus carrier;
     tubesS3ReadCarrierStatus(carrier);
     display.setTextSize(1);
     display.setTextColor(COLOR_MUTED);
-    display.setCursor(190, 88);
+    display.setCursor(190, 252);
     display.printf("state %u  release %u\n", carrier.state, carrier.release);
+    display.setCursor(24, 294);
+    display.println(F("NEARBY DEVICES"));
     const size_t count = tubesS3CarrierTargetCount();
     display.setTextColor(RGB565_WHITE);
     for (size_t index = 0; index < count && index < 7; index++) {
       TubesS3CarrierTarget target;
       if (!tubesS3ReadCarrierTarget(index, target)) continue;
-      const int16_t y = 140 + index * 44;
-      display.fillRoundRect(20, y, 440, 36, 8, COLOR_SURFACE_RAISED);
-      display.setCursor(32, y + 12);
-      display.printf("%02X%02X%02X%02X%02X%02X  %s  v%u\n",
-          target.mac[0], target.mac[1], target.mac[2], target.mac[3],
-          target.mac[4], target.mac[5],
-          target.family == 1 ? "Dig2Go" : "Athom C3",
-          target.release);
+      const int16_t y = 310 + index * 44;
+      drawDeviceIdentityRow(y, target.nodeId, target.release, target.uplinkId,
+                            (millis() - target.lastSeenMs) / 1000);
     }
 #else
     display.setTextColor(COLOR_MUTED);
@@ -357,21 +391,28 @@ private:
       if (full) owner.drawChrome(viewTitle, viewId != FieldViewId::Home);
       renderContent(full);
       lastRefreshMs = millis();
+      lastRevision = revision();
     }
     virtual FieldViewId tap(int16_t, int16_t) { return viewId; }
     virtual void tick(uint32_t now) {
-      if (refreshIntervalMs && now - lastRefreshMs >= refreshIntervalMs) render(false);
+      if (refreshIntervalMs && now - lastRefreshMs >= refreshIntervalMs) {
+        lastRefreshMs = now;
+        const uint32_t nextRevision = revision();
+        if (nextRevision != lastRevision) render(false);
+      }
     }
 
   protected:
     WaveshareS3FieldOs &owner;
     virtual void renderContent(bool full) = 0;
     uint32_t lastRefreshMs = 0;
+    virtual uint32_t revision() { return 0; }
 
   private:
     FieldViewId viewId;
     const __FlashStringHelper *viewTitle;
     uint32_t refreshIntervalMs;
+    uint32_t lastRevision = 0;
   };
 
   class HomeView final : public FieldView {
@@ -397,7 +438,10 @@ private:
       if (Rect{120, 315, 240, 100}.contains(x, y)) {
         TubesS3FieldStatus status;
         tubesS3ReadStatus(status);
-        if (status.canForceNext) owner.nextSendFailed = !tubesS3ForceNext();
+        if (status.canForceNext) {
+          owner.nextSendFailed = !tubesS3ForceNext();
+          owner.drawConductorContent(false);
+        }
       }
       return FieldViewId::Conductor;
     }
@@ -428,6 +472,20 @@ private:
         : FieldView(owner, FieldViewId::Surveyor, F("Surveyor"), SAMPLE_INTERVAL_MS) {}
   protected:
     void renderContent(bool) override { owner.drawSurveyorContent(); }
+    uint32_t revision() override {
+      TubesS3FieldStatus status;
+      tubesS3ReadStatus(status);
+      uint32_t value = owner.mixRevision(status.localNodeId, status.tubesVersion);
+      value = owner.mixRevision(value, status.uplinkId);
+      for (size_t index = 0; index < status.peerCount; index++) {
+        TubesS3PeerStatus peer;
+        if (!tubesS3ReadPeer(index, peer)) continue;
+        value = owner.mixRevision(value, peer.nodeId);
+        value = owner.mixRevision(value, peer.uplinkId);
+        value = owner.mixRevision(value, peer.tubesVersion);
+      }
+      return value;
+    }
   };
 
   class UpdateView final : public FieldView {
@@ -436,10 +494,10 @@ private:
         : FieldView(owner, FieldViewId::Update, F("Update"), SAMPLE_INTERVAL_MS) {}
     FieldViewId tap(int16_t x, int16_t y) override {
 #ifdef TUBES_S3_FIRMWARE_CARRIER
-      if (Rect{20, 70, 150, 55}.contains(x, y)) {
+      if (Rect{20, 230, 150, 60}.contains(x, y)) {
         tubesS3ScanCarrierTargets();
-      } else if (y >= 140) {
-        const size_t index = (y - 140) / 44;
+      } else if (y >= 304) {
+        const size_t index = (y - 310) / 44;
         TubesS3CarrierTarget target;
         if (tubesS3ReadCarrierTarget(index, target))
           tubesS3ArmCarrier(target.mac, target.family, target.variant, target.release);
@@ -449,6 +507,25 @@ private:
     }
   protected:
     void renderContent(bool) override { owner.drawUpdateContent(); }
+    uint32_t revision() override {
+#ifdef TUBES_S3_FIRMWARE_CARRIER
+      TubesS3CarrierStatus carrier;
+      tubesS3ReadCarrierStatus(carrier);
+      uint32_t value = owner.mixRevision(carrier.state, carrier.release);
+      const size_t count = tubesS3CarrierTargetCount();
+      value = owner.mixRevision(value, count);
+      for (size_t index = 0; index < count; index++) {
+        TubesS3CarrierTarget target;
+        if (!tubesS3ReadCarrierTarget(index, target)) continue;
+        value = owner.mixRevision(value, target.nodeId);
+        value = owner.mixRevision(value, target.uplinkId);
+        value = owner.mixRevision(value, target.release);
+      }
+      return value;
+#else
+      return 0;
+#endif
+    }
   };
 
   class ChannelsView final : public FieldView {
@@ -457,6 +534,20 @@ private:
         : FieldView(owner, FieldViewId::Channels, F("Channels"), SAMPLE_INTERVAL_MS) {}
   protected:
     void renderContent(bool) override { owner.drawChannelsContent(); }
+    uint32_t revision() override {
+      TubesS3FieldStatus status;
+      tubesS3ReadStatus(status);
+      uint32_t value = owner.mixRevision(status.bpm, status.beatChannel.active);
+      value = owner.mixRevision(value, status.patternId | (status.nextPatternId << 8));
+      value = owner.mixRevision(value, status.paletteId | (status.nextPaletteId << 8));
+      value = owner.mixRevision(value, status.beatChannel.ownerChannelId);
+      value = owner.mixRevision(value, status.beatChannel.ownerControlId);
+      value = owner.mixRevision(value, status.patternChannel.ownerChannelId);
+      value = owner.mixRevision(value, status.patternChannel.ownerControlId);
+      value = owner.mixRevision(value, status.paletteChannel.ownerChannelId);
+      value = owner.mixRevision(value, status.paletteChannel.ownerControlId);
+      return value;
+    }
   };
 
   class ViewManager {
@@ -475,7 +566,6 @@ private:
       }
       const FieldViewId destination = active->tap(x, y);
       if (destination != active->id()) navigate(destination);
-      else active->render(false);
     }
 
   private:

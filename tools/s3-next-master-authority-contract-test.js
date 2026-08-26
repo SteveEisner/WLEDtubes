@@ -20,5 +20,5 @@ test('authority gate precedes the only local canonical mutation', () => {
 
 test('Field OS disables followers and rechecks authority on touch', () => {
   assert.match(ui, /if \(!status\.canForceNext\)/);
-  assert.match(ui, /if \(status\.canForceNext\) owner\.nextSendFailed = !tubesS3ForceNext\(\)/);
+  assert.match(ui, /if \(status\.canForceNext\) \{\s*owner\.nextSendFailed = !tubesS3ForceNext\(\)/);
 });

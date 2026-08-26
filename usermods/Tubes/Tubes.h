@@ -142,6 +142,7 @@ class TubesUsermod : public Usermod {
       status.nextPatternPhrase = controller.next_state.pattern_phrase;
       status.localNodeId = controller.node.header.id;
       status.uplinkId = controller.node.header.uplinkId;
+      status.tubesVersion = RELEASE_VERSION;
       status.currentSyncMode = controller.current_state.pattern_sync_id;
       status.nextPatternId = controller.next_state.pattern_id;
       status.nextSyncMode = controller.next_state.pattern_sync_id;
@@ -184,6 +185,7 @@ class TubesUsermod : public Usermod {
       peer.samples = entry->samples;
       peer.latestRssi = entry->latestRssi;
       peer.protocolGeneration = entry->protocolGeneration;
+      peer.tubesVersion = entry->tubesVersion;
       peer.rssiKnown = entry->rssiKnown;
       return true;
     }

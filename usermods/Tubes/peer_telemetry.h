@@ -15,6 +15,7 @@ struct PeerTelemetryEntry {
   int8_t minimumRssi = 0;
   int8_t maximumRssi = 0;
   uint8_t protocolGeneration = 0;
+  uint16_t tubesVersion = 0;
   bool rssiKnown = false;
 };
 
@@ -42,6 +43,18 @@ public:
     if (rssi < entry->minimumRssi) entry->minimumRssi = rssi;
     if (rssi > entry->maximumRssi) entry->maximumRssi = rssi;
     entry->smoothedRssi = static_cast<int16_t>((entry->smoothedRssi * 3 + rssi) / 4);
+  }
+
+  void observeIdentity(uint16_t nodeId, uint16_t uplinkId, uint16_t tubesVersion,
+                       uint32_t now) {
+    if (nodeId == 0) return;
+    PeerTelemetryEntry *entry = find(nodeId);
+    if (entry == nullptr) entry = allocate(now);
+    if (entry->nodeId != nodeId) *entry = PeerTelemetryEntry{};
+    entry->nodeId = nodeId;
+    entry->uplinkId = uplinkId;
+    entry->tubesVersion = tubesVersion;
+    entry->lastSeenMs = now;
   }
 
   size_t count() const {

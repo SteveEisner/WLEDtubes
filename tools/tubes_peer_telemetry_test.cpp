@@ -13,8 +13,10 @@ int main() {
   telemetry.observe(0x1101, 0x1102, 1, -50, 300);
   assert(unknown->rssiKnown && unknown->minimumRssi == -70 && unknown->maximumRssi == -50);
   assert(unknown->smoothedRssi == -65 && unknown->uplinkId == 0x1102);
-  assert(telemetry.freshCount(60300, 60000) == 1);
-  assert(telemetry.freshCount(60301, 60000) == 0);
+  telemetry.observeIdentity(0x1101, 0x1103, 47, 350);
+  assert(unknown->tubesVersion == 47 && unknown->uplinkId == 0x1103);
+  assert(telemetry.freshCount(60350, 60000) == 1);
+  assert(telemetry.freshCount(60351, 60000) == 0);
   for (uint16_t i = 0; i < TUBES_PEER_TELEMETRY_CAPACITY - 1; i++)
     telemetry.observe(0x1200 + i, 0x1100, 1, -60, 400 + i);
   assert(telemetry.count() == TUBES_PEER_TELEMETRY_CAPACITY);

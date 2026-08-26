@@ -26,6 +26,7 @@ struct TubesS3PeerStatus {
   uint32_t samples = 0;
   int8_t latestRssi = 0;
   uint8_t protocolGeneration = 0;
+  uint16_t tubesVersion = 0;
   bool rssiKnown = false;
 };
 
@@ -42,6 +43,15 @@ struct TubesS3CarrierTarget {
   uint8_t variant = 0;
   uint16_t release = 0;
   uint32_t lastSeenMs = 0;
+  uint16_t nodeId = 0;
+  uint16_t uplinkId = 0;
+};
+
+struct TubesS3CarrierArtifact {
+  uint8_t family = 0;
+  uint8_t variant = 0;
+  uint16_t release = 0;
+  uint32_t size = 0;
 };
 
 struct TubesS3FieldStatus {
@@ -61,6 +71,7 @@ struct TubesS3FieldStatus {
   uint16_t nextPatternPhrase = 0;
   uint16_t localNodeId = 0;
   uint16_t uplinkId = 0;
+  uint16_t tubesVersion = 0;
   uint8_t currentSyncMode = 0;
   uint8_t nextPatternId = 0;
   uint8_t nextSyncMode = 0;
@@ -89,3 +100,5 @@ void tubesS3CarrierObserveDeviceReport(const DeviceReportMessage &report);
 bool tubesS3ScanCarrierTargets();
 size_t tubesS3CarrierTargetCount();
 bool tubesS3ReadCarrierTarget(size_t index, TubesS3CarrierTarget &target);
+size_t tubesS3CarrierArtifactCount();
+bool tubesS3ReadCarrierArtifact(size_t index, TubesS3CarrierArtifact &artifact);

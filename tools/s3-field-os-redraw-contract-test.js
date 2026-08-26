@@ -15,6 +15,8 @@ test('periodic refreshes update content without clearing whole screens', () => {
   const loop = source.match(/void loop\(\) override \{([\s\S]*?)\n  \}\n\n  void addToJsonInfo/)[1];
   assert.doesNotMatch(loop, /fillScreen|drawSurveyorContent|drawUpdateContent|drawChannelsContent/);
   assert.match(loop, /viewManager\.tick\(millis\(\)\)/);
+  assert.match(source, /if \(nextRevision != lastRevision\) render\(false\)/);
+  assert.doesNotMatch(source, /else active->render\(false\)/);
 });
 
 test('all workspaces share one inherited lifecycle and one view manager', () => {

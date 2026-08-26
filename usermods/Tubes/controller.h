@@ -4445,6 +4445,10 @@ class PatternController : public MessageReceiver {
 
     if (message.kind == DeviceReportReply) {
       printDeviceReport(message);
+#ifdef TUBES_S3_FIELD_OS
+      node.peerTelemetry.observeIdentity(message.nodeId, message.uplinkId,
+                                         message.tubesVersion, millis());
+#endif
 #ifdef TUBES_S3_FIRMWARE_CARRIER
       tubesS3CarrierObserveDeviceReport(message);
 #endif
