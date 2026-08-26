@@ -75,6 +75,8 @@ class TubesUsermod : public Usermod
     uint32_t modernPropagationSourceNonce = 0;
     uint32_t modernPropagationBatonUntil = 0;
     uint32_t modernPropagationNextBatonAt = 0;
+    bool legacyMigrationBootCandidate = false;
+    bool currentReleaseMarkerWritten = false;
     static constexpr uint32_t LEGACY_BOOTSTRAP_BATON_WINDOW_MS = 60000;
     static constexpr uint32_t LEGACY_BOOTSTRAP_SOURCE_QUIET_MS = 5000;
     static constexpr uint32_t LEGACY_BOOTSTRAP_BATON_GRACE_MS = 15000;
@@ -126,9 +128,12 @@ class TubesUsermod : public Usermod
           return true;
         }
         if (!isFreshLegacyBootstrapBaton(
-                offer, RELEASE_VERSION, millis(), LEGACY_BOOTSTRAP_BATON_WINDOW_MS)
+                offer, RELEASE_VERSION, millis(), LEGACY_BOOTSTRAP_BATON_WINDOW_MS,
+                legacyMigrationBootCandidate)
             || !legacyPullCanAcceptExplicitTurn(modernPropagationTurn))
           return false;
+        currentReleaseMarkerWritten = writeCurrentReleaseMarker(RELEASE_VERSION);
+        legacyMigrationBootCandidate = false;
         initializePeerPropagationTurn();
         modernPropagationTurn = true;
         modernPropagationWaitForSourceQuiet = true;
@@ -525,8 +530,19 @@ class TubesUsermod : public Usermod
       controller.setup();
 #if defined(TUBES_DIG2GO_LEGACY_PULL_HOST)
       legacyPullHost.setup();
+      currentReleaseMarkerWritten = hasCurrentReleaseMarker(RELEASE_VERSION);
+      legacyMigrationBootCandidate = !currentReleaseMarkerWritten
+          && esp_reset_reason() == ESP_RST_SW;
+      if (!currentReleaseMarkerWritten && !legacyMigrationBootCandidate)
+        currentReleaseMarkerWritten = writeCurrentReleaseMarker(RELEASE_VERSION);
+      Serial.printf("FLEET_PROPAGATION bootstrap_candidate=%u marker=%u reset=%u\n",
+          legacyMigrationBootCandidate, currentReleaseMarkerWritten,
+          static_cast<unsigned>(esp_reset_reason()));
       ModernPropagationLeaseRecord modernLease;
       if (claimStoredModernPropagationLease(modernLease, RELEASE_VERSION)) {
+        currentReleaseMarkerWritten = writeCurrentReleaseMarker(RELEASE_VERSION)
+            || currentReleaseMarkerWritten;
+        legacyMigrationBootCandidate = false;
         modernPropagationTurn = true;
         modernPropagationNonce = esp_random();
         if (modernPropagationNonce == 0) modernPropagationNonce = 1;
@@ -604,6 +620,13 @@ class TubesUsermod : public Usermod
       }
       controller.update();
 #if defined(TUBES_DIG2GO_LEGACY_PULL_HOST)
+      if (!currentReleaseMarkerWritten
+          && millis() > LEGACY_BOOTSTRAP_BATON_WINDOW_MS) {
+        currentReleaseMarkerWritten = writeCurrentReleaseMarker(RELEASE_VERSION);
+        legacyMigrationBootCandidate = false;
+        Serial.printf("FLEET_PROPAGATION marker_written=%u\n",
+            currentReleaseMarkerWritten);
+      }
       const uint32_t legacyHostStartMs = modernPropagationTurn
           ? modernPropagationStartAt : 15000;
       const bool legacyBootEligible = dig2GoIsPrime

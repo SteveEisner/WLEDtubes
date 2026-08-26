@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdio.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -69,14 +70,28 @@ inline bool isFreshLegacyBootstrapBaton(
     const FleetUpdateOffer& offer,
     uint16_t runningVersion,
     uint32_t uptimeMs,
-    uint32_t bootWindowMs
+    uint32_t bootWindowMs,
+    bool legacyMigrationBoot
 ) {
   return isValidFleetUpdateOffer(offer)
+      && legacyMigrationBoot
       && (offer.flags & FleetUpdatePropagate)
       && offer.serverPort != 0
       && offer.targetDeviceId == 0
       && offer.tubesVersion == runningVersion
       && uptimeMs <= bootWindowMs;
+}
+
+inline bool makeModernPropagationSessionSSID(
+    char* destination,
+    size_t capacity,
+    uint32_t nonce
+) {
+  if (!destination || capacity < 15 || nonce == 0) return false;
+  // Steve's v1 offer has 22 combined credential bytes. Fourteen bytes here
+  // leave the unchanged eight-byte Tubes password intact.
+  return snprintf(destination, capacity, "Tubes-%08lX",
+      static_cast<unsigned long>(nonce)) == 14;
 }
 
 inline ModernPropagationLeaseRecord makeModernPropagationLease(

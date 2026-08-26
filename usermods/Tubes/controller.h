@@ -458,6 +458,7 @@ class PatternController : public MessageReceiver {
     Dig2GoBridgeReportCallback dig2GoBridgeReportCallback = nullptr;
     Dig2GoPropagationCallback dig2GoPropagationCallback = nullptr;
     UpdateWorkflowStatus dig2GoBridgeOverlayStatus = Idle;
+    bool fleetPropagationTransportSuspended = false;
 #endif
 
     Energy energy=Chill;
@@ -1854,6 +1855,19 @@ class PatternController : public MessageReceiver {
     }
 
     updater.update();
+
+#if TUBES_ENABLE_DIG2GO_PUSH_BRIDGE
+    // A propagated pull writes flash synchronously. Leaving the Tubes receive
+    // callback active during that write can fill QuickESPNow's small queue and
+    // spend the transfer reporting drops from the Wi-Fi task. Successful pulls
+    // reboot; failed pulls must restore the mesh so a distinct child nonce can
+    // retry them.
+    if (fleetPropagationTransportSuspended && updater.status == Failed) {
+      restoreMeshRadioAfterDig2Go();
+      fleetPropagationTransportSuspended = false;
+      Serial.println(F("FLEET_OTA mesh_restored_after_failure"));
+    }
+#endif
 
     // WLED state changes above may rebuild its stored segment list; reserve our runtime layer last.
     ensureSoundOverlaySegment();
@@ -4891,6 +4905,13 @@ class PatternController : public MessageReceiver {
         }
         if (targeted && !isHomeLightRole()) {
           const bool accepted = updater.startFleet(offer);
+#if TUBES_ENABLE_DIG2GO_PUSH_BRIDGE
+          if (accepted && (offer.flags & FleetUpdatePropagate)) {
+            node.suspendTransportForStationJoin(true);
+            fleetPropagationTransportSuspended = true;
+            Serial.println(F("FLEET_OTA mesh_suspended_for_propagation"));
+          }
+#endif
           Serial.printf("FLEET_RX transition=%s updater=%u active=%u\n",
               accepted ? "accepted" : "rejected", updater.status,
               updater.fleetUpdateActive);

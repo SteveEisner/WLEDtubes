@@ -12,11 +12,12 @@ void expect(bool condition, const std::string& message) {
 constexpr uint32_t REQUEST_TIMEOUT = 360000;
 constexpr uint32_t STREAM_TIMEOUT = 20000;
 constexpr uint32_t ASSOCIATED_TIMEOUT = 20000;
+constexpr uint32_t FINAL_DRAIN = 3000;
 constexpr uint32_t SECOND_GRACE = 60000;
 
 LegacyPullHostRestoreReason reason(const LegacyPullHostLifecycle& state, uint32_t now) {
   return legacyPullHostRestoreReason(state, now, REQUEST_TIMEOUT, STREAM_TIMEOUT,
-      ASSOCIATED_TIMEOUT, SECOND_GRACE);
+      ASSOCIATED_TIMEOUT, FINAL_DRAIN, SECOND_GRACE);
 }
 
 void associatedWithoutRequestRecoversBoundedly() {
@@ -30,15 +31,17 @@ void associatedWithoutRequestRecoversBoundedly() {
       "associated receiver pinned the host until the rendezvous timeout");
 }
 
-void bothCompletedLifetimeSlotsRestoreImmediately() {
+void bothCompletedLifetimeSlotsDrainBeforeRestore() {
   LegacyPullHostLifecycle state;
   state.startedAt = 100;
   state.requestSeen = true;
   state.bodyComplete = true;
   state.completedAt = 2000;
   state.allLifetimeSlotsUsed = true;
-  expect(reason(state, 2000) == LegacyPullHostAllSlotsComplete,
-      "two completed lifetime slots waited through second-receiver grace");
+  expect(reason(state, 2000 + FINAL_DRAIN - 1) == LegacyPullHostKeepServing,
+      "last response lost its bounded TCP drain interval");
+  expect(reason(state, 2000 + FINAL_DRAIN) == LegacyPullHostAllSlotsComplete,
+      "two completed lifetime slots outlived the final response drain");
 }
 
 void twoAdmittedButOnlyOneCompletedRetainsGrace() {
@@ -114,7 +117,7 @@ void terminalTurnCannotAutoRepeatButExplicitTurnCanRearm() {
 
 int main() {
   associatedWithoutRequestRecoversBoundedly();
-  bothCompletedLifetimeSlotsRestoreImmediately();
+  bothCompletedLifetimeSlotsDrainBeforeRestore();
   twoAdmittedButOnlyOneCompletedRetainsGrace();
   oneCompletedSlotRetainsSecondReceiverGrace();
   activePartialBodyUsesProgressDeadline();

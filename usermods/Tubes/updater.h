@@ -407,7 +407,12 @@ class AutoUpdater {
         memset(fleetOffer.credentials, 0, sizeof(fleetOffer.credentials));
         fleetUpdateActive = false;
         status = Failed;
-        displayStatusTimer.start(30000);
+        // A fanout host intentionally retires after two complete bodies. A
+        // third receiver may already have joined that AP and receive a 403 as
+        // the second slot closes. Keep the failure visible briefly, then make
+        // the receiver eligible for a newly migrated peer's distinct offer.
+        // The nonce guard still prevents it from retrying the retired host.
+        displayStatusTimer.start(1500);
     }
     // AI: end
 

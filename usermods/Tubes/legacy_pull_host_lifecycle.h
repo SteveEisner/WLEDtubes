@@ -37,6 +37,7 @@ inline LegacyPullHostRestoreReason legacyPullHostRestoreReason(
     uint32_t requestTimeoutMs,
     uint32_t streamIdleTimeoutMs,
     uint32_t associatedRequestTimeoutMs,
+    uint32_t finalResponseDrainMs,
     uint32_t secondReceiverGraceMs
 ) {
   if (state.restoreRequested) return LegacyPullHostRestoreRequested;
@@ -46,8 +47,14 @@ inline LegacyPullHostRestoreReason legacyPullHostRestoreReason(
       return LegacyPullHostStreamStalled;
     return LegacyPullHostKeepServing;
   }
-  if (state.bodyComplete && state.allLifetimeSlotsUsed)
-    return LegacyPullHostAllSlotsComplete;
+  // AsyncAbstractResponse reports complete when the final source bytes have
+  // entered its TCP send buffer. Keep the AP alive briefly so the last client
+  // can consume them, verify the image, and commit its OTA slot before teardown.
+  if (state.bodyComplete && state.allLifetimeSlotsUsed) {
+    if (legacyPullDeadlineReached(now, state.completedAt, finalResponseDrainMs))
+      return LegacyPullHostAllSlotsComplete;
+    return LegacyPullHostKeepServing;
+  }
   if (state.bodyComplete) {
     if (legacyPullDeadlineReached(now, state.completedAt, secondReceiverGraceMs))
       return LegacyPullHostSecondReceiverGraceElapsed;

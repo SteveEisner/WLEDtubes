@@ -174,6 +174,7 @@ public:
   static constexpr uint32_t REQUEST_TIMEOUT_MS = 360000;
   static constexpr uint32_t STREAM_IDLE_TIMEOUT_MS = 20000;
   static constexpr uint32_t ASSOCIATED_REQUEST_TIMEOUT_MS = 20000;
+  static constexpr uint32_t FINAL_RESPONSE_DRAIN_MS = 3000;
   // Once every download that actually started has completed, leave one short
   // admission window for a second woken receiver. A station that associated but
   // never requested the image must not pin the host for the full six minutes.
@@ -235,9 +236,15 @@ public:
     _modernTurn.release = release;
     _modernTurn.hardwareFamily = hardwareFamily;
     _modernTurn.firmwareVariant = firmwareVariant;
+    if (!makeModernPropagationSessionSSID(
+            _sessionSSID, sizeof(_sessionSSID), nonce))
+      strlcpy(_sessionSSID, SSID, sizeof(_sessionSSID));
   }
 
-  void clearModernTurn() { _modernTurn = ModernPeerRequestIdentity(); }
+  void clearModernTurn() {
+    _modernTurn = ModernPeerRequestIdentity();
+    strlcpy(_sessionSSID, SSID, sizeof(_sessionSSID));
+  }
 
   bool prepare() {
     if (_prepared) return true;
@@ -263,7 +270,7 @@ public:
     _storedAPBehavior = apBehavior;
     _storedAPChannel = apChannel;
     _configurationOverridden = true;
-    strlcpy(apSSID, SSID, sizeof(apSSID));
+    strlcpy(apSSID, _sessionSSID, sizeof(apSSID));
     strlcpy(apPass, PASSWORD, sizeof(apPass));
     apBehavior = AP_BEHAVIOR_ALWAYS;
     apChannel = WLED_ESPNOW_WIFI_CHANNEL;
@@ -294,7 +301,7 @@ public:
       stop();
       return false;
     }
-    Serial.printf("TUBE_PULL_HOST ready ssid=%s ip=%s\n", SSID,
+    Serial.printf("TUBE_PULL_HOST ready ssid=%s ip=%s\n", _sessionSSID,
         WiFi.softAPIP().toString().c_str());
     return true;
   }
@@ -315,7 +322,8 @@ public:
     lifecycle.allLifetimeSlotsUsed = LegacyPullTelemetry::completedCount() >= 2;
     return legacyPullHostRestoreReason(lifecycle, now, REQUEST_TIMEOUT_MS,
         STREAM_IDLE_TIMEOUT_MS, ASSOCIATED_REQUEST_TIMEOUT_MS,
-        SECOND_RECEIVER_GRACE_MS) != LegacyPullHostKeepServing;
+        FINAL_RESPONSE_DRAIN_MS, SECOND_RECEIVER_GRACE_MS)
+        != LegacyPullHostKeepServing;
   }
 
   void requestRestore() { _restoreRequested = true; }
@@ -367,7 +375,7 @@ public:
   bool stationSeen() const { return LegacyPullTelemetry::stationSeen(); }
   bool requestSeen() const { return LegacyPullTelemetry::requestSeen(); }
   bool capacityReached() const { return LegacyPullTelemetry::admittedCount() >= 2; }
-  const char* sessionSSID() const { return SSID; }
+  const char* sessionSSID() const { return _sessionSSID; }
   const char* sessionPassword() const { return PASSWORD; }
   bool hasEnrollment() const { return _hasEnrollment; }
   bool copyEnrolledMac(uint8_t mac[6]) const {
@@ -488,6 +496,7 @@ private:
   uint8_t _lastStationCount = 0;
   uint8_t _concurrentCapacity = 1;
   uint32_t _startedAt = 0;
+  char _sessionSSID[25] = "TubesOTA";
   ModernPeerRequestIdentity _modernTurn;
 };
 
