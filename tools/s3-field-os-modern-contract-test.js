@@ -32,6 +32,7 @@ test('channel ownership has a dedicated reserved workspace', () => {
   assert.match(ui, /void drawChannelsContent\(\)/);
   assert.match(ui, /LIVE CHANNEL AUTHORITY/);
   assert.match(ui, /READ ONLY/);
+  assert.match(ui, /display\.printf\("%s: %s", name, currentValue\)/);
   assert.match(ui, /Owned by channel %03X \/ control %03X/);
   assert.doesNotMatch(ui, /FieldViewId::Status/);
 });

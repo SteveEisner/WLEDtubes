@@ -25,6 +25,7 @@
 
 #ifdef TUBES_S3_FIELD_OS
 #include "../Tubes/s3_field_api.h"
+#include "../Tubes/device_report_protocol.h"
 #endif
 
 namespace {
@@ -185,7 +186,7 @@ private:
   void drawConductorTelemetry(const TubesS3FieldStatus &status) {
     display.fillRect(20, 68, 440, 108, COLOR_BACKGROUND);
     drawDeviceCard(68, {status.localNodeId, status.tubesVersion, status.uplinkId,
-                       UINT32_MAX, "THIS S3 / CONDUCTOR"});
+                       UINT32_MAX, "THIS DEVICE"});
     display.setTextColor(RGB565_WHITE);
     display.setTextSize(2);
     display.setCursor(24, 132);
@@ -257,24 +258,23 @@ private:
                       uint16_t color = COLOR_SURFACE_RAISED) {
     display.fillRoundRect(20, y, 440, 62, 10, color);
     display.setTextColor(RGB565_WHITE);
-    display.setTextSize(1);
-    display.setCursor(34, y + 9);
-    display.printf("%s", device.kind);
     display.setTextSize(2);
-    display.setCursor(34, y + 23);
-    if (device.id) display.printf("ID %04X", device.id);
-    else display.print(F("ID unknown"));
-    display.setCursor(252, y + 23);
+    display.setCursor(34, y + 7);
+    display.printf("%s", device.kind);
+    display.setTextSize(1);
+    display.setCursor(34, y + 31);
+    if (device.id) display.printf("ID: %04X", device.id);
+    else display.print(F("ID: UNKNOWN"));
+    display.print(F(" | VERSION: "));
     if (device.version) display.printf("v%u", device.version);
-    else display.print(F("version unknown"));
+    else display.print(F("UNKNOWN"));
     display.setTextColor(COLOR_MUTED);
     display.setTextSize(1);
     display.setCursor(34, y + 49);
-    if (device.uplinkId) display.printf("Uplink %04X", device.uplinkId);
-    else display.print(F("Uplink none"));
-    display.setCursor(252, y + 49);
-    if (device.ageSeconds == UINT32_MAX) display.print(F("This device"));
-    else display.printf("Heard %lus ago", device.ageSeconds);
+    if (device.uplinkId) display.printf("UPLINK: %04X", device.uplinkId);
+    else display.print(F("UPLINK: NONE"));
+    if (device.ageSeconds != UINT32_MAX)
+      display.printf(" | HEARD: %lus AGO", device.ageSeconds);
   }
 
   void drawChannelCard(int16_t y, const char *name, const TubesS3ChannelStatus &channel,
@@ -287,7 +287,7 @@ private:
     display.setTextColor(RGB565_WHITE);
     display.setTextSize(2);
     display.setCursor(34, y + 27);
-    display.printf("%s", currentValue);
+    display.printf("%s: %s", name, currentValue);
     display.setTextColor(COLOR_MUTED);
     display.setTextSize(1);
     display.setCursor(34, y + 55);
@@ -323,7 +323,7 @@ private:
     display.setCursor(24, 76);
     display.println(F("THIS S3"));
     drawDeviceCard(92, {status.localNodeId, status.tubesVersion, status.uplinkId,
-                        UINT32_MAX, "S3 FIELD CONSOLE"});
+                        UINT32_MAX, "THIS DEVICE"});
     display.setTextColor(COLOR_MUTED);
     display.setCursor(24, 160);
     display.println(F("NEARBY DEVICES"));
@@ -345,7 +345,7 @@ private:
     display.fillRect(20, 70, 440, 370, COLOR_BACKGROUND);
     display.setTextSize(1);
     drawDeviceCard(72, {status.localNodeId, status.tubesVersion, status.uplinkId,
-                        UINT32_MAX, "THIS S3"});
+                        UINT32_MAX, "THIS DEVICE"});
     display.setTextColor(COLOR_MUTED);
     display.setCursor(24, 142);
     display.println(F("LIVE CHANNEL AUTHORITY"));
@@ -372,20 +372,27 @@ private:
     display.setCursor(24, 72);
     display.println(F("THIS S3 UPDATE CARRIER"));
     drawDeviceCard(88, {status.localNodeId, status.tubesVersion, status.uplinkId,
-                        UINT32_MAX, "THIS S3 UPDATE CARRIER"});
+                        UINT32_MAX, "THIS DEVICE"});
     display.setTextColor(COLOR_MUTED);
     display.setCursor(24, 158);
     display.println(F("EMBEDDED v47 FIRMWARE"));
     for (size_t index = 0; index < tubesS3CarrierArtifactCount(); index++) {
       TubesS3CarrierArtifact artifact;
-      if (!tubesS3ReadCarrierArtifact(index, artifact)) continue;
       const int16_t y = 174 + index * 38;
       display.fillRoundRect(20, y, 440, 32, 8, COLOR_SURFACE_RAISED);
       display.setTextColor(RGB565_WHITE);
+      display.setTextSize(2);
       display.setCursor(32, y + 11);
-      display.printf("%s / standard   v%u   %lu KB\n",
-          artifact.family == 1 ? "Dig2Go" : "Athom C3", artifact.release,
-          static_cast<unsigned long>(artifact.size / 1024));
+      if (!tubesS3ReadCarrierArtifact(index, artifact)) {
+        display.print(F("ARTIFACT UNAVAILABLE"));
+      } else {
+        if (artifact.family == TubeHardwareDig2Go) display.print(F("DIG2GO"));
+        else if (artifact.family == TubeHardwareAthomC3) display.print(F("ATHOM C3"));
+        else display.print(F("UNKNOWN TARGET"));
+        if (artifact.variant == TubeVariantStandard) display.print(F(" | STANDARD | v"));
+        else display.print(F(" | VARIANT UNKNOWN | v"));
+        display.print(artifact.release);
+      }
     }
     drawButton({{20, 258, 150, 46}, COLOR_PRIMARY, F("Scan")});
     TubesS3CarrierStatus carrier;
@@ -398,6 +405,11 @@ private:
     display.println(F("DISCOVERED UPDATE TARGETS"));
     const size_t count = tubesS3CarrierTargetCount();
     display.setTextColor(RGB565_WHITE);
+    if (count == 0) {
+      display.setTextSize(2);
+      display.setCursor(24, 348);
+      display.println(F("NO DEVICES NEARBY"));
+    }
     for (size_t index = 0; index < count && index < 2; index++) {
       TubesS3CarrierTarget target;
       if (!tubesS3ReadCarrierTarget(index, target)) continue;
