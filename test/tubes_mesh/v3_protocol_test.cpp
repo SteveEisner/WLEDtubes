@@ -342,6 +342,45 @@ void variable_pattern_snapshot_preserves_program_and_fallback() {
       "legacy Pattern snapshot failed compatibility validation");
 }
 
+// The Beat owner chooses participation policy with the exact overlay program.
+// Carrying both values prevents receivers with different local tables from diverging.
+void beat_snapshot_carries_authoritative_chance() {
+  TubesChannelMessageV2 message;
+  message.header.id = 0x1FF0;
+  message.header.version = TUBES_PROTOCOL_V3;
+  message.recipients = RECIPIENTS_ALL;
+  message.command = BeatChannel;
+  message.envelope.messageKind = ChannelDeclaration;
+  message.envelope.channelId = 0x1FF0;
+  message.envelope.sourceControlId = 0x1FF0;
+  message.envelope.sourceSession = 0x12345678;
+  message.envelope.sequence = 11;
+
+  BeatChannelSnapshot snapshot;
+  snapshot.state.bpm = 128U << 8;
+  snapshot.state.beatFrame = 80U << TUBES_BEAT_FRAME_PHRASE_SHIFT;
+  snapshot.soundProgram.current = {
+      80, SoundProgramEnabled, 188, 71, 115, 170, 96, 120, 2, 6, 10, 210};
+  snapshot.soundProgram.next = snapshot.soundProgram.current;
+  snapshot.soundProgram.next.effectivePhrase = 84;
+  snapshot.soundProgram.currentChance = 64;
+  snapshot.soundProgram.nextChance = 128;
+
+  expect(writeChannelMessageV2Body(message, snapshot), "Beat snapshot did not fit");
+  expect(channelMessageV2WireSize(message.envelope.bodyLength) < TUBES_ESPNOW_MAX_MESSAGE_SIZE,
+      "Beat snapshot exceeded ESP-NOW");
+  BeatChannelSnapshot decoded;
+  expect(readChannelMessageV2Body(message, decoded), "Beat snapshot did not decode");
+  expect(decoded.soundProgram.version == BEAT_SOUND_PROGRAM_VERSION_2,
+      "Beat snapshot used the obsolete sound-program version");
+  expect(decoded.soundProgram.currentChance == 64
+          && decoded.soundProgram.nextChance == 128,
+      "Beat owner participation chance changed on the wire");
+  expect(memcmp(&snapshot.soundProgram.current, &decoded.soundProgram.current,
+          sizeof(SoundProgramEntry)) == 0,
+      "Beat overlay program changed on the wire");
+}
+
 // A complete snapshot can arrive after its advertised next boundary. Receivers
 // must promote next immediately instead of flashing the obsolete current entry.
 void delayed_pattern_snapshot_promotes_next() {
@@ -448,7 +487,7 @@ void position_peers_expire() {
 } // namespace
 
 int main() {
-  const std::array<std::pair<const char*, void (*)()>, 17> tests = {{
+  const std::array<std::pair<const char*, void (*)()>, 18> tests = {{
       {"wire validation rejects malformed lengths", wire_validation_rejects_malformed_lengths},
       {"topic authorities remain independent", topic_authorities_remain_independent},
       {"projection marker distinguishes master output", projection_marker_distinguishes_master_output},
@@ -460,6 +499,7 @@ int main() {
       {"Palette channel carries full definition and fallback", palette_channel_carries_full_definition_and_fallback},
       {"variable Palette snapshot is atomic", variable_palette_snapshot_is_atomic},
       {"variable Pattern snapshot preserves program and fallback", variable_pattern_snapshot_preserves_program_and_fallback},
+      {"Beat snapshot carries authoritative chance", beat_snapshot_carries_authoritative_chance},
       {"delayed Pattern snapshot promotes next", delayed_pattern_snapshot_promotes_next},
       {"modern source recognizes both channel envelopes", modern_source_recognizes_both_channel_envelopes},
       {"channel operations schedule on phrase boundaries", channel_operations_schedule_on_phrase_boundaries},
