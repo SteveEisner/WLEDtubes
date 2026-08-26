@@ -16,6 +16,7 @@ constexpr char FLEET_FIRMWARE_IDENTITY_MAGIC[8] = {'T', 'U', 'B', 'E', 'U', 'P',
 
 enum FleetUpdateFlag : uint8_t {
   FleetUpdateForce = 1 << 0,
+  FleetUpdatePropagate = 1 << 1,
 };
 
 #pragma pack(push, 1)
@@ -49,23 +50,28 @@ static_assert(sizeof(FleetUpdateOffer) <= 44, "fleet update offer exceeds the Co
 static_assert(sizeof(FleetFirmwareIdentity) == 16, "fleet firmware identity size changed");
 
 inline bool isValidFleetUpdateOffer(const FleetUpdateOffer& offer) {
-  uint8_t unknownFlags = offer.flags & ~FleetUpdateForce;
+  const uint8_t unknownFlags = offer.flags & ~(FleetUpdateForce | FleetUpdatePropagate);
+  const bool propagate = offer.flags & FleetUpdatePropagate;
+  const bool hasServer = offer.serverAddress[0] || offer.serverAddress[1]
+      || offer.serverAddress[2] || offer.serverAddress[3];
+  const bool serveCurrent = propagate && !hasServer && offer.serverPort == 0;
   return offer.magic == FLEET_UPDATE_MAGIC
       && offer.protocolVersion == FLEET_UPDATE_PROTOCOL_VERSION
       && unknownFlags == 0
       && offer.tubesVersion > 0
       && offer.nonce != 0
-      && (offer.serverAddress[0]
-          || offer.serverAddress[1]
-          || offer.serverAddress[2]
-          || offer.serverAddress[3])
-      && offer.serverPort != 0
+      && (hasServer || serveCurrent)
+      && (offer.serverPort != 0 || serveCurrent)
       && offer.startWindowMs <= FLEET_UPDATE_MAX_START_WINDOW_MS
       && offer.ssidLength <= FLEET_UPDATE_CREDENTIAL_BYTES
       && offer.passwordLength <= FLEET_UPDATE_CREDENTIAL_BYTES
       && uint16_t(offer.ssidLength) + offer.passwordLength <= FLEET_UPDATE_CREDENTIAL_BYTES
       && ((offer.ssidLength == 0 && offer.passwordLength == 0)
-          || offer.ssidLength > 0);
+          || offer.ssidLength > 0)
+      && !(propagate && (offer.flags & FleetUpdateForce))
+      && (!serveCurrent || (offer.targetDeviceId != 0
+          && offer.startWindowMs == 0
+          && offer.ssidLength == 0 && offer.passwordLength == 0));
 }
 
 inline bool setFleetUpdateCredentials(

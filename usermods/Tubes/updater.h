@@ -8,6 +8,8 @@
 #include "timer.h"
 #include "device_report_protocol.h"
 #include "fleet_update_protocol.h"
+#include "modern_propagation_lease_storage.h"
+#include "legacy_auto_update_wire.h"
 
 #define RELEASE_VERSION 47
 
@@ -44,6 +46,7 @@ typedef struct AutoUpdateOffer {
     char password[25] = "Fish Tank";
     IPAddress host = IPAddress(192,168,0,146);
 } AutoUpdateOffer;
+
 
 class AutoUpdater {
   public:
@@ -146,13 +149,18 @@ class AutoUpdater {
     // Schedules one integrity-checked pull from the installation LAN. The offer
     // changes neither stored Wi-Fi credentials nor the selected-device AP state.
     bool startFleet(const FleetUpdateOffer& offer) {
-        if (fleetFirmwareIdentity.tubesVersion != RELEASE_VERSION
-            || !isValidFleetUpdateOffer(offer)
-            || status != Idle
-            || offer.nonce == lastFleetNonce
-            || (!(offer.flags & FleetUpdateForce)
-                && offer.tubesVersion <= RELEASE_VERSION))
+        const bool identityValid = fleetFirmwareIdentity.tubesVersion == RELEASE_VERSION;
+        const bool offerValid = isValidFleetUpdateOffer(offer);
+        const bool idle = status == Idle;
+        const bool freshNonce = offer.nonce != lastFleetNonce;
+        const bool releaseAccepted = (offer.flags & FleetUpdateForce)
+            || offer.tubesVersion > RELEASE_VERSION;
+        if (!identityValid || !offerValid || !idle || !freshNonce || !releaseAccepted) {
+            Serial.printf("FLEET_OTA reject identity=%u offer=%u idle=%u nonce=%u release=%u current=%u offered=%u\n",
+                identityValid, offerValid, idle, freshNonce, releaseAccepted,
+                RELEASE_VERSION, offer.tubesVersion);
             return false;
+        }
 
         uint8_t deviceMac[6];
         WiFi.macAddress(deviceMac);
@@ -361,6 +369,20 @@ class AutoUpdater {
             return;
         }
 
+        if (shouldArmModernPropagationLease(fleetOffer, RELEASE_VERSION)) {
+            const ModernPropagationLeaseRecord lease =
+                makeModernPropagationLease(fleetOffer);
+            if (!writeModernPropagationLease(lease)) {
+                // HTTPUpdate has already verified the body and selected the
+                // next boot partition. Propagation is additive; failure to arm
+                // it must not misreport or strand an otherwise valid OTA.
+                Serial.println(F("FLEET_PROPAGATION disabled: lease persistence failed"));
+            } else {
+                Serial.printf("FLEET_PROPAGATION armed release=%u source=%08lX\n",
+                    lease.tubesVersion, (unsigned long)lease.sourceNonce);
+            }
+        }
+
         Serial.println(F("FLEET_OTA complete; rebooting"));
         memset(fleetOffer.credentials, 0, sizeof(fleetOffer.credentials));
         fleetUpdateActive = false;
@@ -518,13 +540,31 @@ class AutoUpdater {
         this->progress = 0;
         vTaskDelay(500);
         uint8_t buf[4096];
-        int lr;
-        while ((lr = client.read(buf, sizeof(buf))) > 0) {
-            size_t written = Update.write(buf, lr);
-            if (!written)
-                break;
+        uint32_t streamDeadline = millis() + 20000;
+        while (this->progress < fileSize) {
+            const int lr = client.read(buf, min(sizeof(buf), size_t(fileSize - this->progress)));
+            if (lr <= 0) {
+                // An empty read is ordinary TCP backpressure, especially when a
+                // Dig2Go host is feeding two receivers. It is not end-of-file;
+                // Content-Length is the authoritative completion boundary.
+                if ((!client.connected() && !client.available())
+                    || static_cast<int32_t>(millis() - streamDeadline) >= 0) {
+                    Update.abort();
+                    abort("firmware stream ended before Content-Length");
+                    return;
+                }
+                vTaskDelay(10);
+                continue;
+            }
+            const size_t written = Update.write(buf, size_t(lr));
+            if (written != size_t(lr)) {
+                Update.abort();
+                abort("firmware flash write was incomplete");
+                return;
+            }
 
             this->progress += written;
+            streamDeadline = millis() + 20000;
             Serial.printf(" %d of %ld\n", this->progress, fileSize);
 
             // Give the server time to send some more data

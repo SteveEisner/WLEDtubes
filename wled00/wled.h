@@ -1064,6 +1064,11 @@ public:
   void handleConnection();
   void initAP(bool resetAP = false);
   void initConnection();
+  // Temporarily give one caller exclusive ownership of the station interface.
+  // The lease uses an ephemeral DHCP profile and leaves saved profiles untouched.
+  bool beginTemporaryStaLease(const char* ssid, const char* pass);
+  bool endTemporaryStaLease();
+  bool temporaryStaLeaseActive() const { return _temporaryStaLeaseActive; }
   void initInterfaces();
   #if defined(STATUSLED)
   void handleStatusLED();
@@ -1072,5 +1077,14 @@ public:
   void enableWatchdog();
   void disableWatchdog();
   #endif
+
+private:
+  bool _temporaryStaLeaseActive = false;
+  uint8_t _temporaryStaLeaseIndex = 0;
+  int8_t _temporaryStaSavedSelection = 0;
+  bool _temporaryStaSavedForceReconnect = false;
+  bool _temporaryStaSavedInterfacesInited = false;
+  bool _temporaryStaSavedWasConnected = false;
+  unsigned long _temporaryStaSavedLastReconnectAttempt = 0;
 };
 #endif        // WLED_H

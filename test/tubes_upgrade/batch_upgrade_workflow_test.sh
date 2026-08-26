@@ -50,7 +50,7 @@ previous=""
 for argument in "$@"; do
   if [[ "$previous" == "-o" ]]; then
     output_file="$argument"
-  elif [[ "$previous" == "-F" && "$argument" == update=@* ]]; then
+  elif [[ "$argument" == update=@* ]]; then
     is_upload=true
   fi
   if [[ "$argument" == http://* ]]; then
@@ -79,7 +79,7 @@ if (( device > 2 )); then
 fi
 case "$url" in
   */json/si) source_file="$TUBES_FAKE_STATE/info-$device.json" ;;
-  */json/cfg) source_file="$TUBES_FAKE_STATE/cfg-$device.json" ;;
+  */json/cfg|*/cfg.json) source_file="$TUBES_FAKE_STATE/cfg-$device.json" ;;
   *) exit 22 ;;
 esac
 if [[ -n "$output_file" ]]; then
@@ -134,8 +134,8 @@ grep -q 'BATCH_UPGRADE_OK mac=222222222222 profile=dig2go leds=112' "$workflow_o
 grep -q 'BATCH_COMPLETE upgraded=1 migrated=0 skipped=1 failed=0' "$workflow_output"
 grep -qx 'dismiss 1' "$fake_state/writes.log"
 grep -qx 'upload 2' "$fake_state/writes.log"
-expected_release="$(sed -n 's/^#define RELEASE_VERSION //p' "$repo_dir/usermods/Tubes/updater.h")"
-grep -q "^offer .* $expected_release$" "$fake_state/mesh.log"
+ expected_release="$(sed -n 's/^#define RELEASE_VERSION //p' "$repo_dir/usermods/Tubes/updater.h")"
+ grep -q "^offer .* $expected_release$" "$fake_state/mesh.log"
 grep -q '^verify .*222222222222 .*--family dig2go .*--variant 0 .*--release DIG2GO_TUBES' "$fake_state/mesh.log"
 test -f "$backup_dir"/batch-*/111111111111/info.json
 test -f "$backup_dir"/batch-*/111111111111/cfg.json

@@ -52,6 +52,26 @@ int main() {
   require(setFleetUpdateCredentials(offer, "Eisner", "test-password"), "bounded credentials were rejected");
   require(isValidFleetUpdateOffer(offer), "offer with bounded credentials was rejected");
 
+  // P2P is opt-in. An exact equal-version serve command carries no OTA server;
+  // wildcard, forced, or credential-bearing variants fail closed.
+  FleetUpdateOffer serve;
+  serve.flags = FleetUpdatePropagate;
+  serve.tubesVersion = 47;
+  serve.nonce = 0x10203040;
+  serve.serverPort = 0;
+  serve.targetDeviceId = 0x1234;
+  require(isValidFleetUpdateOffer(serve), "exact P2P serve command was rejected");
+  invalid = serve;
+  invalid.targetDeviceId = 0;
+  require(!isValidFleetUpdateOffer(invalid), "wildcard P2P serve command was accepted");
+  invalid = serve;
+  invalid.flags |= FleetUpdateForce;
+  require(!isValidFleetUpdateOffer(invalid), "forced P2P serve command was accepted");
+  invalid = serve;
+  require(setFleetUpdateCredentials(invalid, "TubesOTA", "tubes123"),
+      "test P2P credentials did not fit");
+  require(!isValidFleetUpdateOffer(invalid), "P2P serve command carried credentials");
+
   // Fifty stable MACs spread throughout the requested window without any fleet
   // roster or coordinator state on the devices.
   offer = validOffer();
