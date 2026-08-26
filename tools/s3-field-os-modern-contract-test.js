@@ -27,8 +27,9 @@ test('Surveyor is bounded, fresh, read-only, and exposes modern channel winners'
 });
 
 test('channel ownership has a dedicated reserved workspace', () => {
-  assert.match(ui, /FieldScreen::Channels/);
-  assert.match(ui, /void drawChannels\(\)/);
+  assert.match(ui, /FieldViewId::Channels/);
+  assert.match(ui, /class ChannelsView final : public FieldView/);
+  assert.match(ui, /void drawChannelsContent\(\)/);
   assert.match(ui, /Read-only authority\. Interaction controls come next/);
-  assert.doesNotMatch(ui, /FieldScreen::Status/);
+  assert.doesNotMatch(ui, /FieldViewId::Status/);
 });

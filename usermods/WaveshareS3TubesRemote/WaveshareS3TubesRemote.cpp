@@ -63,7 +63,7 @@ SensorQMI8658 imu;
 XPowersPMU pmu;
 
 #ifdef TUBES_S3_FIELD_OS
-enum class FieldScreen : uint8_t {
+enum class FieldViewId : uint8_t {
   Home,
   Conductor,
   Surveyor,
@@ -73,11 +73,25 @@ enum class FieldScreen : uint8_t {
 
 class WaveshareS3FieldOs : public Usermod {
 private:
+  struct Rect {
+    int16_t x;
+    int16_t y;
+    int16_t width;
+    int16_t height;
+
+    bool contains(int16_t px, int16_t py) const {
+      return px >= x && py >= y && px < x + width && py < y + height;
+    }
+  };
+
+  struct ButtonComponent {
+    Rect bounds;
+    uint16_t color;
+    const __FlashStringHelper *label;
+  };
+
   bool displayReady = false;
   bool touchReady = false;
-  FieldScreen screen = FieldScreen::Home;
-  uint32_t lastPreviewDraw = 0;
-  uint32_t lastTelemetryDraw = 0;
   bool nextSendFailed = false;
   bool touchDown = false;
 
@@ -98,38 +112,34 @@ private:
     return static_cast<uint16_t>(((red & 0xF8) << 8) | ((green & 0xFC) << 3) | (blue >> 3));
   }
 
-  void title(const __FlashStringHelper *text) {
+  void drawChrome(const __FlashStringHelper *text, bool showHome) {
     display.fillScreen(COLOR_BACKGROUND);
     display.setTextWrap(false);
     display.setTextColor(RGB565_WHITE);
     display.setTextSize(2);
     display.setCursor(24, 22);
     display.println(text);
+    if (showHome) drawButton({{372, 12, 88, 48}, COLOR_SURFACE_RAISED, F("Home")});
   }
 
-  void button(int16_t x, int16_t y, int16_t width, int16_t height, uint16_t color,
-              const __FlashStringHelper *label) {
-    display.fillRoundRect(x, y, width, height, 20, color);
+  void drawButton(const ButtonComponent &button) {
+    const Rect &bounds = button.bounds;
+    display.fillRoundRect(bounds.x, bounds.y, bounds.width, bounds.height, 20, button.color);
     display.setTextColor(RGB565_WHITE);
     display.setTextSize(2);
-    display.setCursor(x + 16, y + height / 2 - 8);
-    display.println(label);
+    display.setCursor(bounds.x + 16, bounds.y + bounds.height / 2 - 8);
+    display.println(button.label);
   }
 
-  void drawHome() {
-    title(F("Tubes Field OS"));
+  void drawHomeContent() {
     display.setTextColor(COLOR_MUTED);
     display.setTextSize(1);
     display.setCursor(25, 51);
     display.println(F("The flock stays live wherever you go"));
-    button(20, 84, 210, 150, COLOR_PRIMARY, F("Conductor"));
-    button(250, 84, 210, 150, COLOR_SURFACE_RAISED, F("Surveyor"));
-    button(20, 250, 210, 150, COLOR_SURFACE_RAISED, F("Update"));
-    button(250, 250, 210, 150, COLOR_SURFACE_RAISED, F("Channels"));
-  }
-
-  void drawBack() {
-    button(372, 12, 88, 48, COLOR_SURFACE_RAISED, F("Home"));
+    drawButton({{20, 84, 210, 150}, COLOR_PRIMARY, F("Conductor")});
+    drawButton({{250, 84, 210, 150}, COLOR_SURFACE_RAISED, F("Surveyor")});
+    drawButton({{20, 250, 210, 150}, COLOR_SURFACE_RAISED, F("Update")});
+    drawButton({{250, 250, 210, 150}, COLOR_SURFACE_RAISED, F("Channels")});
   }
 
   // Persistent Strip observes WLED's canonical, completed logical framebuffer.
@@ -196,21 +206,17 @@ private:
     }
   }
 
-  void drawConductor() {
+  void drawConductorContent(bool full) {
     TubesS3FieldStatus status;
     tubesS3ReadStatus(status);
-    title(F("Conductor"));
-    drawBack();
     drawConductorTelemetry(status);
-    stripComponent.draw(31, 156, 420, 138, true);
+    stripComponent.draw(31, 156, 420, 138, full);
     if (!status.canForceNext)
-      button(120, 328, 240, 70, COLOR_MUTED, F("Next unavailable"));
+      drawButton({{120, 328, 240, 70}, COLOR_MUTED, F("Next unavailable")});
     else if (nextSendFailed)
-      button(120, 328, 240, 70, RGB565_RED, F("Next failed"));
+      drawButton({{120, 328, 240, 70}, RGB565_RED, F("Next failed")});
     else
-      button(150, 328, 180, 70, COLOR_PRIMARY, F("Next"));
-    lastPreviewDraw = millis();
-    lastTelemetryDraw = millis();
+      drawButton({{150, 328, 180, 70}, COLOR_PRIMARY, F("Next")});
   }
 
   static bool surveyorBefore(const TubesS3PeerStatus &candidate, const TubesS3PeerStatus &prior) {
@@ -278,13 +284,6 @@ private:
         display.printf("%03X -> %03X  gen%u  RSSI --  age %lus\n", peer.nodeId, peer.uplinkId,
             peer.protocolGeneration, (now - peer.lastSeenMs) / 1000);
     }
-    lastTelemetryDraw = now;
-  }
-
-  void drawSurveyor() {
-    title(F("Surveyor"));
-    drawBack();
-    drawSurveyorContent();
   }
 
   void drawChannelsContent() {
@@ -309,19 +308,12 @@ private:
     display.printf("Palette %u -> %u\n", status.paletteId, status.nextPaletteId);
     display.setCursor(24, 356);
     display.println(F("Read-only authority. Interaction controls come next."));
-    lastTelemetryDraw = millis();
-  }
-
-  void drawChannels() {
-    title(F("Channels"));
-    drawBack();
-    drawChannelsContent();
   }
 
   void drawUpdateContent() {
     display.fillRect(20, 68, 440, 372, COLOR_BACKGROUND);
 #ifdef TUBES_S3_FIRMWARE_CARRIER
-    button(20, 70, 150, 50, COLOR_PRIMARY, F("Scan"));
+    drawButton({{20, 70, 150, 50}, COLOR_PRIMARY, F("Scan")});
     TubesS3CarrierStatus carrier;
     tubesS3ReadCarrierStatus(carrier);
     display.setTextSize(1);
@@ -342,7 +334,6 @@ private:
           target.family == 1 ? "Dig2Go" : "Athom C3",
           target.release);
     }
-    lastTelemetryDraw = millis();
 #else
     display.setTextColor(COLOR_MUTED);
     display.setTextSize(2);
@@ -354,51 +345,176 @@ private:
 #endif
   }
 
-  void drawUpdate() {
-    title(F("Update"));
-    drawBack();
-    drawUpdateContent();
-  }
+  class FieldView {
+  public:
+    FieldView(WaveshareS3FieldOs &owner, FieldViewId id,
+              const __FlashStringHelper *title, uint32_t refreshMs)
+        : owner(owner), viewId(id), viewTitle(title), refreshIntervalMs(refreshMs) {}
+    virtual ~FieldView() = default;
 
-  void draw() {
-    if (!displayReady) return;
-    switch (screen) {
-      case FieldScreen::Home: drawHome(); break;
-      case FieldScreen::Conductor: drawConductor(); break;
-      case FieldScreen::Surveyor: drawSurveyor(); break;
-      case FieldScreen::Update: drawUpdate(); break;
-      case FieldScreen::Channels: drawChannels(); break;
+    FieldViewId id() const { return viewId; }
+    void render(bool full) {
+      if (full) owner.drawChrome(viewTitle, viewId != FieldViewId::Home);
+      renderContent(full);
+      lastRefreshMs = millis();
     }
-  }
+    virtual FieldViewId tap(int16_t, int16_t) { return viewId; }
+    virtual void tick(uint32_t now) {
+      if (refreshIntervalMs && now - lastRefreshMs >= refreshIntervalMs) render(false);
+    }
 
-  void onTouch(int16_t x, int16_t y) {
-    if (screen != FieldScreen::Home && x >= 360 && y <= 75) {
-      screen = FieldScreen::Home;
-    } else if (screen == FieldScreen::Home) {
-      if (y >= 84 && y < 250) {
-        screen = x < 240 ? FieldScreen::Conductor : FieldScreen::Surveyor;
-      } else if (y >= 250 && y < 400) {
-        screen = x < 240 ? FieldScreen::Update : FieldScreen::Channels;
+  protected:
+    WaveshareS3FieldOs &owner;
+    virtual void renderContent(bool full) = 0;
+    uint32_t lastRefreshMs = 0;
+
+  private:
+    FieldViewId viewId;
+    const __FlashStringHelper *viewTitle;
+    uint32_t refreshIntervalMs;
+  };
+
+  class HomeView final : public FieldView {
+  public:
+    explicit HomeView(WaveshareS3FieldOs &owner)
+        : FieldView(owner, FieldViewId::Home, F("Tubes Field OS"), 0) {}
+    FieldViewId tap(int16_t x, int16_t y) override {
+      if (Rect{20, 84, 210, 150}.contains(x, y)) return FieldViewId::Conductor;
+      if (Rect{250, 84, 210, 150}.contains(x, y)) return FieldViewId::Surveyor;
+      if (Rect{20, 250, 210, 150}.contains(x, y)) return FieldViewId::Update;
+      if (Rect{250, 250, 210, 150}.contains(x, y)) return FieldViewId::Channels;
+      return FieldViewId::Home;
+    }
+  protected:
+    void renderContent(bool) override { owner.drawHomeContent(); }
+  };
+
+  class ConductorView final : public FieldView {
+  public:
+    explicit ConductorView(WaveshareS3FieldOs &owner)
+        : FieldView(owner, FieldViewId::Conductor, F("Conductor"), 0) {}
+    FieldViewId tap(int16_t x, int16_t y) override {
+      if (Rect{120, 315, 240, 100}.contains(x, y)) {
+        TubesS3FieldStatus status;
+        tubesS3ReadStatus(status);
+        if (status.canForceNext) owner.nextSendFailed = !tubesS3ForceNext();
       }
+      return FieldViewId::Conductor;
+    }
+    void tick(uint32_t now) override {
+      if (now - lastPreviewMs >= PREVIEW_INTERVAL_MS) {
+        lastPreviewMs = now;
+        owner.stripComponent.draw(31, 156, 420, 138);
+      }
+      if (now - lastRefreshMs >= SAMPLE_INTERVAL_MS) {
+        TubesS3FieldStatus status;
+        tubesS3ReadStatus(status);
+        owner.drawConductorTelemetry(status);
+        lastRefreshMs = now;
+      }
+    }
+  protected:
+    void renderContent(bool full) override {
+      owner.drawConductorContent(full);
+      lastPreviewMs = millis();
+    }
+  private:
+    uint32_t lastPreviewMs = 0;
+  };
+
+  class SurveyorView final : public FieldView {
+  public:
+    explicit SurveyorView(WaveshareS3FieldOs &owner)
+        : FieldView(owner, FieldViewId::Surveyor, F("Surveyor"), SAMPLE_INTERVAL_MS) {}
+  protected:
+    void renderContent(bool) override { owner.drawSurveyorContent(); }
+  };
+
+  class UpdateView final : public FieldView {
+  public:
+    explicit UpdateView(WaveshareS3FieldOs &owner)
+        : FieldView(owner, FieldViewId::Update, F("Update"), SAMPLE_INTERVAL_MS) {}
+    FieldViewId tap(int16_t x, int16_t y) override {
 #ifdef TUBES_S3_FIRMWARE_CARRIER
-    } else if (screen == FieldScreen::Update) {
-      if (y >= 70 && y <= 125) tubesS3ScanCarrierTargets();
-      else if (y >= 140) {
-        size_t index = (y - 140) / 44;
+      if (Rect{20, 70, 150, 55}.contains(x, y)) {
+        tubesS3ScanCarrierTargets();
+      } else if (y >= 140) {
+        const size_t index = (y - 140) / 44;
         TubesS3CarrierTarget target;
         if (tubesS3ReadCarrierTarget(index, target))
           tubesS3ArmCarrier(target.mac, target.family, target.variant, target.release);
       }
 #endif
-    } else if (screen == FieldScreen::Conductor && y >= 315 && y <= 415) {
-      TubesS3FieldStatus status;
-      tubesS3ReadStatus(status);
-      if (status.canForceNext) nextSendFailed = !tubesS3ForceNext();
+      return FieldViewId::Update;
     }
-    draw();
-  }
+  protected:
+    void renderContent(bool) override { owner.drawUpdateContent(); }
+  };
+
+  class ChannelsView final : public FieldView {
+  public:
+    explicit ChannelsView(WaveshareS3FieldOs &owner)
+        : FieldView(owner, FieldViewId::Channels, F("Channels"), SAMPLE_INTERVAL_MS) {}
+  protected:
+    void renderContent(bool) override { owner.drawChannelsContent(); }
+  };
+
+  class ViewManager {
+  public:
+    ViewManager(WaveshareS3FieldOs &owner, HomeView &home, ConductorView &conductor,
+                SurveyorView &surveyor, UpdateView &update, ChannelsView &channels)
+        : owner(owner), home(home), conductor(conductor), surveyor(surveyor),
+          update(update), channels(channels), active(&home) {}
+
+    void begin() { active->render(true); }
+    void tick(uint32_t now) { active->tick(now); }
+    void tap(int16_t x, int16_t y) {
+      if (active->id() != FieldViewId::Home && Rect{360, 0, 120, 75}.contains(x, y)) {
+        navigate(FieldViewId::Home);
+        return;
+      }
+      const FieldViewId destination = active->tap(x, y);
+      if (destination != active->id()) navigate(destination);
+      else active->render(false);
+    }
+
+  private:
+    void navigate(FieldViewId id) {
+      active = view(id);
+      active->render(true);
+    }
+    FieldView *view(FieldViewId id) {
+      switch (id) {
+        case FieldViewId::Conductor: return &conductor;
+        case FieldViewId::Surveyor: return &surveyor;
+        case FieldViewId::Update: return &update;
+        case FieldViewId::Channels: return &channels;
+        case FieldViewId::Home: default: return &home;
+      }
+    }
+
+    WaveshareS3FieldOs &owner;
+    HomeView &home;
+    ConductorView &conductor;
+    SurveyorView &surveyor;
+    UpdateView &update;
+    ChannelsView &channels;
+    FieldView *active;
+  };
+
+  HomeView homeView;
+  ConductorView conductorView;
+  SurveyorView surveyorView;
+  UpdateView updateView;
+  ChannelsView channelsView;
+  ViewManager viewManager;
 
 public:
+  WaveshareS3FieldOs()
+      : homeView(*this), conductorView(*this), surveyorView(*this), updateView(*this),
+        channelsView(*this),
+        viewManager(*this, homeView, conductorView, surveyorView, updateView, channelsView) {}
+
   void setup() override {
     Wire.begin(PERIPHERAL_SDA, PERIPHERAL_SCL);
     displayReady = display.begin();
@@ -424,7 +540,7 @@ public:
       touchInterruptPending = false;
       attachInterrupt(TOUCH_IRQ, handleTouchInterrupt, FALLING);
     }
-    draw();
+    if (displayReady) viewManager.begin();
   }
 
   void loop() override {
@@ -433,30 +549,10 @@ public:
       int16_t x = -1;
       int16_t y = -1;
       const bool pressed = touch.getPoint(&x, &y, 1) > 0;
-      if (pressed && !touchDown) onTouch(x, y);
+      if (pressed && !touchDown) viewManager.tap(x, y);
       touchDown = pressed;
     }
-    const uint32_t now = millis();
-    if (displayReady && screen == FieldScreen::Conductor && now - lastPreviewDraw >= PREVIEW_INTERVAL_MS) {
-      lastPreviewDraw = now;
-      TubesS3FieldStatus status;
-      tubesS3ReadStatus(status);
-      stripComponent.draw(31, 156, 420, 138);
-    }
-    if (displayReady && now - lastTelemetryDraw >= SAMPLE_INTERVAL_MS) {
-      if (screen == FieldScreen::Conductor) {
-        TubesS3FieldStatus status;
-        tubesS3ReadStatus(status);
-        drawConductorTelemetry(status);
-        lastTelemetryDraw = now;
-      } else if (screen == FieldScreen::Surveyor) {
-        drawSurveyorContent();
-      } else if (screen == FieldScreen::Update) {
-        drawUpdateContent();
-      } else if (screen == FieldScreen::Channels) {
-        drawChannelsContent();
-      }
-    }
+    if (displayReady) viewManager.tick(millis());
   }
 
   void addToJsonInfo(JsonObject &root) override {
