@@ -54,6 +54,23 @@ void ordinaryFleetOfferNeverArmsPeerPropagation() {
       "ordinary fleet OTA armed peer propagation");
 }
 
+void legacyBootstrapBatonRequiresFreshEqualWildcardPropagation() {
+  FleetUpdateOffer baton = offer(48);
+  expect(isFreshLegacyBootstrapBaton(baton, 48, 5000, 60000),
+      "fresh legacy migration did not recognize its predecessor offer");
+  expect(!isFreshLegacyBootstrapBaton(baton, 48, 60001, 60000),
+      "established current device accepted a legacy bootstrap baton");
+  expect(!isFreshLegacyBootstrapBaton(baton, 47, 5000, 60000),
+      "newer download offer was mistaken for an equal-version baton");
+  baton.targetDeviceId = 0x1234;
+  expect(!isFreshLegacyBootstrapBaton(baton, 48, 5000, 60000),
+      "targeted download offer was mistaken for a wildcard baton");
+  baton = offer(48);
+  baton.flags = 0;
+  expect(!isFreshLegacyBootstrapBaton(baton, 48, 5000, 60000),
+      "ordinary fleet OTA became a legacy bootstrap baton");
+}
+
 void wrongImageAndCorruptionFailClosed() {
   ModernPropagationLeaseRecord lease = makeModernPropagationLease(offer());
   expect(!claimModernPropagationLease(lease, 49),
@@ -103,6 +120,7 @@ int main() {
   newerModernOfferArmsOneShotLease();
   equalOlderAndForcedOffersDoNotPropagate();
   ordinaryFleetOfferNeverArmsPeerPropagation();
+  legacyBootstrapBatonRequiresFreshEqualWildcardPropagation();
   wrongImageAndCorruptionFailClosed();
   propagationOfferPreservesModernAuthorityAndStandardCredentials();
   exactCurrentCommandStartsHostingWithoutAnOtaServer();

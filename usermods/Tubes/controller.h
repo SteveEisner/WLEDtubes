@@ -4360,10 +4360,25 @@ class PatternController : public MessageReceiver {
 
   bool sendFleetPullUpdateOffer(const FleetUpdateOffer& offer) {
     const bool valid = isValidFleetUpdateOffer(offer);
-    const bool sent = valid
+    const bool controlSent = valid
         && sendV3ControlCommand(COMMAND_FLEET_UPGRADE, &offer, sizeof(offer));
-    Serial.printf("FLEET_TX valid=%u sent=%u role=%s state=%s nonce=%08lX target=%04X release=%u flags=%02X ssid=%u pass=%u\n",
-        valid, sent, node.isFollowing() ? "follower" : "root", node.status_code(),
+    // Propagation is intentionally independent of whichever laptop/root owns
+    // the Control rail. Carry the same validated Steve FleetUpdateOffer one hop
+    // as well, so nearby Dig2Gos can receive it without a compatible root.
+    bool neighborSent = false;
+    if (valid) {
+      ControlChannelBody control;
+      control.command = COMMAND_FLEET_UPGRADE;
+      control.commandLength = sizeof(offer);
+      memcpy(control.commandData, &offer, sizeof(offer));
+      const TubesChannelPayload payload = makeChannelPayload(
+          ControlChannel, ChannelRequest, &control, sizeof(offer) + 2);
+      neighborSent = node.sendV3NeighborChannel(ControlChannel, payload);
+    }
+    const bool sent = controlSent || neighborSent;
+    Serial.printf("FLEET_TX valid=%u sent=%u control=%u neighbor=%u role=%s state=%s nonce=%08lX target=%04X release=%u flags=%02X ssid=%u pass=%u\n",
+        valid, sent, controlSent, neighborSent,
+        node.isFollowing() ? "follower" : "root", node.status_code(),
         (unsigned long)offer.nonce, offer.targetDeviceId, offer.tubesVersion,
         offer.flags, offer.ssidLength, offer.passwordLength);
     return sent;
@@ -4857,15 +4872,21 @@ class PatternController : public MessageReceiver {
           return false;
         const bool serveCurrent = (offer.flags & FleetUpdatePropagate)
             && offer.serverPort == 0;
-        if (serveCurrent) {
+        const bool legacyBootstrapBaton = (offer.flags & FleetUpdatePropagate)
+            && offer.serverPort != 0
+            && offer.targetDeviceId == 0
+            && offer.tubesVersion == RELEASE_VERSION;
+        if (serveCurrent || legacyBootstrapBaton) {
           bool accepted = false;
 #if TUBES_ENABLE_DIG2GO_PUSH_BRIDGE
-          accepted = targeted && offer.targetDeviceId != 0
+          accepted = targeted
+              && (legacyBootstrapBaton || offer.targetDeviceId != 0)
               && !isHomeLightRole() && dig2GoPropagationCallback
               && dig2GoPropagationCallback(offer);
 #endif
-          Serial.printf("FLEET_RX propagation=%s\n",
-              accepted ? "accepted" : "rejected");
+          Serial.printf("FLEET_RX propagation=%s mode=%s\n",
+              accepted ? "accepted" : "rejected",
+              legacyBootstrapBaton ? "legacy_baton" : "command");
           return true;
         }
         if (targeted && !isHomeLightRole()) {
@@ -4992,8 +5013,18 @@ class PatternController : public MessageReceiver {
       return false;
     if (payload.envelope.messageKind == ControlBeacon)
       return channel == ControlChannel && recipients == RECIPIENTS_NEIGHBORS;
-    if (payload.envelope.messageKind == ChannelRequest && recipients != RECIPIENTS_ROOT)
-      return false;
+    if (payload.envelope.messageKind == ChannelRequest && recipients != RECIPIENTS_ROOT) {
+      bool neighborFleetOffer = false;
+      if (channel == ControlChannel && recipients == RECIPIENTS_NEIGHBORS) {
+        ControlChannelBody control;
+        memset(&control, 0, sizeof(control));
+        memcpy(&control, payload.body, payload.envelope.bodyLength);
+        neighborFleetOffer = control.command == COMMAND_FLEET_UPGRADE
+            && control.commandLength == sizeof(FleetUpdateOffer);
+      }
+      if (!neighborFleetOffer)
+        return false;
+    }
     if (payload.envelope.messageKind == ChannelDeclaration && recipients != RECIPIENTS_ALL)
       return false;
     if (channel == BeatChannel) {

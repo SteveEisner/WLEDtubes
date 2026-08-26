@@ -27,6 +27,10 @@ public:
     _wakeAttempts = 0;
   }
 
+  // The HTTP host owns the rendezvous lifetime. Once it restores the normal
+  // mesh/AP configuration, no further wake may advertise stale credentials.
+  void cancel() { _active = false; }
+
   LegacyPullRendezvousAction update(uint32_t now, bool stationSeen) {
     if (!_active) return LegacyPullRendezvousIdle;
     if (stationSeen) {

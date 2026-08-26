@@ -61,6 +61,24 @@ inline bool shouldArmModernPropagationLease(
       && offer.tubesVersion > runningVersion;
 }
 
+// Deployed legacy firmware cannot write a modern lease before reboot. Its
+// freshly installed image can still hear the predecessor's continuing,
+// propagation-marked download offer and use that equal-release offer as the
+// baton. The boot window keeps established current devices out of later waves.
+inline bool isFreshLegacyBootstrapBaton(
+    const FleetUpdateOffer& offer,
+    uint16_t runningVersion,
+    uint32_t uptimeMs,
+    uint32_t bootWindowMs
+) {
+  return isValidFleetUpdateOffer(offer)
+      && (offer.flags & FleetUpdatePropagate)
+      && offer.serverPort != 0
+      && offer.targetDeviceId == 0
+      && offer.tubesVersion == runningVersion
+      && uptimeMs <= bootWindowMs;
+}
+
 inline ModernPropagationLeaseRecord makeModernPropagationLease(
     const FleetUpdateOffer& offer
 ) {

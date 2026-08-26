@@ -71,6 +71,13 @@ class TubesUsermod : public Usermod
     bool modernPropagationLeaseCleared = false;
     uint32_t modernPropagationNonce = 0;
     uint32_t modernPropagationStartAt = 0;
+    bool modernPropagationWaitForSourceQuiet = false;
+    uint32_t modernPropagationSourceNonce = 0;
+    uint32_t modernPropagationBatonUntil = 0;
+    uint32_t modernPropagationNextBatonAt = 0;
+    static constexpr uint32_t LEGACY_BOOTSTRAP_BATON_WINDOW_MS = 60000;
+    static constexpr uint32_t LEGACY_BOOTSTRAP_SOURCE_QUIET_MS = 5000;
+    static constexpr uint32_t LEGACY_BOOTSTRAP_BATON_GRACE_MS = 15000;
 #endif
 #if TUBES_ENABLE_DIG2GO_PUSH_BRIDGE
     tubes_p2p::Dig2GoPushSourceAdapter dig2GoSourceAdapter;
@@ -110,12 +117,36 @@ class TubesUsermod : public Usermod
 #if defined(TUBES_DIG2GO_LEGACY_PULL_HOST)
       if (!(offer.flags & FleetUpdatePropagate)
           || offer.tubesVersion != RELEASE_VERSION
-          || offer.serverPort != 0
-          || !legacyPullCanAcceptExplicitTurn(modernPropagationTurn)
           || legacyPullHost.started())
+        return false;
+      if (offer.serverPort != 0) {
+        if (modernPropagationWaitForSourceQuiet
+            && modernPropagationSourceNonce == offer.nonce) {
+          modernPropagationStartAt = millis() + LEGACY_BOOTSTRAP_SOURCE_QUIET_MS;
+          return true;
+        }
+        if (!isFreshLegacyBootstrapBaton(
+                offer, RELEASE_VERSION, millis(), LEGACY_BOOTSTRAP_BATON_WINDOW_MS)
+            || !legacyPullCanAcceptExplicitTurn(modernPropagationTurn))
+          return false;
+        initializePeerPropagationTurn();
+        modernPropagationTurn = true;
+        modernPropagationWaitForSourceQuiet = true;
+        modernPropagationSourceNonce = offer.nonce;
+        modernPropagationNonce = esp_random();
+        if (modernPropagationNonce == 0) modernPropagationNonce = 1;
+        modernPropagationStartAt = millis() + LEGACY_BOOTSTRAP_SOURCE_QUIET_MS;
+        Serial.printf("FLEET_PROPAGATION legacy_baton source=%08lX offer=%08lX\n",
+            static_cast<unsigned long>(offer.nonce),
+            static_cast<unsigned long>(modernPropagationNonce));
+        return true;
+      }
+      if (!legacyPullCanAcceptExplicitTurn(modernPropagationTurn))
         return false;
       initializePeerPropagationTurn();
       modernPropagationTurn = true;
+      modernPropagationWaitForSourceQuiet = false;
+      modernPropagationSourceNonce = 0;
       modernPropagationNonce = esp_random();
       if (modernPropagationNonce == 0) modernPropagationNonce = 1;
       modernPropagationStartAt = millis() + 1000;
@@ -147,6 +178,10 @@ class TubesUsermod : public Usermod
       modernPropagationLeaseCleared = false;
       modernPropagationNonce = 0;
       modernPropagationStartAt = 0;
+      modernPropagationWaitForSourceQuiet = false;
+      modernPropagationSourceNonce = 0;
+      modernPropagationBatonUntil = 0;
+      modernPropagationNextBatonAt = 0;
       legacyPullHost.clearModernTurn();
     }
 
@@ -168,6 +203,10 @@ class TubesUsermod : public Usermod
       modernPropagationLeaseCleared = false;
       modernPropagationNonce = 0;
       modernPropagationStartAt = 0;
+      modernPropagationWaitForSourceQuiet = false;
+      modernPropagationSourceNonce = 0;
+      modernPropagationBatonUntil = 0;
+      modernPropagationNextBatonAt = 0;
       legacyPullHost.clearModernTurn();
     }
 #endif
@@ -445,6 +484,13 @@ class TubesUsermod : public Usermod
       }
 
       if (!busConfigs.empty()) {
+        // A legacy config may leave a zero-length segment running an effect
+        // such as Flow. WLED services that segment before it consumes
+        // doInitBusses later in the same loop, and some native effects divide
+        // by their derived zero zone length. Keep the placeholder inert for
+        // that single loop; finalizeInit/fixInvalidSegments restores the real
+        // bus-backed segment immediately afterward.
+        strip.getMainSegment().setMode(FX_MODE_STATIC);
         doInitBusses = true;
         Serial.println(F("Tubes: recovered default LED bus config"));
       }
@@ -673,6 +719,7 @@ class TubesUsermod : public Usermod
       }
       if (legacyPullHost.shouldRestore(millis())) {
         legacyPullBodyServed = legacyPullHost.bodyComplete();
+        legacyPullRendezvous.cancel();
 #if defined(TUBES_DIG2GO_DYNAMIC_ENROLLMENT)
         legacyPullHost.copyEnrolledMac(dig2GoEnrolledMac);
 #endif
@@ -723,16 +770,42 @@ class TubesUsermod : public Usermod
         }
 #endif
       }
+      // A legacy client cannot persist propagation intent before installing
+      // this image. Once the AP is gone and ESP-NOW is restored, repeat the
+      // same existing offer briefly so freshly rebooted children can take the
+      // baton. This is radio-only; the predecessor does not wait for an ACK.
+      if (modernPropagationTurn && legacyPullBodyServed
+          && legacyPullRestoreStarted && controller.meshRadioStartedAfterDig2Go()) {
+        if (modernPropagationBatonUntil == 0) {
+          modernPropagationBatonUntil = millis() + LEGACY_BOOTSTRAP_BATON_GRACE_MS;
+          modernPropagationNextBatonAt = millis();
+          Serial.println(F("FLEET_PROPAGATION baton_grace_started"));
+        }
+        if (static_cast<int32_t>(modernPropagationBatonUntil - millis()) > 0
+            && static_cast<int32_t>(millis() - modernPropagationNextBatonAt) >= 0) {
+          FleetUpdateOffer baton;
+          const uint8_t serverAddress[4] = {4, 3, 2, 1};
+          if (makeModernPropagationOffer(
+                  baton, RELEASE_VERSION, modernPropagationNonce, serverAddress,
+                  80, 1000, legacyPullHost.sessionSSID(),
+                  legacyPullHost.sessionPassword()))
+            controller.sendFleetPullUpdateOffer(baton);
+          modernPropagationNextBatonAt = millis() + 1000;
+        }
+      }
+      const bool modernBatonGraceComplete = modernPropagationBatonUntil == 0
+          || static_cast<int32_t>(millis() - modernPropagationBatonUntil) >= 0;
       if (modernPropagationTurn && legacyPullRestoreStarted
           && controller.meshRadioStartedAfterDig2Go()
-          && !modernPropagationLeaseCleared) {
+          && !modernPropagationLeaseCleared && modernBatonGraceComplete) {
         clearModernPropagationLease();
         modernPropagationLeaseCleared = true;
         Serial.println(F("FLEET_PROPAGATION lease_cleared"));
       }
       if (legacyPullPropagationTurnFinished(modernPropagationTurn,
           legacyPullRestoreStarted, controller.meshRadioStartedAfterDig2Go(),
-          legacyHostRetired, legacyPullNeedsRestore, legacyPullBodyServed)) {
+          legacyHostRetired, legacyPullNeedsRestore, legacyPullBodyServed)
+          && modernBatonGraceComplete) {
         Serial.println(F("FLEET_PROPAGATION turn_reset"));
         finishPeerPropagationTurn();
       }

@@ -33,6 +33,15 @@ int main() {
         "bounded rendezvous did not time out across millis wrap");
     expect(!rendezvous.active(), "timed-out rendezvous stayed active");
     std::cout << "PASS: rendezvous timeout is bounded across millis wrap\n";
+
+    rendezvous.begin(3000);
+    expect(rendezvous.update(3000, false) == LegacyPullRendezvousSendWake,
+        "rendezvous did not begin before host restore");
+    rendezvous.cancel();
+    expect(!rendezvous.active(), "cancelled rendezvous remained active");
+    expect(rendezvous.update(3500, false) == LegacyPullRendezvousIdle,
+        "cancelled rendezvous emitted a stale wake after host restore");
+    std::cout << "PASS: host restore cancels outstanding wake window\n";
   } catch (const std::exception& error) {
     std::cerr << "FAIL: " << error.what() << '\n';
     return 1;

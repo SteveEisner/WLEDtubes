@@ -388,6 +388,16 @@ static void productionP2PBuildHasNoBenchBootTriggers() {
   EXPECT(environment.find("TUBES_DIG2GO_PUSH_PRIME_MAC") == std::string::npos);
 }
 
+static void legacyBusRecoveryMakesPlaceholderEffectSafeBeforeWledService() {
+  const std::string tubes = readSource("usermods/Tubes/Tubes.h");
+  const auto recovery = tubes.find("Tubes: recovered default LED bus config");
+  EXPECT(recovery != std::string::npos);
+  const auto safeMode = tubes.rfind("strip.getMainSegment().setMode(FX_MODE_STATIC)", recovery);
+  const auto init = tubes.rfind("doInitBusses = true", recovery);
+  EXPECT(safeMode != std::string::npos && init != std::string::npos);
+  EXPECT(safeMode < init && init < recovery);
+}
+
 static void oneFieldTurnAdvertisesToOldAndCurrentDig2Gos() {
   const std::string tubes = readSource("usermods/Tubes/Tubes.h");
   const auto begin = tubes.find("case LegacyPullRendezvousSendWake");
@@ -427,6 +437,7 @@ int main() {
   propagationSerialFormDoesNotConsumeBarePowerSaveP();
   laptopFleetToolCannotStartPropagation();
   productionP2PBuildHasNoBenchBootTriggers();
+  legacyBusRecoveryMakesPlaceholderEffectSafeBeforeWledService();
   oneFieldTurnAdvertisesToOldAndCurrentDig2Gos();
   productionPropagationDoesNotWaitForRebootAck();
   autoTriggerWaitsAndLatchesOneAttempt();
