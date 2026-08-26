@@ -53,12 +53,12 @@ command with no OTA server or credentials. That command does not reinstall the
 root. Wildcard equal-version serve commands are invalid, so current peers do not
 recursively activate one another.
 
-Field activation is explicit and separate from laptop OTA selection. An S3 or
-other controller broadcasts the additive `Q` action, opening a 20-second source
-window on capable tubes. A human double-clicks exactly one source; that tube
-constructs the exact-target command for its own current Device ID and begins one
-bounded turn. The existing `*` / `y####` selection paths retain their
-`WLED-UPDATE` behavior and are not used by propagation.
+Field activation is explicit and separate from laptop OTA selection. An S3,
+Easy Flash, or another authorized controller sends the exact-target `Fleet
+Update Propagate` command to one current Dig2Go. That seed starts one bounded
+turn immediately. The existing `*` / `y####` selection paths retain their
+`WLED-UPDATE` behavior and are not used by propagation; no physical button is
+part of the propagation contract.
 
 Easy Flash may present "propagate after install" as its default product choice,
 but it must still require an explicit user action and invoke this same source

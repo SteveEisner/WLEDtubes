@@ -561,10 +561,7 @@ class TubesUsermod : public Usermod {
         return true;
       }
       if (b == 102) { // Double-click button 0
-        if (controller.isPropagationSelecting()) {
-          if (controller.startSelectedPropagation())
-            controller.acknowledge();
-        } else if (controller.isSelecting()) {
+        if (controller.isSelecting()) {
           controller.acknowledge();
           if (controller.isSelected())
             controller.deselect();

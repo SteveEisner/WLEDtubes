@@ -19,17 +19,22 @@ static std::string readSource(const char* path) {
   return buffer.str();
 }
 
-static void propagationSelectionIsSeparateFromOtaSelection() {
+static void explicitPropagationCommandIsSeparateFromOtaSelection() {
   const std::string controller = readSource("usermods/Tubes/controller.h");
-  EXPECT(controller.find("TUBE_COMMAND('Q', PropagationSelectOperation, MeshScope)")
-      != std::string::npos);
-  const auto begin = controller.find("bool startSelectedPropagation()");
-  const auto end = controller.find("bool isSelected() const", begin);
+  const auto begin = controller.find("void requestFleetUpdate(char* text, bool propagate");
+  const auto end = controller.find("void requestDeviceIdentify", begin);
   EXPECT(begin != std::string::npos && end != std::string::npos);
   const std::string trigger = controller.substr(begin, end - begin);
-  EXPECT(trigger.find("makeModernPropagationServeCommand") != std::string::npos);
-  EXPECT(trigger.find("updater.ready") == std::string::npos);
-  EXPECT(trigger.find("select()") == std::string::npos);
+  EXPECT(trigger.find("if (propagate) offer.flags = FleetUpdatePropagate")
+      != std::string::npos);
+  EXPECT(trigger.find("fleetUpdateTargetsDevice(offer, node.header.id)")
+      != std::string::npos);
+  EXPECT(trigger.find("applyCommand(COMMAND_FLEET_UPGRADE, &offer)")
+      != std::string::npos);
+  EXPECT(trigger.find("sendV3ControlCommand(COMMAND_FLEET_UPGRADE")
+      != std::string::npos);
+  EXPECT(controller.find("PropagationSelectOperation") == std::string::npos);
+  EXPECT(controller.find("startSelectedPropagation") == std::string::npos);
 }
 
 static void barePowerSaveCommandRemainsIntact() {
@@ -122,7 +127,7 @@ static void failedPullKeepsRestoringUntilMeshIsStarted() {
 }
 
 int main() {
-  propagationSelectionIsSeparateFromOtaSelection();
+  explicitPropagationCommandIsSeparateFromOtaSelection();
   barePowerSaveCommandRemainsIntact();
   laptopFleetToolCannotStartPropagation();
   productionBuildHasNoBenchBootTriggers();

@@ -9,9 +9,17 @@ OTA remains a separate update-only operation.
 
 ## Runtime shape
 
-1. A Dig2Go already running the desired image is explicitly chosen as the
-   source. The current field prototype uses `Q` followed by a physical
-   double-click; S3 and Easy Flash own the eventual user-flow policy.
+1. A Dig2Go already running the desired image is explicitly targeted by a
+   `Fleet Update Propagate` command. The command starts its bounded source turn
+   directly; it does not enter ordinary OTA selection or require a button.
+
+   The current serial/control form is:
+
+   ```text
+   P<release>,0.0.0.0,0,0,<target-device-id>,<nonce>,,
+   ```
+
+   `P` is propagation; ordinary server-backed fleet OTA remains `Y`.
 2. The source inspects and serves its exact running application image. A
    legacy-only session uses the deployed RAM-only `TubesOTA` / `tubes123`
    network. A mixed modern turn derives a RAM-only `Tubes-<nonce>` SSID and
@@ -71,7 +79,7 @@ Physically proven on August 25-26, 2026:
 Host/model tests cover the running-image source, strict Dig2Go target contract,
 HTTP ranges and transfer completion, A-to-B, A-to-C, A-to-C-plus-D, bounded
 fanout, modern offer validation, ordinary-OTA non-propagation, lease claim and
-replay prevention, source selection separation, and mixed legacy/modern wake
+replay prevention, command separation, and mixed legacy/modern wake
 construction.
 
 The clean artifact still needs Steve's integration review and a final physical
