@@ -136,6 +136,7 @@ class TubesUsermod : public Usermod {
       status.patternId = controller.current_state.pattern_id;
       status.paletteId = controller.current_state.palette_id;
       status.bpm = controller.current_state.bpm >> 8;
+      status.beatFrame = controller.current_state.beat_frame;
       status.beat = (controller.current_state.beat_frame >> 8) % 16;
       status.currentPatternPhrase = controller.current_state.beat_frame >> 12;
       status.nextPatternPhrase = controller.next_state.pattern_phrase;

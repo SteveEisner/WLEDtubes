@@ -55,6 +55,7 @@ struct TubesS3FieldStatus {
   uint8_t patternId = 0;
   uint8_t paletteId = 0;
   uint16_t bpm = 0;
+  uint32_t beatFrame = 0;
   uint8_t beat = 0;
   uint16_t currentPatternPhrase = 0;
   uint16_t nextPatternPhrase = 0;
