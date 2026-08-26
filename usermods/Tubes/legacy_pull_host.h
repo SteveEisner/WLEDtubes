@@ -59,6 +59,10 @@ struct LegacyPullTelemetry {
     return uint8_t(slots()[0].admitted) + uint8_t(slots()[1].admitted);
   }
 
+  static uint8_t completedCount() {
+    return uint8_t(slots()[0].complete) + uint8_t(slots()[1].complete);
+  }
+
   static void observeStation() {
     if (stationSeen() || WiFi.softAPgetStationNum() == 0) return;
     stationSeen() = true;
@@ -308,7 +312,7 @@ public:
     lifecycle.requestSeen = LegacyPullTelemetry::requestSeen();
     lifecycle.incompleteRequest = LegacyPullTelemetry::hasIncompleteRequest();
     lifecycle.bodyComplete = bodyComplete();
-    lifecycle.allLifetimeSlotsUsed = capacityReached();
+    lifecycle.allLifetimeSlotsUsed = LegacyPullTelemetry::completedCount() >= 2;
     return legacyPullHostRestoreReason(lifecycle, now, REQUEST_TIMEOUT_MS,
         STREAM_IDLE_TIMEOUT_MS, ASSOCIATED_REQUEST_TIMEOUT_MS,
         SECOND_RECEIVER_GRACE_MS) != LegacyPullHostKeepServing;

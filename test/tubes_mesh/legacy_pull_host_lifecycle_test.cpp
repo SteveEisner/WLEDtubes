@@ -41,6 +41,17 @@ void bothCompletedLifetimeSlotsRestoreImmediately() {
       "two completed lifetime slots waited through second-receiver grace");
 }
 
+void twoAdmittedButOnlyOneCompletedRetainsGrace() {
+  LegacyPullHostLifecycle state;
+  state.startedAt = 100;
+  state.requestSeen = true;
+  state.bodyComplete = true;
+  state.completedAt = 2000;
+  state.allLifetimeSlotsUsed = false;
+  expect(reason(state, 2000) == LegacyPullHostKeepServing,
+      "one completed body was mistaken for two completed lifetime slots");
+}
+
 void oneCompletedSlotRetainsSecondReceiverGrace() {
   LegacyPullHostLifecycle state;
   state.requestSeen = true;
@@ -104,6 +115,7 @@ void terminalTurnCannotAutoRepeatButExplicitTurnCanRearm() {
 int main() {
   associatedWithoutRequestRecoversBoundedly();
   bothCompletedLifetimeSlotsRestoreImmediately();
+  twoAdmittedButOnlyOneCompletedRetainsGrace();
   oneCompletedSlotRetainsSecondReceiverGrace();
   activePartialBodyUsesProgressDeadline();
   deadlinesRemainCorrectAcrossMillisWrap();
