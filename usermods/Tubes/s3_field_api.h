@@ -50,6 +50,7 @@ struct TubesS3CarrierTarget {
 struct TubesS3CarrierArtifact {
   uint8_t family = 0;
   uint8_t variant = 0;
+  bool peerPropagation = false;
   uint16_t release = 0;
   uint32_t size = 0;
 };
@@ -103,3 +104,4 @@ size_t tubesS3CarrierTargetCount();
 bool tubesS3ReadCarrierTarget(size_t index, TubesS3CarrierTarget &target);
 size_t tubesS3CarrierArtifactCount();
 bool tubesS3ReadCarrierArtifact(size_t index, TubesS3CarrierArtifact &artifact);
+bool tubesS3SeedDig2GoPropagation(uint16_t nodeId);
