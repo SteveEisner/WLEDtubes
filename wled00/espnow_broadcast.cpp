@@ -323,6 +323,46 @@ bool ESPNOWBroadcast::send(const uint8_t* msg, size_t len) {
 #endif
 }
 
+bool ESPNOWBroadcast::startAPCarrier(uint8_t channel) {
+#ifdef ESP32
+    if (!WiFi.getMode() || !WiFi.softAPIP()) return false;
+    // AP-carrier takeover is a transaction. Never leave callers observing the
+    // old STA STARTED state after its ESP-NOW instance has been deinitialized.
+    espnowBroadcastImpl._state.exchange(STOPPED);
+    esp_now_deinit();
+    esp_err_t err = esp_now_init();
+    if (err != ESP_OK) {
+        Serial.printf("ESP-NOW AP carrier init failed: %d\n", err);
+        return false;
+    }
+    err = esp_now_register_recv_cb(ESPNOWBroadcastImpl::onESPNowRxCallback);
+    if (err != ESP_OK) {
+        Serial.printf("ESP-NOW AP carrier receive failed: %d\n", err);
+        esp_now_deinit();
+        return false;
+    }
+    esp_now_peer_info_t peer = {};
+    static const uint8_t broadcast[] = BROADCAST_ADDR_ARRAY_INITIALIZER;
+    memcpy(peer.peer_addr, broadcast, sizeof(peer.peer_addr));
+    peer.channel = channel;
+    peer.ifidx = WIFI_IF_AP;
+    peer.encrypt = false;
+    err = esp_now_add_peer(&peer);
+    if (err != ESP_OK) {
+        Serial.printf("ESP-NOW AP carrier peer failed: %d\n", err);
+        esp_now_unregister_recv_cb();
+        esp_now_deinit();
+        return false;
+    }
+    espnowBroadcastImpl._state.exchange(STARTED);
+    Serial.printf("ESP-NOW AP carrier ready channel=%u if=AP\n", channel);
+    return true;
+#else
+    (void)channel;
+    return false;
+#endif
+}
+
 bool ESPNOWBroadcast::registerCallback( ESPNOWBroadcast::receive_callback_t callback ) {
     // last element is always null
     size_t ndx;

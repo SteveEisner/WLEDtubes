@@ -17,6 +17,10 @@
 
 #include "controller.h"
 #include "debug.h"
+#include "dig2go_peer_config.h"
+#include "legacy_pull_host.h"
+#include "legacy_pull_rendezvous.h"
+#include "modern_propagation_lease_storage.h"
 
 #ifndef PIXEL_COUNTS
 #define PIXEL_COUNTS DEFAULT_LED_COUNT
@@ -45,6 +49,158 @@ class TubesUsermod : public Usermod {
     Master master = Master(controller);
     bool isLegacy = false;
     bool checkedLedSegments = false;
+#if defined(TUBES_DIG2GO_LEGACY_PULL_HOST)
+    LegacyPullHost legacyPullHost;
+    LegacyPullRendezvous legacyPullRendezvous;
+    bool legacyPullOfferSent = false;
+    bool legacyPullWakeAccepted = false;
+    bool legacyPullNeedsRestore = false;
+    bool legacyPullRestoreStarted = false;
+    bool legacyPullBodyServed = false;
+    bool legacyPullNoReceiver = false;
+    bool legacyHostRetired = false;
+    bool modernPropagationTurn = false;
+    bool modernPropagationLeaseCleared = false;
+    uint32_t modernPropagationNonce = 0;
+    uint32_t modernPropagationStartAt = 0;
+    bool modernPropagationWaitForSourceQuiet = false;
+    uint32_t modernPropagationSourceNonce = 0;
+    uint32_t modernPropagationBatonUntil = 0;
+    uint32_t modernPropagationNextBatonAt = 0;
+    bool legacyMigrationBootCandidate = false;
+    bool currentReleaseMarkerWritten = false;
+    uint32_t currentReleaseMarkerNextAttemptAt = 0;
+    static constexpr uint32_t LEGACY_BOOTSTRAP_BATON_WINDOW_MS = 60000;
+    static constexpr uint32_t CURRENT_RELEASE_MARKER_RETRY_MS = 60000;
+    static constexpr uint32_t LEGACY_BOOTSTRAP_SOURCE_QUIET_MS = 5000;
+    static constexpr uint32_t LEGACY_BOOTSTRAP_BATON_GRACE_MS = 15000;
+#endif
+#if TUBES_ENABLE_DIG2GO_PEER_PROPAGATION
+    static TubesUsermod*& dig2GoPeerPropagationInstance() {
+      static TubesUsermod* instance = nullptr;
+      return instance;
+    }
+
+    static bool acceptDig2GoPropagation(const FleetUpdateOffer& offer) {
+      return dig2GoPeerPropagationInstance()
+          && dig2GoPeerPropagationInstance()->acceptDig2GoPropagationInternal(offer);
+    }
+
+    bool acceptDig2GoPropagationInternal(const FleetUpdateOffer& offer) {
+#if defined(TUBES_DIG2GO_LEGACY_PULL_HOST)
+      if (!(offer.flags & FleetUpdatePropagate)
+          || offer.tubesVersion != RELEASE_VERSION
+          || legacyPullHost.started())
+        return false;
+      if (offer.serverPort != 0) {
+        if (modernPropagationWaitForSourceQuiet
+            && modernPropagationSourceNonce == offer.nonce) {
+          modernPropagationStartAt = millis() + LEGACY_BOOTSTRAP_SOURCE_QUIET_MS;
+          return true;
+        }
+        if (!isFreshLegacyBootstrapBaton(
+                offer, RELEASE_VERSION, millis(), LEGACY_BOOTSTRAP_BATON_WINDOW_MS,
+                legacyMigrationBootCandidate)
+            || !legacyPullCanAcceptExplicitTurn(modernPropagationTurn))
+          return false;
+        currentReleaseMarkerWritten = writeCurrentReleaseMarker(RELEASE_VERSION);
+        legacyMigrationBootCandidate = false;
+        initializePeerPropagationTurn();
+        modernPropagationTurn = true;
+        modernPropagationWaitForSourceQuiet = true;
+        modernPropagationSourceNonce = offer.nonce;
+        modernPropagationNonce = esp_random();
+        if (modernPropagationNonce == 0) modernPropagationNonce = 1;
+        modernPropagationStartAt = millis() + LEGACY_BOOTSTRAP_SOURCE_QUIET_MS;
+        Serial.printf("FLEET_PROPAGATION legacy_baton source=%08lX offer=%08lX\n",
+            static_cast<unsigned long>(offer.nonce),
+            static_cast<unsigned long>(modernPropagationNonce));
+        return true;
+      }
+      if (!legacyPullCanAcceptExplicitTurn(modernPropagationTurn))
+        return false;
+      initializePeerPropagationTurn();
+      modernPropagationTurn = true;
+      modernPropagationWaitForSourceQuiet = false;
+      modernPropagationSourceNonce = 0;
+      modernPropagationNonce = esp_random();
+      if (modernPropagationNonce == 0) modernPropagationNonce = 1;
+      modernPropagationStartAt = millis() + 1000;
+      Serial.printf("FLEET_PROPAGATION commanded source=%08lX offer=%08lX\n",
+          static_cast<unsigned long>(offer.nonce),
+          static_cast<unsigned long>(modernPropagationNonce));
+      return true;
+#else
+      (void)offer;
+      return false;
+#endif
+    }
+
+#if defined(TUBES_DIG2GO_LEGACY_PULL_HOST)
+    void initializePeerPropagationTurn() {
+      legacyPullOfferSent = false;
+      legacyPullWakeAccepted = false;
+      legacyPullNeedsRestore = false;
+      legacyPullRestoreStarted = false;
+      legacyPullBodyServed = false;
+      legacyPullNoReceiver = false;
+      legacyHostRetired = false;
+      modernPropagationTurn = false;
+      modernPropagationLeaseCleared = false;
+      modernPropagationNonce = 0;
+      modernPropagationStartAt = 0;
+      modernPropagationWaitForSourceQuiet = false;
+      modernPropagationSourceNonce = 0;
+      modernPropagationBatonUntil = 0;
+      modernPropagationNextBatonAt = 0;
+      legacyPullHost.clearModernTurn();
+    }
+
+    void finishPeerPropagationTurn() {
+      // Preserve offerSent/hostRetired so PRIME and test-only boot gates cannot
+      // immediately start another host. A fresh explicit command is the only
+      // operation that reinitializes those admission latches.
+      legacyPullWakeAccepted = false;
+      legacyPullNeedsRestore = false;
+      legacyPullRestoreStarted = false;
+      legacyPullBodyServed = false;
+      legacyPullNoReceiver = false;
+      modernPropagationTurn = false;
+      modernPropagationLeaseCleared = false;
+      modernPropagationNonce = 0;
+      modernPropagationStartAt = 0;
+      modernPropagationWaitForSourceQuiet = false;
+      modernPropagationSourceNonce = 0;
+      modernPropagationBatonUntil = 0;
+      modernPropagationNextBatonAt = 0;
+      legacyPullHost.clearModernTurn();
+    }
+#endif
+
+#endif
+
+    void drawDig2GoConnectionDiagnostic() {
+#if defined(TUBES_DIG2GO_LEGACY_PULL_HOST)
+      if (modernPropagationTurn && legacyPullOfferSent && !legacyHostRetired) {
+        const bool terminal = legacyPullNeedsRestore;
+        const auto stageColor = [terminal](bool passed) {
+          return passed ? CRGB::Green : (terminal ? CRGB::Red : CRGB::Blue);
+        };
+        const CRGB stages[5] = {
+          stageColor(legacyPullWakeAccepted),
+          stageColor(legacyPullHost.stationSeen()),
+          stageColor(legacyPullHost.requestSeen()),
+          stageColor(legacyPullHost.bodyComplete()),
+          legacyPullBodyServed ? CRGB::Yellow : stageColor(false)
+        };
+        for (uint8_t pair = 0; pair < 5; pair++) {
+          strip.setPixelColor(pair * 2, stages[pair]);
+          strip.setPixelColor(pair * 2 + 1, stages[pair]);
+        }
+        return;
+      }
+#endif
+    }
 
     void randomize() {
       randomSeed(esp_random());
@@ -91,6 +247,13 @@ class TubesUsermod : public Usermod {
       }
 
       if (!busConfigs.empty()) {
+        // A legacy config may leave a zero-length segment running an effect
+        // such as Flow. WLED services that segment before it consumes
+        // doInitBusses later in the same loop, and some native effects divide
+        // by their derived zero zone length. Keep the placeholder inert for
+        // that single loop; finalizeInit/fixInvalidSegments restores the real
+        // bus-backed segment immediately afterward.
+        strip.getMainSegment().setMode(FX_MODE_STATIC);
         doInitBusses = true;
         Serial.println(F("Tubes: recovered default LED bus config"));
       }
@@ -209,6 +372,36 @@ class TubesUsermod : public Usermod {
       // Start timing
       globalTimer.setup();
       controller.setup();
+#if defined(TUBES_DIG2GO_LEGACY_PULL_HOST)
+      legacyPullHost.setup();
+      currentReleaseMarkerWritten = hasCurrentReleaseMarker(RELEASE_VERSION);
+      legacyMigrationBootCandidate = !currentReleaseMarkerWritten
+          && esp_reset_reason() == ESP_RST_SW;
+      if (!currentReleaseMarkerWritten && !legacyMigrationBootCandidate)
+        currentReleaseMarkerWritten = writeCurrentReleaseMarker(RELEASE_VERSION);
+      currentReleaseMarkerNextAttemptAt = millis() + CURRENT_RELEASE_MARKER_RETRY_MS;
+      Serial.printf("FLEET_PROPAGATION bootstrap_candidate=%u marker=%u reset=%u\n",
+          legacyMigrationBootCandidate, currentReleaseMarkerWritten,
+          static_cast<unsigned>(esp_reset_reason()));
+      ModernPropagationLeaseRecord modernLease;
+      if (claimStoredModernPropagationLease(modernLease, RELEASE_VERSION)) {
+        currentReleaseMarkerWritten = writeCurrentReleaseMarker(RELEASE_VERSION)
+            || currentReleaseMarkerWritten;
+        legacyMigrationBootCandidate = false;
+        modernPropagationTurn = true;
+        modernPropagationNonce = esp_random();
+        if (modernPropagationNonce == 0) modernPropagationNonce = 1;
+        modernPropagationStartAt = millis() + 5000;
+        Serial.printf("FLEET_PROPAGATION claimed release=%u source=%08lX offer=%08lX\n",
+            modernLease.tubesVersion,
+            static_cast<unsigned long>(modernLease.sourceNonce),
+            static_cast<unsigned long>(modernPropagationNonce));
+      }
+#endif
+#if TUBES_ENABLE_DIG2GO_PEER_PROPAGATION
+      dig2GoPeerPropagationInstance() = this;
+      controller.setDig2GoPropagationCallback(acceptDig2GoPropagation);
+#endif
 
       if (!controller.isHomeLightRole()) {
         if (PinManager::isPinOk(MASTER_PIN)) {
@@ -250,6 +443,162 @@ class TubesUsermod : public Usermod {
 #endif
       }
       controller.update();
+#if defined(TUBES_DIG2GO_LEGACY_PULL_HOST)
+      if (!currentReleaseMarkerWritten
+          && static_cast<int32_t>(millis() - currentReleaseMarkerNextAttemptAt) >= 0) {
+        currentReleaseMarkerWritten = writeCurrentReleaseMarker(RELEASE_VERSION);
+        legacyMigrationBootCandidate = false;
+        currentReleaseMarkerNextAttemptAt = millis() + CURRENT_RELEASE_MARKER_RETRY_MS;
+        Serial.printf("FLEET_PROPAGATION marker_written=%u\n",
+            currentReleaseMarkerWritten);
+      }
+      const uint32_t legacyHostStartMs = modernPropagationStartAt;
+      const bool legacyHostEligible = legacyPullAutomaticHostEligible(
+          false, modernPropagationTurn, legacyPullOfferSent,
+          legacyHostRetired);
+      if (legacyHostEligible
+          && millis() >= legacyHostStartMs && controller.meshRadioStartedAfterDig2Go()
+          && !controller.deviceUpdateInProgress()) {
+        legacyPullOfferSent = true;
+        if (!legacyPullHost.prepare()) {
+          controller.setDig2GoPeerPropagationOverlay(Failed);
+          Serial.println(F("TUBE_PULL failed: running image unavailable"));
+          if (modernPropagationTurn) {
+            clearModernPropagationLease();
+            finishPeerPropagationTurn();
+          }
+        } else {
+          // One explicit field turn can contain both deployed legacy clients
+          // and current FleetUpdateOffer receivers. Serialize both lifetime
+          // slots because a legacy client treats momentary backpressure as EOF.
+          legacyPullHost.setConcurrentCapacity(1);
+          if (modernPropagationTurn) {
+            legacyPullHost.setModernTurn(modernPropagationNonce, RELEASE_VERSION,
+                TUBES_HARDWARE_FAMILY, TUBES_FIRMWARE_VARIANT);
+          } else {
+            legacyPullHost.clearModernTurn();
+          }
+          if (!legacyPullHost.start(millis())) {
+            controller.setDig2GoPeerPropagationOverlay(Failed);
+            Serial.println(F("TUBE_PULL failed: host start"));
+            legacyPullNeedsRestore = true;
+          } else {
+            legacyPullRendezvous.begin(millis());
+            Serial.println(F("TUBE_PULL_RENDEZVOUS started"));
+          }
+        }
+      }
+      legacyPullHost.observe();
+      switch (legacyPullRendezvous.update(millis(), legacyPullHost.capacityReached())) {
+        case LegacyPullRendezvousSendWake: {
+          if (modernPropagationTurn) {
+            FleetUpdateOffer offer;
+            const uint8_t serverAddress[4] = {4, 3, 2, 1};
+            const bool madeOffer = makeModernPropagationOffer(
+                offer, RELEASE_VERSION, modernPropagationNonce, serverAddress,
+                80, 1000, legacyPullHost.sessionSSID(),
+                legacyPullHost.sessionPassword());
+            legacyPullWakeAccepted = (madeOffer
+                && controller.sendFleetPullUpdateOffer(offer))
+                || legacyPullWakeAccepted;
+          }
+          // The deployed wake is additive during a modern turn. Old Dig2Gos
+          // understand only this command; current Dig2Gos ignore it because
+          // the offered release is not newer and consume FleetUpdateOffer.
+          AutoUpdateOffer legacyOffer;
+          legacyOffer.version = RELEASE_VERSION;
+          strlcpy(legacyOffer.ssid, legacyPullHost.sessionSSID(), sizeof(legacyOffer.ssid));
+          strlcpy(legacyOffer.password, legacyPullHost.sessionPassword(), sizeof(legacyOffer.password));
+          legacyOffer.host = IPAddress(4, 3, 2, 1);
+          legacyPullWakeAccepted = controller.sendLegacyPullUpdateOffer(legacyOffer)
+              || legacyPullWakeAccepted;
+          if (legacyPullRendezvous.wakeAttempts() == 1
+              || legacyPullRendezvous.wakeAttempts() % 10 == 0)
+            Serial.printf("TUBE_PULL_WAKE attempts=%u radio_accepted=%u\n",
+                legacyPullRendezvous.wakeAttempts(), legacyPullWakeAccepted);
+          break;
+        }
+        case LegacyPullRendezvousStationArrived:
+          Serial.printf("TUBE_PULL_RENDEZVOUS station attempts=%u\n",
+              legacyPullRendezvous.wakeAttempts());
+          break;
+        case LegacyPullRendezvousTimedOut:
+          Serial.printf("TUBE_PULL_RENDEZVOUS timeout attempts=%u\n",
+              legacyPullRendezvous.wakeAttempts());
+          legacyPullHost.requestRestore();
+          legacyPullNoReceiver = !legacyPullHost.stationSeen();
+          break;
+        default:
+          break;
+      }
+      if (legacyPullHost.shouldRestore(millis())) {
+        legacyPullBodyServed = legacyPullHost.bodyComplete();
+        legacyPullRendezvous.cancel();
+        legacyPullHost.stop();
+        legacyPullNeedsRestore = true;
+        controller.setDig2GoPeerPropagationOverlay(legacyPullBodyServed ? Received
+            : (legacyPullNoReceiver ? Idle : Failed));
+      }
+      if (legacyPullNeedsRestore && !legacyPullRestoreStarted) {
+        legacyPullRestoreStarted = controller.restoreMeshRadioAfterDig2Go();
+        if (legacyPullRestoreStarted)
+          Serial.println(F("TUBE_PULL_RESTORE radio_requested"));
+      }
+      if (legacyPullRestoreStarted && controller.meshRadioStartedAfterDig2Go()) {
+        if (legacyPullNoReceiver && !legacyPullBodyServed && !legacyHostRetired) {
+          legacyHostRetired = true;
+          controller.setDig2GoPeerPropagationOverlay(Idle);
+          Serial.println(F("TUBE_PULL chain_complete_no_receiver"));
+        }
+        // A complete body is the predecessor's terminal success condition.
+        // Do not wait for a reboot report or second acknowledgement: the child
+        // continues independently from its pre-reboot lease / first-boot turn.
+        if (legacyPullBodyServed && !legacyHostRetired) {
+          legacyHostRetired = true;
+          controller.setDig2GoPeerPropagationOverlay(Idle);
+          Serial.println(F("TUBE_PULL predecessor_recovered transfer_complete_no_ack"));
+        }
+      }
+      // A legacy client cannot persist propagation intent before installing
+      // this image. Once the AP is gone and ESP-NOW is restored, repeat the
+      // same existing offer briefly so freshly rebooted children can take the
+      // baton. This is radio-only; the predecessor does not wait for an ACK.
+      if (modernPropagationTurn && legacyPullBodyServed
+          && legacyPullRestoreStarted && controller.meshRadioStartedAfterDig2Go()) {
+        if (modernPropagationBatonUntil == 0) {
+          modernPropagationBatonUntil = millis() + LEGACY_BOOTSTRAP_BATON_GRACE_MS;
+          modernPropagationNextBatonAt = millis();
+          Serial.println(F("FLEET_PROPAGATION baton_grace_started"));
+        }
+        if (static_cast<int32_t>(modernPropagationBatonUntil - millis()) > 0
+            && static_cast<int32_t>(millis() - modernPropagationNextBatonAt) >= 0) {
+          FleetUpdateOffer baton;
+          const uint8_t serverAddress[4] = {4, 3, 2, 1};
+          if (makeModernPropagationOffer(
+                  baton, RELEASE_VERSION, modernPropagationNonce, serverAddress,
+                  80, 1000, legacyPullHost.sessionSSID(),
+                  legacyPullHost.sessionPassword()))
+            controller.sendFleetPullUpdateOffer(baton);
+          modernPropagationNextBatonAt = millis() + 1000;
+        }
+      }
+      const bool modernBatonGraceComplete = modernPropagationBatonUntil == 0
+          || static_cast<int32_t>(millis() - modernPropagationBatonUntil) >= 0;
+      if (modernPropagationTurn && legacyPullRestoreStarted
+          && controller.meshRadioStartedAfterDig2Go()
+          && !modernPropagationLeaseCleared && modernBatonGraceComplete) {
+        clearModernPropagationLease();
+        modernPropagationLeaseCleared = true;
+        Serial.println(F("FLEET_PROPAGATION lease_cleared"));
+      }
+      if (legacyPullPropagationTurnFinished(modernPropagationTurn,
+          legacyPullRestoreStarted, controller.meshRadioStartedAfterDig2Go(),
+          legacyHostRetired, legacyPullNeedsRestore, legacyPullBodyServed)
+          && modernBatonGraceComplete) {
+        Serial.println(F("FLEET_PROPAGATION turn_reset"));
+        finishPeerPropagationTurn();
+      }
+#endif
       debug.update();
 
       // Draw after everything else is done
@@ -300,6 +649,7 @@ class TubesUsermod : public Usermod {
       // AI: below section was generated by an AI
       debug.observeRenderedOutput();
       // AI: end
+      drawDig2GoConnectionDiagnostic();
     }
 
     bool handleButton(uint8_t b) {
@@ -316,13 +666,14 @@ class TubesUsermod : public Usermod {
         return true;
       }
       if (b == 102) { // Double-click button 0
-        controller.acknowledge();
         if (controller.isSelecting()) {
+          controller.acknowledge();
           if (controller.isSelected())
             controller.deselect();
           else
             controller.select();
         } else {
+          controller.acknowledge();
           controller.request_new_bpm();
         }
         return true;

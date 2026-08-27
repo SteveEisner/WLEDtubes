@@ -26,7 +26,9 @@ jobs:
     - name: Get default environments
       id: envs
       run: |
-        echo "usermods=$(find usermods/ -name library.json | xargs dirname | xargs -n 1 basename | jq -R | grep -v PWM_fan | grep -v BME68X_v2| grep -v pixels_dice_tray | jq --slurp -c)" >> $GITHUB_OUTPUT
+        # WaveshareS3TubesRemote requires its board-specific flags and hardware
+        # libraries, so the generic four-family usermod matrix cannot build it.
+        echo "usermods=$(find usermods/ -name library.json | xargs dirname | xargs -n 1 basename | jq -R | grep -v PWM_fan | grep -v BME68X_v2 | grep -v pixels_dice_tray | grep -v WaveshareS3TubesRemote | jq --slurp -c)" >> $GITHUB_OUTPUT
     outputs:
       usermods: ${{ steps.envs.outputs.usermods }}
 

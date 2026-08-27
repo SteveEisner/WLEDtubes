@@ -39,6 +39,11 @@ class ESPNOWBroadcast {
 
     bool send(const uint8_t* msg, size_t len);
 
+    // Temporarily own ESP-NOW on WLED's soft-AP interface. This is used by
+    // the bounded Dig2Go legacy pull carrier; ordinary mesh operation remains
+    // STA-owned and is restored after the carrier stops.
+    bool startAPCarrier(uint8_t channel);
+
     typedef void (*receive_callback_t)(const uint8_t *sender, const uint8_t *data, uint8_t len, int8_t rssi);
     bool registerCallback( receive_callback_t callback );
     bool removeCallback( receive_callback_t callback );
