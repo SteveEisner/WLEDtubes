@@ -68,7 +68,9 @@ class TubesUsermod : public Usermod {
     uint32_t modernPropagationNextBatonAt = 0;
     bool legacyMigrationBootCandidate = false;
     bool currentReleaseMarkerWritten = false;
+    uint32_t currentReleaseMarkerNextAttemptAt = 0;
     static constexpr uint32_t LEGACY_BOOTSTRAP_BATON_WINDOW_MS = 60000;
+    static constexpr uint32_t CURRENT_RELEASE_MARKER_RETRY_MS = 60000;
     static constexpr uint32_t LEGACY_BOOTSTRAP_SOURCE_QUIET_MS = 5000;
     static constexpr uint32_t LEGACY_BOOTSTRAP_BATON_GRACE_MS = 15000;
 #endif
@@ -282,6 +284,7 @@ class TubesUsermod : public Usermod {
           && esp_reset_reason() == ESP_RST_SW;
       if (!currentReleaseMarkerWritten && !legacyMigrationBootCandidate)
         currentReleaseMarkerWritten = writeCurrentReleaseMarker(RELEASE_VERSION);
+      currentReleaseMarkerNextAttemptAt = millis() + CURRENT_RELEASE_MARKER_RETRY_MS;
       Serial.printf("FLEET_PROPAGATION bootstrap_candidate=%u marker=%u reset=%u\n",
           legacyMigrationBootCandidate, currentReleaseMarkerWritten,
           static_cast<unsigned>(esp_reset_reason()));
@@ -343,9 +346,10 @@ class TubesUsermod : public Usermod {
       controller.update();
 #if defined(TUBES_DIG2GO_LEGACY_PULL_HOST)
       if (!currentReleaseMarkerWritten
-          && millis() > LEGACY_BOOTSTRAP_BATON_WINDOW_MS) {
+          && static_cast<int32_t>(millis() - currentReleaseMarkerNextAttemptAt) >= 0) {
         currentReleaseMarkerWritten = writeCurrentReleaseMarker(RELEASE_VERSION);
         legacyMigrationBootCandidate = false;
+        currentReleaseMarkerNextAttemptAt = millis() + CURRENT_RELEASE_MARKER_RETRY_MS;
         Serial.printf("FLEET_PROPAGATION marker_written=%u\n",
             currentReleaseMarkerWritten);
       }

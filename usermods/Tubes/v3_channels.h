@@ -132,13 +132,16 @@ struct SoundProgramEntry {
 };
 
 constexpr uint32_t BEAT_SOUND_PROGRAM_MAGIC = 0x31504453; // "SDP1" little-endian.
-constexpr uint8_t BEAT_SOUND_PROGRAM_VERSION_1 = 1;
+constexpr uint8_t BEAT_SOUND_PROGRAM_VERSION_2 = 2;
 
+// Version 2 replaces the reserved bytes with the master's per-program accent
+// chance while preserving the deployed extension and Beat snapshot sizes.
 struct BeatSoundProgramExtension {
   uint32_t magic = BEAT_SOUND_PROGRAM_MAGIC;
-  uint8_t version = BEAT_SOUND_PROGRAM_VERSION_1;
-  uint8_t length = sizeof(SoundProgramEntry) * 2;
-  uint8_t reserved[2] = {0};
+  uint8_t version = BEAT_SOUND_PROGRAM_VERSION_2;
+  uint8_t length = sizeof(SoundProgramEntry) * 2 + 2;
+  uint8_t currentChance = UINT8_MAX;
+  uint8_t nextChance = UINT8_MAX;
   SoundProgramEntry current;
   SoundProgramEntry next;
 };
@@ -521,81 +524,6 @@ inline bool writeChannelBody(TubesChannelPayload& payload, const void* body, uin
   if (bodyLength)
     memcpy(payload.body, body, bodyLength);
   payload.envelope.bodyLength = bodyLength;
-  return true;
-}
-
-inline bool hasBeatSoundProgramExtension(const TubesChannelPayload& payload) {
-  if (payload.envelope.bodyLength != sizeof(BeatChannelState))
-    return false;
-  uint32_t magic = 0;
-  memcpy(&magic, payload.body + sizeof(BeatChannelState), sizeof(magic));
-  return magic == BEAT_SOUND_PROGRAM_MAGIC;
-}
-
-inline bool readBeatSoundProgramExtension(
-    const TubesChannelPayload& payload,
-    BeatSoundProgramExtension& extension
-) {
-  if (!hasBeatSoundProgramExtension(payload))
-    return false;
-  memcpy(
-      &extension,
-      payload.body + sizeof(BeatChannelState),
-      sizeof(extension)
-  );
-  return extension.version == BEAT_SOUND_PROGRAM_VERSION_1
-      && extension.length == sizeof(SoundProgramEntry) * 2
-      && extension.reserved[0] == 0
-      && extension.reserved[1] == 0;
-}
-
-inline bool writeBeatSoundProgramExtension(
-    TubesChannelPayload& payload,
-    const BeatSoundProgramExtension& extension
-) {
-  if (payload.envelope.bodyLength != sizeof(BeatChannelState)
-      || extension.magic != BEAT_SOUND_PROGRAM_MAGIC
-      || extension.version != BEAT_SOUND_PROGRAM_VERSION_1
-      || extension.length != sizeof(SoundProgramEntry) * 2)
-    return false;
-  memcpy(
-      payload.body + sizeof(BeatChannelState),
-      &extension,
-      sizeof(extension)
-  );
-  return true;
-}
-
-inline bool hasBeatTransientExtension(const TubesChannelPayload& payload) {
-  uint16_t magic = 0;
-  constexpr size_t offset = sizeof(BeatChannelState) + sizeof(BeatSoundProgramExtension);
-  memcpy(&magic, payload.body + offset, sizeof(magic));
-  return magic == BEAT_TRANSIENT_MAGIC;
-}
-
-// Reads the additive transient trailer that old generation-1 nodes safely relay as padding.
-inline bool readBeatTransientExtension(
-    const TubesChannelPayload& payload,
-    BeatTransientExtension& extension
-) {
-  if (!hasBeatTransientExtension(payload))
-    return false;
-  constexpr size_t offset = sizeof(BeatChannelState) + sizeof(BeatSoundProgramExtension);
-  memcpy(&extension, payload.body + offset, sizeof(extension));
-  return extension.version == BEAT_TRANSIENT_VERSION_1 && extension.reserved == 0;
-}
-
-inline bool writeBeatTransientExtension(
-    TubesChannelPayload& payload,
-    const BeatTransientExtension& extension
-) {
-  if (payload.envelope.bodyLength != sizeof(BeatChannelState)
-      || extension.magic != BEAT_TRANSIENT_MAGIC
-      || extension.version != BEAT_TRANSIENT_VERSION_1
-      || extension.reserved != 0)
-    return false;
-  constexpr size_t offset = sizeof(BeatChannelState) + sizeof(BeatSoundProgramExtension);
-  memcpy(payload.body + offset, &extension, sizeof(extension));
   return true;
 }
 

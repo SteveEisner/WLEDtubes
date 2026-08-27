@@ -7,7 +7,8 @@ running and stops microphone estimates from changing it.
 
 Sound overlays and the audio workshop also start disabled, regardless of persisted
 AudioReactive configuration. A `MASTER` build claims Beat-channel ownership during
-startup, but it still starts with microphone tracking and visual overlays disabled.
+startup and enables microphone tempo tracking, but its visual overlay remains
+disabled until explicitly requested.
 
 ## Signal path
 

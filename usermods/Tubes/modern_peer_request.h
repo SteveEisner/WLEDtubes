@@ -20,7 +20,7 @@ inline int modernPeerHexDigit(char value) {
 }
 
 inline bool parseModernPeerMac(const char* text, uint8_t mac[6]) {
-  if (!text || strlen(text) != 12) return false;
+  if (!text || strnlen(text, 13) != 12) return false;
   for (uint8_t index = 0; index < 6; index++) {
     const int high = modernPeerHexDigit(text[index * 2]);
     const int low = modernPeerHexDigit(text[index * 2 + 1]);
