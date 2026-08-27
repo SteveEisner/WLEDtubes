@@ -1,9 +1,9 @@
-import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import test from 'node:test';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const test = require('node:test');
 
 const source = fs.readFileSync(
-  new URL('../usermods/WaveshareS3TubesRemote/WaveshareS3TubesRemote.cpp', import.meta.url),
+  require.resolve('../usermods/WaveshareS3TubesRemote/WaveshareS3TubesRemote.cpp'),
   'utf8',
 );
 
