@@ -14,6 +14,7 @@
 #include "core_esp8266_waveform.h"
 #endif
 #include "bus_manager.h"
+#include "bus_factory_classification.h"
 #include "bus_wrapper.h"
 #include "wled.h"
 
@@ -1220,6 +1221,14 @@ size_t BusHub75Matrix::getPins(uint8_t* pinArray) const {
 #endif
 // ***************************************************************************
 
+#ifdef TUBES_NULL_OUTPUT
+BusTubesNull::BusTubesNull(const BusConfig &bc)
+: Bus(TYPE_TUBES_NULL, bc.start, RGBW_MODE_MANUAL_ONLY, bc.count, bc.reversed, false)
+{
+  _valid = true;
+}
+#endif
+
 BusPlaceholder::BusPlaceholder(const BusConfig &bc)
 : Bus(bc.type, bc.start, bc.autoWhite, bc.count, bc.reversed, bc.refreshReq)
 , _colorOrder(bc.colorOrder)
@@ -1244,6 +1253,11 @@ size_t BusPlaceholder::getPins(uint8_t* pinArray) const {
 //utility to get the approx. memory usage of a given BusConfig inclduding segmentbuffer and global buffer (4 bytes per pixel)
 size_t BusConfig::memUsage() const {
   size_t mem = (count + skipAmount) * 8; // 8 bytes per pixel for segment + global buffer
+#ifdef TUBES_NULL_OUTPUT
+  if (type == TYPE_TUBES_NULL) {
+    mem += sizeof(BusTubesNull);
+  } else
+#endif
   if (Bus::isVirtual(type)) {
     mem += sizeof(BusNetwork) + (count * Bus::getNumberOfChannels(type)); // note: getNumberOfChannels() includes CCT channel if applicable but virtual buses do not use CCT channel buffer
   } else if (Bus::isDigital(type)) {
@@ -1272,6 +1286,10 @@ int BusManager::add(const BusConfig &bc, bool placeholder) {
   if (digital > WLED_MAX_DIGITAL_CHANNELS || analog > WLED_MAX_ANALOG_CHANNELS) placeholder = true; // TODO: add errorFlag here
   if (placeholder) {
     busses.push_back(make_unique<BusPlaceholder>(bc));
+#ifdef TUBES_NULL_OUTPUT
+  } else if (classifyBusFactoryType(bc.type, TYPE_TUBES_NULL, TYPE_VIRTUAL_MIN, TYPE_VIRTUAL_MAX) == BusFactoryKind::TubesNull) {
+    busses.push_back(make_unique<BusTubesNull>(bc));
+#endif
   } else if (Bus::isVirtual(bc.type)) {
     busses.push_back(make_unique<BusNetwork>(bc));
 #ifdef WLED_ENABLE_HUB75MATRIX
