@@ -194,14 +194,45 @@ struct PatternProgramEntry {
   uint8_t custom3 = 0;
   uint8_t optionMask = 0;
   uint8_t optionValues = 0;
+  uint8_t paletteBlend = 0;
 };
 
 constexpr uint32_t PATTERN_PROGRAM_MAGIC = 0x31544E50; // "PNT1" little-endian.
 constexpr uint8_t PATTERN_PROGRAM_VERSION_1 = 1;
+constexpr uint8_t PATTERN_PROGRAM_VERSION_2 = 2;
+
+// Version 1 did not carry WLED's global palette interpolation mode. Keeping its
+// exact layout lets updated receivers accept already-deployed 60-byte snapshots.
+struct PatternProgramEntryV1 {
+  uint16_t effectivePhrase = 0;
+  uint16_t holdPhrases = 0;
+  uint8_t renderer = PatternRendererWled;
+  uint8_t fallbackPatternId = 0;
+  uint8_t syncMode = 0;
+  uint8_t renderId = 0;
+  uint8_t speed = 0;
+  uint8_t intensity = 0;
+  uint8_t custom1 = 0;
+  uint8_t custom2 = 0;
+  uint8_t custom3 = 0;
+  uint8_t optionMask = 0;
+  uint8_t optionValues = 0;
+};
+
+struct PatternChannelSnapshotV1 {
+  uint32_t magic = PATTERN_PROGRAM_MAGIC;
+  uint8_t version = PATTERN_PROGRAM_VERSION_1;
+  uint8_t length = sizeof(PatternProgramEntryV1) * 2;
+  uint8_t reserved[2] = {0};
+  PatternChannelState state;
+  uint16_t transitionMs = 0;
+  PatternProgramEntryV1 currentProgram;
+  PatternProgramEntryV1 nextProgram;
+};
 
 struct PatternChannelSnapshot {
   uint32_t magic = PATTERN_PROGRAM_MAGIC;
-  uint8_t version = PATTERN_PROGRAM_VERSION_1;
+  uint8_t version = PATTERN_PROGRAM_VERSION_2;
   uint8_t length = sizeof(PatternProgramEntry) * 2;
   uint8_t reserved[2] = {0};
   PatternChannelState state;
@@ -238,6 +269,14 @@ struct PaletteGradientDefinition {
   PaletteGradientStop stops[8];
 };
 
+constexpr uint8_t PALETTE_RAW_MAX_STOPS = 18;
+constexpr uint8_t PALETTE_PREDEFINED_ID_NONE = UINT8_MAX;
+
+struct PaletteRawDefinition {
+  uint8_t count = 0;
+  PaletteGradientStop stops[PALETTE_RAW_MAX_STOPS];
+};
+
 struct PaletteGradient16 {
   uint8_t rgb[16][3] = {{0}};
 };
@@ -266,6 +305,18 @@ struct PaletteChannelSnapshot {
   uint16_t transitionMs = 0;
   PaletteGradient16 currentDefinition;
   PaletteGradient16 nextDefinition;
+  uint16_t currentHoldPhrases = 1;
+  uint16_t nextHoldPhrases = 1;
+};
+
+// The larger body length selects this lossless source-stop representation. Its state
+// IDs name predefined source palettes, or PALETTE_PREDEFINED_ID_NONE for literals.
+// Duplicate positions remain ordered because WLED uses them as hard color boundaries.
+struct PaletteRawChannelSnapshot {
+  PaletteChannelState state;
+  uint16_t transitionMs = 0;
+  PaletteRawDefinition currentDefinition;
+  PaletteRawDefinition nextDefinition;
   uint16_t currentHoldPhrases = 1;
   uint16_t nextHoldPhrases = 1;
 };
@@ -314,8 +365,10 @@ static_assert(sizeof(BeatChannelState) <= TUBES_CHANNEL_BODY_SIZE, "Beat state e
 static_assert(sizeof(BeatChannelState) + sizeof(BeatSoundProgramExtension) + sizeof(BeatTransientExtension)
               == TUBES_CHANNEL_BODY_SIZE, "Beat extensions must fill the channel body");
 static_assert(sizeof(PatternChannelState) <= TUBES_CHANNEL_BODY_SIZE, "Pattern state exceeds channel body");
-static_assert(sizeof(PatternProgramEntry) == 15, "Pattern program wire size changed");
-static_assert(sizeof(PatternChannelSnapshot) == 60, "Pattern snapshot wire size changed");
+static_assert(sizeof(PatternProgramEntryV1) == 15, "legacy Pattern program wire size changed");
+static_assert(sizeof(PatternProgramEntry) == 16, "Pattern program wire size changed");
+static_assert(sizeof(PatternChannelSnapshotV1) == 60, "legacy Pattern snapshot wire size changed");
+static_assert(sizeof(PatternChannelSnapshot) == 62, "Pattern snapshot wire size changed");
 static_assert(sizeof(PaletteChannelState) <= TUBES_CHANNEL_BODY_SIZE, "Palette state exceeds channel body");
 static_assert(sizeof(PaletteGradientDefinition) == 33, "Palette gradient wire size changed");
 static_assert(sizeof(PaletteGradient16) == TUBES_CHANNEL_BODY_SIZE,
@@ -324,9 +377,14 @@ static_assert(sizeof(PaletteChannelSchedule) == 10, "Palette schedule wire size 
 static_assert(sizeof(BeatChannelSnapshot) == 48, "Beat snapshot wire size changed");
 static_assert(sizeof(PaletteChannelSnapshotV1) == 104, "legacy Palette snapshot wire size changed");
 static_assert(sizeof(PaletteChannelSnapshot) == 108, "Palette snapshot wire size changed");
+static_assert(sizeof(PaletteRawDefinition) == 73, "raw Palette definition wire size changed");
+static_assert(sizeof(PaletteRawChannelSnapshot) == 158, "raw Palette snapshot wire size changed");
 static_assert(offsetof(TubesChannelMessageV2, body) + sizeof(PaletteChannelSnapshot)
               <= TUBES_ESPNOW_MAX_MESSAGE_SIZE,
               "Palette snapshot exceeds one ESP-NOW packet");
+static_assert(offsetof(TubesChannelMessageV2, body) + sizeof(PaletteRawChannelSnapshot)
+              <= TUBES_ESPNOW_MAX_MESSAGE_SIZE,
+              "raw Palette snapshot exceeds one ESP-NOW packet");
 static_assert(offsetof(TubesChannelMessageV2, body) + sizeof(PatternChannelSnapshot)
               <= TUBES_ESPNOW_MAX_MESSAGE_SIZE,
               "Pattern snapshot exceeds one ESP-NOW packet");
@@ -400,7 +458,7 @@ inline uint8_t expectedChannelSnapshotBodyLength(uint8_t channel) {
   switch (channel) {
     case BeatChannel: return sizeof(BeatChannelSnapshot);
     case PatternChannel: return sizeof(PatternChannelSnapshot);
-    case PaletteChannel: return sizeof(PaletteChannelSnapshot);
+    case PaletteChannel: return sizeof(PaletteRawChannelSnapshot);
     default: return 0;
   }
 }
@@ -408,9 +466,11 @@ inline uint8_t expectedChannelSnapshotBodyLength(uint8_t channel) {
 inline bool isExpectedChannelSnapshotBodyLength(uint8_t channel, uint8_t bodyLength) {
   if (channel == PatternChannel)
     return bodyLength == sizeof(PatternChannelSnapshot)
+        || bodyLength == sizeof(PatternChannelSnapshotV1)
         || bodyLength == sizeof(PatternChannelState);
   if (channel == PaletteChannel)
-    return bodyLength == sizeof(PaletteChannelSnapshot)
+    return bodyLength == sizeof(PaletteRawChannelSnapshot)
+        || bodyLength == sizeof(PaletteChannelSnapshot)
         || bodyLength == sizeof(PaletteChannelSnapshotV1);
   return bodyLength == expectedChannelSnapshotBodyLength(channel);
 }
@@ -469,6 +529,23 @@ inline bool readChannelMessageV2Body(const TubesChannelMessageV2& message, Body&
       || !isExpectedChannelSnapshotBodyLength(message.command, sizeof(Body)))
     return false;
   memcpy(&body, message.body, sizeof(body));
+  return true;
+}
+
+// A validated table can be passed to WLED without changing its stop order or allowing
+// the terminator at position 255 to hide trailing unvalidated data.
+inline bool isValidPaletteRawDefinition(const PaletteRawDefinition& definition) {
+  if (definition.count < 2 || definition.count > PALETTE_RAW_MAX_STOPS)
+    return false;
+  if (definition.stops[0].position != 0
+      || definition.stops[definition.count - 1].position != 255)
+    return false;
+  for (uint8_t index = 1; index < definition.count; index++) {
+    if (definition.stops[index].position < definition.stops[index - 1].position)
+      return false;
+    if (definition.stops[index - 1].position == 255)
+      return false;
+  }
   return true;
 }
 

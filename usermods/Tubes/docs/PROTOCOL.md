@@ -989,10 +989,17 @@ or debug state. Its body supports current and next phrase-keyed entries containi
 - effective phrase;
 - explicit `legacyPatternId` and `legacySyncMode`.
 
-The first implementation should accept existing v2 pattern IDs and parameters before
-adding generated pattern definitions. Pattern changes activate only at their declared
-phrase. Missing, invalid, or unsupported future definitions leave the current pattern
-running.
+The current 62-byte Pattern body is version 2. Each exact program also carries WLED's
+`paletteBlend` value, including `3` for NOBLEND. Receivers apply that interpolation mode
+and the independently authoritative Palette-channel selection in one WLED update, so a
+NOBLEND program cannot inherit a stale segment palette. Pattern does not duplicate or
+take ownership of the palette definition.
+
+Updated receivers also accept the deployed 60-byte version-1 Pattern body and upgrade
+its missing `paletteBlend` field to `0`, WLED's normal blended mode. Body length and the
+embedded version distinguish the two layouts. Pattern changes activate only at their
+declared phrase; missing, invalid, or unsupported future definitions leave the current
+pattern running.
 
 ### Palette authority and literal colors
 
@@ -1000,38 +1007,42 @@ Palette is the color-master protocol. A palette authority can transmit colors th
 are not compiled into the Tubes palette registry. Literal palettes are runtime state,
 not persistent WLED custom-palette files, so frequent changes do not write flash.
 
-The canonical gen1 representation is the same 16-entry RGB palette WLED renders.
-Positions are implicit and evenly indexed, so all 48 RGB bytes fill one Palette
-definition packet without approximation. A separate schedule packet references the
-current and next definition sequence numbers and carries two entries of
-`palettePhrase:u16, legacyPaletteId:u8`.
+The current variable-length Palette snapshot carries the unmodified WLED source stops.
+Each definition contains a one-byte count followed by as many as 18 ordered
+`position:u8, red:u8, green:u8, blue:u8` stops. Duplicate positions are valid and retain
+their order because they encode hard color boundaries. Current and next definitions plus
+schedule metadata occupy a 158-byte body and fit in one ESP-NOW packet.
 
-An authority sends current definition, next definition, then schedule. Receivers
-cache both definitions and apply the schedule only when both references resolve, so
-packet loss cannot expose a partial palette. The next definition becomes visible only
-at its phrase boundary. Periodic publication renews the authority lease and repairs a
-late join or a dropped definition.
+The `paletteId` in each 158-byte current/next entry identifies the predefined source
+palette. Literal palettes use `255`, meaning that no predefined ID exists. This is not a
+legacy fallback ID: receivers recreate the palette from the raw stops, while the ID
+preserves its stable identity when the palette came from the compiled registry.
+
+Palette snapshot body length selects the representation. New authorities send only the
+158-byte raw-stop body. Updated receivers continue to accept the earlier 108-byte and
+104-byte 16-entry snapshots during migration. Fixed and runtime palettes without a
+source stop table are represented as 16 evenly positioned stops, which recreates their
+existing `CRGBPalette16` exactly.
+
+The retained fixed-size decoder accepts the earlier 16-entry RGB representation.
+Positions are implicit and evenly indexed, so all 48 RGB bytes fill one Palette
+definition packet. Its separate schedule references current and next definition
+sequences and carries two legacy palette IDs. Receivers cache both definitions and apply
+the schedule only when both references resolve, allowing older modern senders to remain
+usable during migration; new authorities do not emit this format.
 
 All three packets retain the normal channel request/declaration message kind. Their
 body lengths distinguish definitions from schedules, so Palette authority election,
 upward forwarding, and downward relaying use exactly the same path as every other
 application channel.
 
-After the full schedule, the authority also sends the earlier ID-only Palette state.
-Receivers that predate literal gradients reject the new body lengths and apply this
-fallback declaration. Current receivers remember that the same authority and boot
-session supplied a complete schedule, so they relay the ID-only declaration for older
-descendants without replacing their runtime gradient. A changed authority or boot
-session clears that memory and makes the ID-only state authoritative again.
-
-For a predefined palette, the 16 RGB entries are copied directly from WLED's runtime
-palette and `legacyPaletteId` is that exact built-in ID. For a generated gradient, the
-Palette owner expands it once with WLED's palette rules, sends the resulting 16 RGB
-entries, and computes the closest fixed palette ID by squared RGB error. The Control
-root copies the fallback IDs into its ordinary generation-0 `State`, so gen0 poles
-follow the same schedule with the closest colors they can represent. The fallback ID
-does not replace literal colors on receivers that accepted the complete gradient
-schedule.
+Palette authorities do not emit compatibility palette messages. When the modern
+snapshot reaches the Control master, it converts each source to a generation-0 ID for
+its next ordinary `State` broadcast. A predefined source within the generation-0 range
+keeps its exact ID; an extended predefined palette or literal gradient is mapped to the
+closest generation-0 palette by squared RGB error. Modern receivers continue rendering
+the transmitted raw stops, so this compatibility projection does not replace their
+exact palette.
 
 Palette authority uses the normal per-channel `(channelId, controlId)` ordering. The
 local `g` command sets the Palette channel's local value to `0xFFF`, making that pole
@@ -1225,7 +1236,7 @@ v2 snapshot, followed by ordinary v2 changes.
 |---|---|
 | Beat | `bpm`, `beatFrame`, and phrase-boundary `Beats`. |
 | Pattern | `patternId`, `syncMode`, current/next pattern phrases. |
-| Palette | Required `legacyPaletteId`, current/next palette phrases. |
+| Palette | Control-derived generation-0 palette ID and current/next palette phrases. |
 | Effect | Existing effect/pen/pulse/chance fields or `None`. |
 | Debug | `Options.debugging`; v3-only overlay bits are disabled. |
 | Position | No projection; suspend and mark stale. |
@@ -1334,7 +1345,7 @@ while a missed fallback breaks the installation's visible contract.
 | Old firmware previously wrote nonzero unused bytes that resemble the marker. | A real legacy sender could be mistaken for vNext. | Capture representative fleet traffic, choose a non-colliding magic, and require the complete CRC-checked trailer. | Low after fleet capture; this is the most important pre-deployment compatibility check. |
 | A witness disappears while another legacy pole remains. | Evidence can expire and v3 can resume too early. | Any other direct observer becomes a witness; the still-present legacy pole forces fallback again on its next unmarked packet. | A temporary protocol transition is possible in a lossy or partitioned component. |
 | Nodes miss the coordinated resume proposal. | Some upgraded nodes remain in marked-v2 mode while others resume v3. | Marked v2 is not legacy evidence; repeat the resume proposal and initialize v3 from the same v2 snapshot. | Temporary transport split without an immediate visual jump. |
-| A literal palette has no exact v2 equivalent. | Compatibility output differs from the richer all-v3 output. | Require the color master to choose `legacyPaletteId` before scheduling the literal palette, then switch everyone at a palette boundary. | Intentional color approximation, shared by old and new devices. |
+| A literal palette has no exact v2 equivalent. | Compatibility output differs from the richer modern output. | The Control master derives the closest generation-0 ID from the received raw stops and broadcasts it at the same palette boundary. | Intentional color approximation on generation-0 devices only. |
 | The radio mesh partitions. | No component can know about legacy poles across the partition. | Define evidence and fallback per connected component; re-enter compatibility immediately when components merge and unmarked v2 is observed. | Global unanimity is impossible without connectivity; the protocol guarantees component-local convergence. |
 | A spoofed packet claims legacy evidence or topic authority. | Features can be disabled or visual state controlled. | Strict validation prevents malformed state, but the current unauthenticated trust model cannot prove sender identity. | Credible on an untrusted nearby radio; authentication is required if this threat enters scope. |
 
@@ -1348,7 +1359,7 @@ while a missed fallback breaks the installation's visible contract.
 3. **Independent existing topics:** split Beat, Pattern, Effect, and Debug authority
    while projecting them back into v2.
 4. **Literal Palette:** add fixed definition caches, phrase-keyed activation, and
-   required legacy palette fallback.
+   Control-master generation-0 palette projection.
 5. **Position frame:** integrate the existing positioning design with Position
    suspended during compatibility.
 6. **Fleet evaluation:** simulate and hardware-test partitions, old relays, packet
@@ -1481,7 +1492,7 @@ activate field diagnostics as soon as it connects.
 | `s` | Start phrase and broadcast `State`. |
 | `n` | Move the earliest scheduled change to the next phrase boundary and broadcast state. |
 | `p###` | Schedule the pattern ID for the next phrase boundary. |
-| `pW,<fx>,<speed>,<intensity>,<c1>,<c2>,<c3>,<mask>,<values>,<sync>,<fallback>,<hold>` | Make the connected pole Pattern Master and schedule an exact WLED program. A zero hold pauses automatic pattern rotation. |
+| `pW,<fx>,<speed>,<intensity>,<c1>,<c2>,<c3>,<mask>,<values>,<sync>,<fallback>,<hold>[,<paletteBlend>]` | Make the connected pole Pattern Master and schedule an exact WLED program. A zero hold pauses automatic pattern rotation. The optional blend value is `0`–`3`; `3` selects NOBLEND. The deployed 11-value form defaults to `0`. |
 | `pT,<pattern>,<sync>,<fallback>,<hold>` | Make the connected pole Pattern Master and schedule an exact Tubes renderer program. |
 | `m###` | Schedule the sync mode for the next phrase boundary. |
 | `c###` or `c<id>,<hold>` | Schedule the palette ID for the next phrase boundary, optionally pausing with a zero hold. |
