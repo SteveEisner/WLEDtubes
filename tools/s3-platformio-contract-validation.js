@@ -26,12 +26,13 @@ test('Waveshare effective environment has unique artifact identity, one enabled 
 	for (const library of ['Arduino_GFX', 'SensorLib', 'XPowersLib'])
 		assert.doesNotMatch(dependencies, new RegExp(`${library}\\.git#v\\d`));
 	assert.doesNotMatch(flags, /TUBES_S3_FIRMWARE_CARRIER/);
+	assert.match(flags, /TUBES_HARDWARE_FAMILY=TubeHardwareMatrixM1/);
 	assert.ok(!env['board_build.embed_files'], 'base S3 unexpectedly requires generated vault files');
 	const carrier = sections.get('env:waveshare_s3_tubes_carrier');
 	assert.ok(carrier, 'missing effective carrier environment');
 	const carrierFlags = [].concat(carrier.build_flags).join(' ');
 	assert.match(carrierFlags, /TUBES_S3_FIRMWARE_CARRIER/);
 	assert.match(carrierFlags, /WLED_RELEASE_NAME=\\"WAVESHARE_S3_TUBES_CARRIER\\"/);
-	assert.match([].concat(carrier['board_build.embed_files']).join(' '), /esp32_quinled_dig2go_tubes\.bin/);
+	assert.match([].concat(carrier['board_build.embed_files']).join(' '), /esp32_quinled_dig2go_tubes_p2p\.bin/);
 	assert.match([].concat(carrier['board_build.embed_files']).join(' '), /esp32-c3-athom_tubes\.bin/);
 });
