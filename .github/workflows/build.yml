@@ -75,6 +75,9 @@ jobs:
     - name: Install PlatformIO
       run: pip install -r requirements.txt
 
+    - name: Validate S3 PlatformIO contract
+      run: node tools/s3-platformio-contract-validation.js
+
     - name: Build firmware
       run: pio run -e ${{ matrix.environment }}
     - name: Get artifact name from bin filename

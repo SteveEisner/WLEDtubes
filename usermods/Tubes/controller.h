@@ -17,6 +17,10 @@
 #include "device_report_protocol.h"
 #include "v3_runtime.h"
 
+#ifdef TUBES_S3_FIRMWARE_CARRIER
+void tubesS3CarrierObserveDeviceReport(const DeviceReportMessage &report);
+#endif
+
 #define EEPSIZE 2560
 
 const static uint8_t DEFAULT_MASTER_BRIGHTNESS = 200;
@@ -4204,6 +4208,35 @@ class PatternController : public MessageReceiver {
     sendV3ControlCommand(COMMAND_ACTION, &action, sizeof(Action));
   }
 
+  bool can_force_next() {
+    if (node.isFollowing()) return false;
+    const uint32_t now = millis();
+    return channelWinners.localMayRequest(
+               PatternChannel, localChannelId(PatternChannel), node.header.id, now)
+        && channelWinners.localMayRequest(
+               PaletteChannel, localChannelId(PaletteChannel), node.header.id, now);
+  }
+
+  bool force_next_if_authoritative() {
+    if (!can_force_next()) return false;
+    force_next(true);
+    return true;
+  }
+
+  bool broadcastFleetUpdateOffer(const FleetUpdateOffer &offer) {
+    if (!isValidFleetUpdateOffer(offer)) return false;
+    return sendV3ControlCommand(COMMAND_FLEET_UPGRADE, &offer, sizeof(offer));
+  }
+
+  bool requestDeviceReport(const uint8_t mac[6], uint32_t nonce) {
+    if (!mac || !nonce) return false;
+    DeviceReportMessage request;
+    request.kind = DeviceReportProbe;
+    request.nonce = nonce;
+    memcpy(request.mac, mac, sizeof(request.mac));
+    return sendV3ControlCommand(COMMAND_ACTION, &request, sizeof(request));
+  }
+
   void broadcast_info(NodeInfo *info) {
     sendV3ControlCommand(COMMAND_INFO, info, sizeof(NodeInfo));
   }
@@ -4437,6 +4470,13 @@ class PatternController : public MessageReceiver {
 
     if (message.kind == DeviceReportReply) {
       printDeviceReport(message);
+#ifdef TUBES_S3_FIELD_OS
+      node.peerTelemetry.observeIdentity(message.nodeId, message.uplinkId,
+                                         message.tubesVersion, millis());
+#endif
+#ifdef TUBES_S3_FIRMWARE_CARRIER
+      tubesS3CarrierObserveDeviceReport(message);
+#endif
       return;
     }
 
