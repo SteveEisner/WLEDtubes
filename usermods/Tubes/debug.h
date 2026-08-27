@@ -202,7 +202,7 @@ class DebugController {
       const TempoDiagnostics& tempo = controller.sound.tempoDiagnostics();
       Serial.printf(
           "TEMPO_TRACE audio=%u locked=%u bpm=%.2f confidence=%u owner=%u pll=%u error=%dms events=%u "
-          "fft=%lu/%luus onset=%lu/%lums corr=%.2f flux=%u/%u/%u\n",
+          "fft=%lu/%luus onset=%lu/%lums corr=%.2f held=%.2f/%u challenger=%.2f/%u/%u flux=%u/%u/%u\n",
           controller.sound.active,
           controller.sound.tempoLocked,
           controller.sound.tempoBpmQ8 / 256.0f,
@@ -216,6 +216,11 @@ class DebugController {
           static_cast<unsigned long>(tempo.onsetCandidates),
           static_cast<unsigned long>(tempo.lastOnsetIntervalUs / 1000U),
           tempo.correlationBpmQ8 / 256.0f,
+          tempo.heldBpmQ8 / 256.0f,
+          tempo.heldTimingFit,
+          tempo.challengerBpmQ8 / 256.0f,
+          tempo.challengerScans,
+          tempo.challengerTimingFit,
           tempo.kickFlux,
           tempo.snareFlux,
           tempo.broadFlux

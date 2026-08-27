@@ -281,7 +281,10 @@ int main() {
       trackHalfTempoBait(120.0f, 30.0f), 1.0f);
   requireTempo("160 BPM half-tempo bait", 160.0f,
       trackHalfTempoBait(160.0f, 30.0f), 1.0f);
-  requireTempo("genuine 60 BPM", 60.0f, track(60.0f, 24.0f), 1.5f);
+  // Timing alone cannot distinguish a 60 BPM pulse from 120 BPM with every
+  // other beat omitted. Tubes deliberately selects the dance-tempo octave.
+  requireTempo("ambiguous 60 BPM selects dance octave", 120.0f,
+      track(60.0f, 24.0f), 1.5f);
 
   TempoEstimate bar = trackBarAccented(120.0f, 32.0f);
   requireTempo("bar-accented 120 BPM", 120.0f, bar, 1.0f);
@@ -343,11 +346,39 @@ int main() {
   }
   requireTempo("135 BPM with dropped frames", 135.0f, gapTracker.currentEstimate(), 1.5f);
 
-  // A new sustained tempo must eventually replace the decaying old history rather
-  // than leaving the Beat owner permanently latched to its first song.
+  // A brief unrelated pulse train must not pull a mature lock away from the music.
+  TempoTracker stableTracker;
+  SpectrumFixture stableFixture;
+  float firstLockAt = -1.0f;
+  float maximumLockedError = 0.0f;
+  for (uint32_t frame = 0; frame < 2585; frame++) {
+    float at = frame / TempoTracker::SPECTRUM_FRAMES_PER_SECOND;
+    float bpm = at >= 18.0f && at < 24.0f ? 90.0f : 127.4f;
+    stableFixture.frame(at, bpm, spectrum);
+    stableTracker.addSpectrum(spectrum);
+    const TempoEstimate& stable = stableTracker.currentEstimate();
+    if (stable.locked) {
+      if (firstLockAt < 0.0f)
+        firstLockAt = at;
+      float error = fabsf(stable.bpmQ8 / 256.0f - 127.4f);
+      if (error > maximumLockedError)
+        maximumLockedError = error;
+    }
+  }
+  if (firstLockAt < 0.0f || firstLockAt > 12.0f || maximumLockedError > 3.0f) {
+    fprintf(stderr,
+        "stable lock: first=%.2fs maximum error=%.2f BPM final=%.2f BPM\n",
+        firstLockAt, maximumLockedError,
+        stableTracker.currentEstimate().bpmQ8 / 256.0f);
+    return 1;
+  }
+
+  // A new sustained tempo must eventually replace the old lock. The deliberately
+  // long handover prevents a few seconds of speech or a musical breakdown from
+  // being mistaken for a song-level tempo change.
   TempoTracker changingTracker;
   SpectrumFixture changingFixture;
-  for (uint32_t frame = 0; frame < 1120; frame++) {
+  for (uint32_t frame = 0; frame < 3000; frame++) {
     float at = frame / TempoTracker::SPECTRUM_FRAMES_PER_SECOND;
     float bpm = at < 12.0f ? 120.0f : 135.0f;
     changingFixture.frame(at, bpm, spectrum);
@@ -368,6 +399,16 @@ int main() {
     fprintf(stderr, "stale percussion: expected the estimate to unlock\n");
     return 1;
   }
+
+  // Silence lowers music confidence without forgetting the last reliable tempo.
+  // A short unrelated pulse train after the gap must not get first-lock authority.
+  for (uint32_t frame = 1120; frame < 1550; frame++) {
+    float at = frame / TempoTracker::SPECTRUM_FRAMES_PER_SECOND;
+    staleFixture.frame(at, 157.0f, spectrum, true);
+    staleTracker.addSpectrum(spectrum);
+  }
+  requireTempo("tempo retained across silence", 128.0f,
+      staleTracker.currentEstimate(), 1.5f);
 
   printf("tempo tracker scenarios passed\n");
   return 0;

@@ -64,6 +64,11 @@ struct TempoDiagnostics {
   uint8_t kickFlux = 0;
   uint8_t snareFlux = 0;
   uint8_t broadFlux = 0;
+  uint16_t heldBpmQ8 = 0;
+  uint16_t challengerBpmQ8 = 0;
+  uint8_t challengerScans = 0;
+  uint8_t heldTimingFit = 0;
+  uint8_t challengerTimingFit = 0;
 };
 
 // Estimates a stable dance-music tempo from WLED's existing 16-band FFT frames.
@@ -89,6 +94,10 @@ class TempoTracker {
       estimatePending = false;
       lastPublishedBpmQ8 = 0;
       lastPublishedFrame = 0;
+      heldTempoBpm = 0.0f;
+      tempoLockCenterBpm = 0.0f;
+      challengerTempoBpm = 0.0f;
+      challengerScans = 0;
       lastSpectrumTimestampUs = 0;
       spectrumTimestampReady = false;
       previousPhaseOnset = 0.0f;
@@ -242,11 +251,20 @@ class TempoTracker {
     static constexpr uint8_t MINIMUM_TIMING_EVENTS = 6;
     static constexpr uint32_t MINIMUM_ONSET_INTERVAL_US = 180000;
     static constexpr float MAXIMUM_PHASE_ERROR = 0.22f;
-    static constexpr float PERIOD_CORRECTION_GAIN = 0.20f;
     static constexpr float PHASE_CORRECTION_GAIN = 0.20f;
     static constexpr int32_t MAXIMUM_PHASE_CORRECTION_US = 8000;
     static constexpr uint32_t MINIMUM_PHASE_TIMEOUT_US = 2000000;
     static constexpr uint32_t MAXIMUM_PHASE_TIMEOUT_US = 5000000;
+    static constexpr float LOCK_REFINEMENT_RANGE_BPM = 1.5f;
+    static constexpr float MAXIMUM_LOCK_REFINEMENT_BPM = 0.75f;
+    static constexpr float HALF_TEMPO_CANONICAL_LIMIT_BPM = 75.0f;
+    static constexpr float CHALLENGER_TOLERANCE_BPM = 2.0f;
+    static constexpr uint8_t CHALLENGER_REQUIRED_SCANS = 96;
+    static constexpr float HELD_TEMPO_ADAPTATION = 0.04f;
+    static constexpr float CHALLENGER_TIMING_FIT_RATIO = 1.25f;
+    static constexpr float MINIMUM_CHALLENGER_TIMING_FIT = 2.5f;
+    static constexpr float MAXIMUM_PLL_TEMPO_DEVIATION = 0.02f;
+    static constexpr float TRACKED_PERIOD_ADAPTATION = 0.05f;
 
     float previousSpectrum[SPECTRUM_BINS] = {0.0f};
     float onsetHistory[HISTORY_LENGTH] = {0.0f};
@@ -260,6 +278,10 @@ class TempoTracker {
     bool estimatePending = false;
     uint16_t lastPublishedBpmQ8 = 0;
     uint32_t lastPublishedFrame = 0;
+    float heldTempoBpm = 0.0f;
+    float tempoLockCenterBpm = 0.0f;
+    float challengerTempoBpm = 0.0f;
+    uint8_t challengerScans = 0;
     uint32_t lastSpectrumTimestampUs = 0;
     bool spectrumTimestampReady = false;
     float previousPhaseOnset = 0.0f;
@@ -288,7 +310,6 @@ class TempoTracker {
     uint32_t phaseRevision = 0;
     uint32_t lastPublishedPhaseRevision = 0;
     uint16_t lastPublishedBarRevision = 0;
-    uint8_t tempoMismatchScans = 0;
     DownbeatTracker downbeatTracker;
     TempoDiagnostics diagnostics;
 
@@ -305,6 +326,15 @@ class TempoTracker {
         estimate = TempoEstimate();
         estimatePending = true;
       }
+      heldTempoBpm = 0.0f;
+      tempoLockCenterBpm = 0.0f;
+      challengerTempoBpm = 0.0f;
+      challengerScans = 0;
+      diagnostics.heldBpmQ8 = 0;
+      diagnostics.challengerBpmQ8 = 0;
+      diagnostics.challengerScans = 0;
+      diagnostics.heldTimingFit = 0;
+      diagnostics.challengerTimingFit = 0;
     }
 
     void appendOnset(float onset, uint32_t timestampUs) {
@@ -336,7 +366,6 @@ class TempoTracker {
       phaseRevision = 0;
       lastPublishedPhaseRevision = 0;
       lastPublishedBarRevision = 0;
-      tempoMismatchScans = 0;
       downbeatTracker.reset();
     }
 
@@ -439,7 +468,6 @@ class TempoTracker {
       lastAcceptedPhaseTimestampUs = lastPhaseCandidateTimestampUs;
       lastPhaseErrorMs = 0;
       phaseRevision++;
-      tempoMismatchScans = 0;
       downbeatTracker.reset();
       downbeatTracker.observe(
           0,
@@ -507,8 +535,21 @@ class TempoTracker {
       float fitted = fittedPeriodUs();
       float minimumPeriod = 60000000.0f / MAXIMUM_BPM;
       float maximumPeriod = 60000000.0f / MINIMUM_BPM;
-      if (fitted >= minimumPeriod && fitted <= maximumPeriod)
-        trackedPeriodUs += (fitted - trackedPeriodUs) * PERIOD_CORRECTION_GAIN;
+      if (fitted >= minimumPeriod && fitted <= maximumPeriod) {
+        // Once tempo is locked, onset timing is a phase observation rather than
+        // an independent tempo estimator. Bound its period correction around the
+        // held autocorrelation lock so subdivisions cannot drag the PLL away.
+        if (heldTempoBpm > 0.0f) {
+          float heldPeriod = 60000000.0f / heldTempoBpm;
+          float minimumHeldPeriod = heldPeriod * (1.0f - MAXIMUM_PLL_TEMPO_DEVIATION);
+          float maximumHeldPeriod = heldPeriod * (1.0f + MAXIMUM_PLL_TEMPO_DEVIATION);
+          if (fitted < minimumHeldPeriod)
+            fitted = minimumHeldPeriod;
+          else if (fitted > maximumHeldPeriod)
+            fitted = maximumHeldPeriod;
+        }
+        trackedPeriodUs += (fitted - trackedPeriodUs) * TRACKED_PERIOD_ADAPTATION;
+      }
 
       int32_t phaseCorrectionUs = int32_t(phaseErrorUs * PHASE_CORRECTION_GAIN);
       if (phaseCorrectionUs > MAXIMUM_PHASE_CORRECTION_US)
@@ -634,6 +675,116 @@ class TempoTracker {
       return MINIMUM_BPM + index / TEMPO_STEPS_PER_BPM;
     }
 
+    // Scores how precisely recent onsets fit a candidate's half-beat grid. This
+    // rejects a persistent autocorrelation alias while the incumbent clock still
+    // explains the observed timing better.
+    float candidateTimingFit(float bpm) const {
+      if (recentCandidateCount < 2 || bpm <= 0.0f)
+        return 0.0f;
+      float halfPeriodUs = 30000000.0f / bpm;
+      float score = 0.0f;
+      for (uint8_t index = 1; index < recentCandidateCount; index++) {
+        uint32_t intervalUs = uint32_t(
+            recentCandidateTimestampsUs[index] - recentCandidateTimestampsUs[index - 1]
+        );
+        uint8_t halfBeats = uint8_t(intervalUs / halfPeriodUs + 0.5f);
+        if (!halfBeats || halfBeats > 8)
+          continue;
+        float expectedUs = halfBeats * halfPeriodUs;
+        float relativeError = fabsf(float(intervalUs) - expectedUs) / expectedUs;
+        if (relativeError < MAXIMUM_PHASE_ERROR)
+          score += 1.0f - relativeError / MAXIMUM_PHASE_ERROR;
+      }
+      return score;
+    }
+
+    // Keeps acquisition fast while requiring an unrelated tempo to remain the
+    // clear winner for several seconds before it can replace a mature lock.
+    static float canonicalTempo(float candidate) {
+      if (candidate < HALF_TEMPO_CANONICAL_LIMIT_BPM
+          && candidate * 2.0f <= MAXIMUM_BPM)
+        return candidate * 2.0f;
+      return candidate;
+    }
+
+    float updateHeldTempo(float candidate, float instantaneousCandidate, bool& switched) {
+      switched = false;
+      // A regular pulse train cannot distinguish 60 from 120 BPM by timing
+      // alone. Prefer the conventional dance-tempo octave for this narrow
+      // ambiguous range so every other kick cannot establish a false slow lock.
+      candidate = canonicalTempo(candidate);
+      instantaneousCandidate = canonicalTempo(instantaneousCandidate);
+      if (heldTempoBpm <= 0.0f) {
+        heldTempoBpm = candidate;
+        tempoLockCenterBpm = candidate;
+        challengerTempoBpm = 0.0f;
+        challengerScans = 0;
+      } else {
+        float adjustedCandidate = candidate;
+        float halfCandidate = candidate * 0.5f;
+        float doubleCandidate = candidate * 2.0f;
+        if (halfCandidate >= MINIMUM_BPM
+            && fabsf(halfCandidate - heldTempoBpm) < fabsf(adjustedCandidate - heldTempoBpm))
+          adjustedCandidate = halfCandidate;
+        if (doubleCandidate <= MAXIMUM_BPM
+            && fabsf(doubleCandidate - heldTempoBpm) < fabsf(adjustedCandidate - heldTempoBpm))
+          adjustedCandidate = doubleCandidate;
+
+        if (fabsf(adjustedCandidate - tempoLockCenterBpm) <= LOCK_REFINEMENT_RANGE_BPM) {
+          heldTempoBpm += (adjustedCandidate - heldTempoBpm) * HELD_TEMPO_ADAPTATION;
+          float minimumHeld = tempoLockCenterBpm - MAXIMUM_LOCK_REFINEMENT_BPM;
+          float maximumHeld = tempoLockCenterBpm + MAXIMUM_LOCK_REFINEMENT_BPM;
+          if (heldTempoBpm < minimumHeld)
+            heldTempoBpm = minimumHeld;
+          else if (heldTempoBpm > maximumHeld)
+            heldTempoBpm = maximumHeld;
+          challengerTempoBpm = 0.0f;
+          challengerScans = 0;
+        } else {
+          bool instantaneousSupport = fabsf(
+              instantaneousCandidate - challengerTempoBpm
+          ) <= CHALLENGER_TOLERANCE_BPM;
+          if (challengerScans
+              && fabsf(candidate - challengerTempoBpm) <= CHALLENGER_TOLERANCE_BPM) {
+            challengerTempoBpm += (candidate - challengerTempoBpm) * 0.10f;
+            if (instantaneousSupport && challengerScans < UINT8_MAX) {
+              challengerScans++;
+            } else if (!instantaneousSupport) {
+              challengerScans = challengerScans > 3 ? challengerScans - 3 : 0;
+            }
+          } else {
+            challengerTempoBpm = candidate;
+            challengerScans = fabsf(
+                instantaneousCandidate - candidate
+            ) <= CHALLENGER_TOLERANCE_BPM ? 1 : 0;
+          }
+          float heldTimingFit = candidateTimingFit(heldTempoBpm);
+          float challengerTimingFit = candidateTimingFit(challengerTempoBpm);
+          if (challengerScans >= CHALLENGER_REQUIRED_SCANS
+              && candidateHasTimingEvidence(challengerTempoBpm)
+              && challengerTimingFit >= MINIMUM_CHALLENGER_TIMING_FIT
+              && challengerTimingFit >= heldTimingFit * CHALLENGER_TIMING_FIT_RATIO) {
+            heldTempoBpm = challengerTempoBpm;
+            tempoLockCenterBpm = heldTempoBpm;
+            challengerTempoBpm = 0.0f;
+            challengerScans = 0;
+            switched = true;
+          }
+        }
+      }
+
+      diagnostics.heldBpmQ8 = uint16_t(heldTempoBpm * 256.0f + 0.5f);
+      diagnostics.challengerBpmQ8 = challengerScans
+          ? uint16_t(challengerTempoBpm * 256.0f + 0.5f)
+          : 0;
+      diagnostics.challengerScans = challengerScans;
+      diagnostics.heldTimingFit = uint8_t(fminf(255.0f, candidateTimingFit(heldTempoBpm) * 16.0f));
+      diagnostics.challengerTimingFit = challengerScans
+          ? uint8_t(fminf(255.0f, candidateTimingFit(challengerTempoBpm) * 16.0f))
+          : 0;
+      return heldTempoBpm;
+    }
+
     uint8_t currentBeatPhase(float bpm) const {
       if (!phaseClockActive || bpm <= 0.0f || !spectrumTimestampReady)
         return 0;
@@ -662,7 +813,14 @@ class TempoTracker {
         if (framesSinceEvidence >= EVIDENCE_TIMEOUT_FRAMES && estimate.locked) {
           estimate = TempoEstimate();
           estimatePending = true;
-          resetPhaseClock();
+          challengerTempoBpm = 0.0f;
+          challengerScans = 0;
+          diagnostics.challengerBpmQ8 = 0;
+          diagnostics.challengerScans = 0;
+          diagnostics.challengerTimingFit = 0;
+          // Silence withdraws the claim that music is present, but the last good
+          // song tempo and phase keep coasting. Resumed noise must challenge that
+          // prior instead of receiving an unsafe first-lock shortcut.
         }
         return;
       }
@@ -693,9 +851,17 @@ class TempoTracker {
           || (competing > 0.0f && peak < competing * MINIMUM_PEAK_RATIO))
         return;
 
-      float bpm = interpolateTempo(strongest);
-      if (!estimate.locked && !candidateHasTimingEvidence(bpm))
+      float candidateBpm = interpolateTempo(strongest);
+      if (!estimate.locked && !candidateHasTimingEvidence(candidateBpm))
         return;
+      bool tempoSwitched = false;
+      float instantaneousBpm = MINIMUM_BPM
+          + bestCandidate / float(TEMPO_STEPS_PER_BPM);
+      float bpm = updateHeldTempo(candidateBpm, instantaneousBpm, tempoSwitched);
+      if (tempoSwitched) {
+        resetPhaseClock();
+        initializePhaseClock(bpm);
+      }
       if (!phaseClockActive) {
         initializePhaseClock(bpm);
       } else {
@@ -706,24 +872,10 @@ class TempoTracker {
           phaseTimeoutUs = MAXIMUM_PHASE_TIMEOUT_US;
         bool timingFresh = lastAcceptedPhaseTimestampUs
             && uint32_t(lastSpectrumTimestampUs - lastAcceptedPhaseTimestampUs) <= phaseTimeoutUs;
-        if (timingCount >= MINIMUM_TIMING_EVENTS && timingFresh) {
-          float trackedBpm = 60000000.0f / trackedPeriodUs;
-          float ratio = bpm > trackedBpm ? bpm / trackedBpm : trackedBpm / bpm;
-          bool harmonicVote = fabsf(ratio - 2.0f) <= 0.20f;
-          if (fabsf(trackedBpm - bpm) <= 6.0f || harmonicVote) {
-            // Repeated onset times outrank an autocorrelation half/double vote.
-            bpm = trackedBpm;
-            tempoMismatchScans = 0;
-          } else if (++tempoMismatchScans >= 8) {
-            resetPhaseClock();
-            initializePhaseClock(bpm);
-          } else {
-            bpm = trackedBpm;
-          }
-        } else if (!timingFresh) {
-          resetPhaseClock();
-          initializePhaseClock(bpm);
-        }
+        // Missing or contradictory onsets make the phase PLL coast. They do not
+        // revoke a stable tempo; the parallel challenger above owns that decision.
+        if (!timingFresh)
+          lastPhaseErrorMs = 0;
       }
       uint16_t bpmQ8 = uint16_t(bpm * 256.0f + 0.5f);
       uint8_t confidence = uint8_t(fminf(
