@@ -296,6 +296,67 @@ void variable_palette_snapshot_is_atomic() {
       "wrong variable-channel magic passed ingress validation");
 }
 
+// A raw Palette snapshot preserves every ordered source stop, including duplicate
+// positions, while its distinct body length selects the new decoder at ingress.
+void raw_palette_snapshot_preserves_source_stops() {
+  TubesChannelMessageV2 message;
+  message.header.id = 0x1FF0;
+  message.header.version = TUBES_PROTOCOL_V3;
+  message.recipients = RECIPIENTS_ALL;
+  message.command = PaletteChannel;
+  message.envelope.messageKind = ChannelDeclaration;
+  message.envelope.channelId = 0x1FF0;
+  message.envelope.sourceControlId = 0x1FF0;
+  message.envelope.sourceSession = 0x12345678;
+  message.envelope.sequence = 10;
+
+  constexpr uint8_t positions[PALETTE_RAW_MAX_STOPS] = {
+      0, 15, 30, 45, 60, 60, 90, 105, 120,
+      135, 150, 165, 180, 195, 210, 225, 240, 255};
+  PaletteRawChannelSnapshot snapshot;
+  snapshot.state.current = {80, 71};
+  snapshot.state.next = {84, PALETTE_PREDEFINED_ID_NONE};
+  snapshot.transitionMs = 1200;
+  snapshot.currentDefinition.count = PALETTE_RAW_MAX_STOPS;
+  snapshot.nextDefinition.count = PALETTE_RAW_MAX_STOPS;
+  for (uint8_t index = 0; index < PALETTE_RAW_MAX_STOPS; index++) {
+    snapshot.currentDefinition.stops[index] = {
+        positions[index], uint8_t(index * 13), uint8_t(255 - index * 11), uint8_t(index * 7)};
+    snapshot.nextDefinition.stops[index] = {
+        positions[index], uint8_t(255 - index * 9), uint8_t(index * 5), uint8_t(index * 15)};
+  }
+
+  expect(isValidPaletteRawDefinition(snapshot.currentDefinition),
+      "valid raw Palette source stops were rejected");
+  expect(writeChannelMessageV2Body(message, snapshot), "raw Palette snapshot did not fit");
+  size_t wireLength = channelMessageV2WireSize(message.envelope.bodyLength);
+  expect(message.envelope.bodyLength == sizeof(PaletteRawChannelSnapshot),
+      "raw Palette body length did not select the new decoder");
+  expect(wireLength < TUBES_ESPNOW_MAX_MESSAGE_SIZE,
+      "raw current/next Palette snapshot exceeded ESP-NOW");
+  expect(isValidChannelMessageV2Prefix(reinterpret_cast<const uint8_t*>(&message), wireLength),
+      "valid raw Palette snapshot failed ingress validation");
+
+  PaletteRawChannelSnapshot decoded;
+  expect(readChannelMessageV2Body(message, decoded), "raw Palette snapshot did not decode");
+  expect(memcmp(&snapshot, &decoded, sizeof(snapshot)) == 0,
+      "raw Palette source stops changed on the wire");
+  expect(decoded.currentDefinition.stops[4].position
+          == decoded.currentDefinition.stops[5].position,
+      "raw Palette hard stop lost its duplicate position");
+  expect(decoded.state.current.paletteId == 71
+          && decoded.state.next.paletteId == PALETTE_PREDEFINED_ID_NONE,
+      "raw Palette predefined identity changed on the wire");
+
+  decoded.currentDefinition.count = PALETTE_RAW_MAX_STOPS + 1;
+  expect(!isValidPaletteRawDefinition(decoded.currentDefinition),
+      "oversized raw Palette stop count was accepted");
+  decoded.currentDefinition = snapshot.currentDefinition;
+  decoded.currentDefinition.stops[7].position = 255;
+  expect(!isValidPaletteRawDefinition(decoded.currentDefinition),
+      "early raw Palette terminator was accepted");
+}
+
 // A modern Pattern snapshot carries exact WLED/Tubes render programs while its
 // embedded legacy state remains a complete fallback for older receivers.
 void variable_pattern_snapshot_preserves_program_and_fallback() {
@@ -316,10 +377,14 @@ void variable_pattern_snapshot_preserves_program_and_fallback() {
   snapshot.transitionMs = 8000;
   snapshot.currentProgram = {
       80, 0, PatternRendererWled, 61, 0, 214, 115, 170, 96, 120, 2, 7, 6};
+  snapshot.currentProgram.paletteBlend = 3;
   snapshot.nextProgram = snapshot.currentProgram;
   snapshot.nextProgram.effectivePhrase = UINT16_MAX;
+  snapshot.nextProgram.paletteBlend = 2;
 
   expect(writeChannelMessageV2Body(message, snapshot), "Pattern snapshot did not fit");
+  expect(message.envelope.bodyLength == sizeof(PatternChannelSnapshot),
+      "current Pattern snapshot did not select the version-2 body length");
   size_t wireLength = channelMessageV2WireSize(message.envelope.bodyLength);
   expect(isValidChannelMessageV2Prefix(reinterpret_cast<const uint8_t*>(&message), wireLength),
       "valid variable Pattern snapshot failed ingress validation");
@@ -332,6 +397,25 @@ void variable_pattern_snapshot_preserves_program_and_fallback() {
       "Pattern snapshot lost its exact legacy fallback");
   expect(decoded.currentProgram.renderId == 214,
       "Pattern snapshot lost the raw WLED effect");
+  expect(decoded.currentProgram.paletteBlend == 3
+          && decoded.nextProgram.paletteBlend == 2,
+      "Pattern snapshot lost the master's palette-blend modes");
+
+  PatternChannelSnapshotV1 version1;
+  version1.state = snapshot.state;
+  version1.transitionMs = snapshot.transitionMs;
+  version1.currentProgram = {
+      80, 0, PatternRendererWled, 61, 0, 214, 115, 170, 96, 120, 2, 7, 6};
+  version1.nextProgram = version1.currentProgram;
+  version1.nextProgram.effectivePhrase = UINT16_MAX;
+  expect(writeChannelMessageV2Body(message, version1),
+      "deployed version-1 Pattern snapshot was no longer accepted");
+  expect(message.envelope.bodyLength == sizeof(PatternChannelSnapshotV1),
+      "version-1 Pattern snapshot did not retain its distinct wire length");
+  expect(isValidChannelMessageV2Prefix(
+      reinterpret_cast<const uint8_t*>(&message),
+      channelMessageV2WireSize(message.envelope.bodyLength)),
+      "version-1 Pattern snapshot failed compatibility validation");
 
   PatternChannelState legacy = snapshot.state;
   expect(writeChannelMessageV2Body(message, legacy),
@@ -487,7 +571,7 @@ void position_peers_expire() {
 } // namespace
 
 int main() {
-  const std::array<std::pair<const char*, void (*)()>, 18> tests = {{
+  const std::array<std::pair<const char*, void (*)()>, 19> tests = {{
       {"wire validation rejects malformed lengths", wire_validation_rejects_malformed_lengths},
       {"topic authorities remain independent", topic_authorities_remain_independent},
       {"projection marker distinguishes master output", projection_marker_distinguishes_master_output},
@@ -498,6 +582,7 @@ int main() {
       {"Palette expansion matches WLED fixed-point rounding", palette_expansion_matches_wled_fixed_point_rounding},
       {"Palette channel carries full definition and fallback", palette_channel_carries_full_definition_and_fallback},
       {"variable Palette snapshot is atomic", variable_palette_snapshot_is_atomic},
+      {"raw Palette snapshot preserves source stops", raw_palette_snapshot_preserves_source_stops},
       {"variable Pattern snapshot preserves program and fallback", variable_pattern_snapshot_preserves_program_and_fallback},
       {"Beat snapshot carries authoritative chance", beat_snapshot_carries_authoritative_chance},
       {"delayed Pattern snapshot promotes next", delayed_pattern_snapshot_promotes_next},
