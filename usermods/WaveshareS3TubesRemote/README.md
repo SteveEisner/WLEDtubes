@@ -18,8 +18,9 @@ white marker across one sixteenth of that preview. The preview and beat lane use
 single opaque framebuffer transfer because narrow CO5300 writes can leave visible
 black seams. The four home workspaces are Patterns, Beats, Colors, and Mesh. Patterns
 schedules one of twelve touch-sized choices at the next phrase boundary. Beats
-controls microphone tempo listening, resets the shared downbeat, and queues one of
-eight curated audio overlays or turns the overlay off. Mesh shows up to four fresh
+controls microphone tempo listening, shows live BPM plus a 12-band microphone
+spectrum, resets the shared downbeat, and queues one of eight curated audio overlays
+or turns the overlay off. Mesh shows up to four fresh
 nearby Tubes nodes and links to Update. Colors edits and schedules a three-stop
 gradient as soon as its continuous hue sweep, brightness row, or a preset changes.
 Its eight two-row presets are regenerated around the selected color and preserve

@@ -100,6 +100,8 @@ class TempoTracker {
       challengerScans = 0;
       lastSpectrumTimestampUs = 0;
       spectrumTimestampReady = false;
+      spectrumFramePeriodUs = SPECTRUM_FRAME_PERIOD_US;
+      spectrumIntervalSamples = 0;
       previousPhaseOnset = 0.0f;
       previousPreviousPhaseOnset = 0.0f;
       previousPhaseKick = 0.0f;
@@ -177,9 +179,10 @@ class TempoTracker {
       // Missing frames carry time but no invented onset; the next real spectrum
       // becomes the new baseline because its unobserved transition is ambiguous.
       if (missingFrames) {
-        uint32_t intervalUs = uint32_t(timestampUs - lastSpectrumTimestampUs) / (missingFrames + 1);
+        const uint32_t previousTimestampUs = lastSpectrumTimestampUs;
+        uint32_t intervalUs = uint32_t(timestampUs - previousTimestampUs) / (missingFrames + 1);
         for (uint8_t frame = 0; frame <= missingFrames; frame++)
-          appendOnset(0.0f, lastSpectrumTimestampUs + intervalUs * (frame + 1));
+          appendOnset(0.0f, previousTimestampUs + intervalUs * (frame + 1));
         copySpectrum(spectrum);
         lastSpectrumTimestampUs = timestampUs;
         return;
@@ -284,6 +287,8 @@ class TempoTracker {
     uint8_t challengerScans = 0;
     uint32_t lastSpectrumTimestampUs = 0;
     bool spectrumTimestampReady = false;
+    float spectrumFramePeriodUs = SPECTRUM_FRAME_PERIOD_US;
+    uint8_t spectrumIntervalSamples = 0;
     float previousPhaseOnset = 0.0f;
     float previousPreviousPhaseOnset = 0.0f;
     float previousPhaseKick = 0.0f;
@@ -338,8 +343,26 @@ class TempoTracker {
     }
 
     void appendOnset(float onset, uint32_t timestampUs) {
-      if (spectrumTimestampReady)
-        diagnostics.lastSpectrumIntervalUs = uint32_t(timestampUs - lastSpectrumTimestampUs);
+      if (spectrumTimestampReady) {
+        const uint32_t intervalUs = uint32_t(timestampUs - lastSpectrumTimestampUs);
+        diagnostics.lastSpectrumIntervalUs = intervalUs;
+        // AudioReactive's real completion cadence depends on sample rate, slot
+        // count, and FFT cost. Average timestamps so autocorrelation converts a
+        // lag to BPM using the device's measured cadence instead of 22.05 kHz mono.
+        const float minimumCadenceInterval = spectrumFramePeriodUs * 0.6f;
+        const float maximumCadenceInterval = spectrumFramePeriodUs * 1.5f;
+        if (intervalUs >= minimumCadenceInterval
+            && intervalUs <= maximumCadenceInterval) {
+          if (spectrumIntervalSamples < 32) {
+            spectrumFramePeriodUs =
+                (spectrumFramePeriodUs * spectrumIntervalSamples + intervalUs)
+                / (spectrumIntervalSamples + 1);
+            spectrumIntervalSamples++;
+          } else {
+            spectrumFramePeriodUs += (intervalUs - spectrumFramePeriodUs) * 0.02f;
+          }
+        }
+      }
       diagnostics.spectrumFrames++;
       onsetHistory[historyWriteIndex] = onset;
       historyWriteIndex = (historyWriteIndex + 1) % HISTORY_LENGTH;
@@ -589,7 +612,8 @@ class TempoTracker {
     }
 
     float candidateScore(float bpm) const {
-      float lag = SPECTRUM_FRAMES_PER_SECOND * 60.0f / bpm;
+      const float measuredFramesPerSecond = 1000000.0f / spectrumFramePeriodUs;
+      float lag = measuredFramesPerSecond * 60.0f / bpm;
       float score = correlationAtLag(lag);
       if (lag * 2.0f < historyCount)
         score += correlationAtLag(lag * 2.0f) * 0.45f;

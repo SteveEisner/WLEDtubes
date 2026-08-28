@@ -10,6 +10,7 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 // Proves the field target owns a 128-pixel logical surface and is always a sound-reactive master.
 test('Waveshare S3 enables a 128-pixel null output as an audio-reactive master', () => {
   const ini = read('platformio_tubes.ini');
+  const ui = read('usermods/WaveshareS3TubesRemote/WaveshareS3TubesRemote.cpp');
   const s3 = ini.match(/\[env:waveshare_s3_tubes_remote\]([\s\S]*?)(?=\n\[|$)/)[1];
   assert.match(s3, /-D TUBES_NULL_OUTPUT/);
   assert.match(s3, /-D LED_TYPES=TYPE_TUBES_NULL/);
@@ -18,10 +19,16 @@ test('Waveshare S3 enables a 128-pixel null output as an audio-reactive master',
   assert.match(s3, /-D UM_AUDIOREACTIVE_ENABLE/);
   assert.match(s3, /-D UM_AUDIOREACTIVE_SAMPLE_RATE=16000/);
   assert.match(s3, /-D SR_DMTYPE=4/);
+  assert.match(s3, /-D I2S_USE_16BIT_SAMPLES/);
+  assert.match(s3, /-D I2S_USE_STEREO_SLOTS/);
+  assert.match(s3, /-D I2S_USE_256FS_MCLK/);
+  assert.match(s3, /-D I2S_USE_PORT_1/);
   assert.match(s3, /-D I2S_SDPIN=10/);
   assert.match(s3, /-D I2S_WSPIN=45/);
   assert.match(s3, /-D I2S_CKPIN=9/);
   assert.match(s3, /-D MCLK_PIN=42/);
+  assert.match(ui, /writeEs7210\(0x11, 0x60\)/);
+  assert.match(ui, /writeEs7210\(0x01, 0x00\)/);
   assert.match(s3, /-D DATA_PINS=255/); // sentinel pin; null-bus factory ignores it
   assert.doesNotMatch(s3, /(?:LEDPIN|TYPE_NET_)/);
   const dig2go = ini.match(/\[env:esp32_quinled_dig2go_tubes\]([\s\S]*?)(?=\n\[|$)/)[1];

@@ -45,6 +45,7 @@ constexpr int16_t DISPLAY_HEIGHT = 480;
 constexpr uint32_t SAMPLE_INTERVAL_MS = 1000;
 constexpr uint32_t PREVIEW_INTERVAL_MS = 50;
 #ifdef TUBES_S3_FIELD_OS
+constexpr uint32_t MICROPHONE_PREVIEW_INTERVAL_MS = 100;
 constexpr uint8_t FIELD_OS_DEFAULT_BRIGHTNESS = 255;
 constexpr uint32_t FIELD_OS_IDLE_TIMEOUT_MS = 30000;
 constexpr uint32_t BATTERY_PULSE_INTERVAL_MS = 80;
@@ -131,6 +132,9 @@ private:
   uint8_t selectedGradientStop = 1;
   uint32_t gradientStops[3] = {0xFF3A7A, 0x7A5CFF, 0x28D7D0};
   uint32_t gradientPresets[8][3] = {};
+  bool drawnTempoListening = false;
+  uint8_t drawnBeatOverlayChoice = UINT8_MAX;
+  uint8_t drawnNextBeatOverlayChoice = UINT8_MAX;
 
   static constexpr uint16_t COLOR_BACKGROUND = 0x0863;
   static constexpr uint16_t COLOR_SURFACE = 0x10E7;
@@ -184,6 +188,15 @@ private:
     return Wire.endTransmission() == 0;
   }
 
+  bool readEs7210(uint8_t reg, uint8_t &value) {
+    Wire.beginTransmission(0x40);
+    Wire.write(reg);
+    if (Wire.endTransmission(false) != 0 || Wire.requestFrom(0x40, 1U) != 1)
+      return false;
+    value = Wire.read();
+    return true;
+  }
+
   bool initializeMicrophones() {
     bool ok = true;
     ok &= writeEs7210(0x00, 0xFF);
@@ -198,18 +211,29 @@ private:
     ok &= writeEs7210(0x07, 0x20);
     ok &= writeEs7210(0x04, 0x01);
     ok &= writeEs7210(0x05, 0x00);
-    ok &= writeEs7210(0x11, 0x80);
+    // Waveshare's 16-bit reference sets SDP_INTERFACE1[7:5] to 0b011.
+    // A value of 0x80 selects 32-bit samples and leaves the ESP32 reading empty slots.
+    ok &= writeEs7210(0x11, 0x60);
     ok &= writeEs7210(0x12, 0x00);
-    ok &= writeEs7210(0x43, 0x00);
-    ok &= writeEs7210(0x44, 0x00);
+    ok &= writeEs7210(0x43, 0x10);
+    ok &= writeEs7210(0x44, 0x10);
     ok &= writeEs7210(0x45, 0x1E);
     ok &= writeEs7210(0x46, 0x1E);
-    ok &= writeEs7210(0x4B, 0xFF);
+    ok &= writeEs7210(0x4B, 0x00);
     ok &= writeEs7210(0x4C, 0x00);
-    ok &= writeEs7210(0x01, 0x0A);
+    ok &= writeEs7210(0x01, 0x00);
     ok &= writeEs7210(0x06, 0x00);
+    ok &= writeEs7210(0x47, 0x00);
+    ok &= writeEs7210(0x48, 0x00);
     ok &= writeEs7210(0x49, 0x00);
     ok &= writeEs7210(0x4A, 0x00);
+    const uint8_t registers[] = {0x01, 0x02, 0x11, 0x4B, 0x4C};
+    const uint8_t expected[] = {0x00, 0xC1, 0x60, 0x00, 0x00};
+    for (uint8_t i = 0; i < sizeof(registers); i++) {
+      uint8_t actual = 0;
+      const bool read = readEs7210(registers[i], actual);
+      ok &= read && actual == expected[i];
+    }
     return ok;
   }
 
@@ -526,21 +550,64 @@ private:
     display.print(label);
   }
 
-  void drawBeatsContent() {
+  void drawMicrophonePanel(const TubesS3FieldStatus &status) {
+    const Rect bounds = {150, 112, 230, 78};
+    const uint16_t background = COLOR_SURFACE_RAISED;
+    display.fillRoundRect(bounds.x, bounds.y, bounds.width, bounds.height, 20, background);
+    display.setTextColor(status.tempoLocked ? COLOR_MINT : RGB565_WHITE, background);
+    setAppFont();
+    display.setCursor(status.bpm < 100 ? 211 : status.bpm < 1000 ? 202 : 193, 116);
+    display.printf("%u BPM", status.bpm);
+    for (uint8_t bin = 0; bin < TUBES_S3_MICROPHONE_BINS; bin++) {
+      const int16_t x = 168 + bin * 16;
+      display.fillRoundRect(x, 153, 12, 26, 3, COLOR_BEAT);
+      const uint8_t level = status.tempoListening && status.microphoneActive
+          ? status.microphoneSpectrum[bin] : 0;
+      const int16_t height = static_cast<uint16_t>(level) * 26 / 255;
+      if (height > 0)
+        display.fillRoundRect(x, 179 - height, 12, height, 3,
+                              bin < 4 ? COLOR_PRIMARY : bin < 8 ? COLOR_MINT : COLOR_AMBER);
+    }
+    display.fillRoundRect(163, 183, 204, 4, 2, COLOR_BEAT);
+    const int16_t volumeWidth = status.tempoListening && status.microphoneActive
+        ? static_cast<uint16_t>(status.microphoneLevel) * 204 / 255 : 0;
+    if (volumeWidth > 0) display.fillRoundRect(163, 183, volumeWidth, 4, 2, RGB565_WHITE);
+  }
+
+  void drawBeatsContent(bool full) {
     TubesS3FieldStatus status;
     tubesS3ReadStatus(status);
-    display.fillRect(0, FIELD_OS_APP_TOP, DISPLAY_WIDTH,
-                     DISPLAY_HEIGHT - FIELD_OS_APP_TOP, COLOR_BACKGROUND);
-    drawButton({{20, 112, 210, 78}, status.tempoListening ? COLOR_MINT : COLOR_SURFACE_RAISED,
-                status.tempoListening ? F("Listen ON") : F("Listen OFF")});
-    drawButton({{250, 112, 210, 78}, COLOR_AMBER, F("Downbeat")});
-    for (uint8_t choice = 0; choice < 9; choice++)
-      drawBeatOverlayTile(choice, status);
+    const bool controlsChanged = status.tempoListening != drawnTempoListening
+        || status.beatOverlayChoice != drawnBeatOverlayChoice
+        || status.nextBeatOverlayChoice != drawnNextBeatOverlayChoice;
+    if (full || controlsChanged) {
+      display.fillRect(0, FIELD_OS_APP_TOP, DISPLAY_WIDTH,
+                       DISPLAY_HEIGHT - FIELD_OS_APP_TOP, COLOR_BACKGROUND);
+      drawButton({{20, 112, 120, 78},
+                  status.tempoListening ? COLOR_MINT : COLOR_SURFACE_RAISED,
+                  F("Listen")});
+      drawMicrophonePanel(status);
+      drawButton({{390, 112, 70, 78}, COLOR_AMBER, F("1")});
+      for (uint8_t choice = 0; choice < 9; choice++)
+        drawBeatOverlayTile(choice, status);
+    } else {
+      drawMicrophonePanel(status);
+    }
+    drawnTempoListening = status.tempoListening;
+    drawnBeatOverlayChoice = status.beatOverlayChoice;
+    drawnNextBeatOverlayChoice = status.nextBeatOverlayChoice;
   }
 
   uint32_t beatsRevision(const TubesS3FieldStatus &status) {
     uint32_t value = mixRevision(status.tempoListening, status.beatOverlayChoice);
-    return mixRevision(value, status.nextBeatOverlayChoice);
+    value = mixRevision(value, status.nextBeatOverlayChoice);
+    value = mixRevision(value, status.bpm);
+    if (!status.tempoListening) return value;
+    value = mixRevision(value, status.microphoneActive);
+    value = mixRevision(value, status.microphoneLevel);
+    for (uint8_t bin = 0; bin < TUBES_S3_MICROPHONE_BINS; bin++)
+      value = mixRevision(value, status.microphoneSpectrum[bin]);
+    return value;
   }
 
   void drawDeviceCard(int16_t y, const DeviceCard &device,
@@ -896,27 +963,27 @@ private:
   class BeatsView final : public FieldView {
   public:
     explicit BeatsView(WaveshareS3FieldOs &owner)
-        : FieldView(owner, FieldViewId::Beats, F("Beats"), SAMPLE_INTERVAL_MS) {}
+        : FieldView(owner, FieldViewId::Beats, F("Beats"), MICROPHONE_PREVIEW_INTERVAL_MS) {}
     FieldViewId tap(int16_t x, int16_t y) override {
-      if (Rect{20, 112, 210, 78}.contains(x, y)) {
+      if (Rect{20, 112, 120, 78}.contains(x, y)) {
         TubesS3FieldStatus status;
         tubesS3ReadStatus(status);
         tubesS3SetTempoListening(!status.tempoListening);
-        owner.drawBeatsContent();
-      } else if (Rect{250, 112, 210, 78}.contains(x, y)) {
+        owner.drawBeatsContent(false);
+      } else if (Rect{390, 112, 70, 78}.contains(x, y)) {
         tubesS3TapDownbeat();
       } else if (x >= 20 && x < 460 && y >= 210 && y < 468) {
         const uint8_t column = (x - 20) / 149;
         const uint8_t row = (y - 210) / 86;
         if (column < 3 && row < 3) {
           tubesS3SelectBeatOverlay(row * 3 + column);
-          owner.drawBeatsContent();
+          owner.drawBeatsContent(false);
         }
       }
       return FieldViewId::Beats;
     }
   protected:
-    void renderContent(bool) override { owner.drawBeatsContent(); }
+    void renderContent(bool full) override { owner.drawBeatsContent(full); }
     uint32_t revision() override {
       TubesS3FieldStatus status;
       tubesS3ReadStatus(status);
