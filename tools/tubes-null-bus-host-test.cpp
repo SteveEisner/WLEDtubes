@@ -27,9 +27,9 @@ int main() {
 
   // DATA_PINS=255 follows the ordinary one-pin loader path. The target-only
   // sentinel is consumed by BusTubesNull and never reaches a digital driver.
-  const BusConfigModel config = parseOnePinDefaults(TYPE_TUBES_NULL, 255, 60);
+  const BusConfigModel config = parseOnePinDefaults(TYPE_TUBES_NULL, 255, 128);
   assert(config.type == TYPE_TUBES_NULL);
-  assert(config.count == 60);
+  assert(config.count == 128);
   assert(config.pin == 255);
 
   // The factory classification selects BusTubesNull, not BusDigital or a

@@ -43,9 +43,16 @@ constexpr int8_t TOUCH_RESET = 40;
 constexpr int16_t DISPLAY_WIDTH = 480;
 constexpr int16_t DISPLAY_HEIGHT = 480;
 constexpr uint32_t SAMPLE_INTERVAL_MS = 1000;
-constexpr uint32_t PREVIEW_INTERVAL_MS = 100;
+constexpr uint32_t PREVIEW_INTERVAL_MS = 50;
 #ifdef TUBES_S3_FIELD_OS
 constexpr uint8_t FIELD_OS_DEFAULT_BRIGHTNESS = 255;
+constexpr uint32_t FIELD_OS_IDLE_TIMEOUT_MS = 30000;
+constexpr uint32_t BATTERY_PULSE_INTERVAL_MS = 80;
+constexpr uint32_t BATTERY_PULSE_CYCLE_MS = 2400;
+constexpr int16_t FIELD_OS_HEADER_HEIGHT = 64;
+constexpr int16_t FIELD_OS_STRIP_TOP = FIELD_OS_HEADER_HEIGHT;
+constexpr int16_t FIELD_OS_STRIP_HEIGHT = 32;
+constexpr int16_t FIELD_OS_APP_TOP = FIELD_OS_STRIP_TOP + FIELD_OS_STRIP_HEIGHT;
 #else
 constexpr uint8_t SMOKE_DEFAULT_BRIGHTNESS = 160;
 #endif
@@ -66,10 +73,11 @@ XPowersPMU pmu;
 #ifdef TUBES_S3_FIELD_OS
 enum class FieldViewId : uint8_t {
   Home,
-  Conductor,
-  Surveyor,
+  Patterns,
+  Beats,
+  Mesh,
+  Colors,
   Update,
-  Channels
 };
 
 class WaveshareS3FieldOs : public Usermod {
@@ -105,8 +113,24 @@ private:
 
   bool displayReady = false;
   bool touchReady = false;
+  bool pmuReady = false;
+  bool microphoneReady = false;
   bool nextSendFailed = false;
   bool touchDown = false;
+  bool screenOn = true;
+  bool usbPresent = false;
+  bool charging = false;
+  int16_t batteryPercent = -1;
+  uint16_t batteryMv = 0;
+  uint32_t lastActivityMs = 0;
+  uint32_t lastBatterySampleMs = 0;
+  uint32_t lastPmuPollMs = 0;
+  uint32_t lastPreviewMs = 0;
+  uint32_t lastBatteryPulseMs = 0;
+  bool physicalButtonDown[WLED_MAX_BUTTONS] = {};
+  uint8_t selectedGradientStop = 1;
+  uint32_t gradientStops[3] = {0xFF3A7A, 0x7A5CFF, 0x28D7D0};
+  uint32_t gradientPresets[8][3] = {};
 
   static constexpr uint16_t COLOR_BACKGROUND = 0x0863;
   static constexpr uint16_t COLOR_SURFACE = 0x10E7;
@@ -115,6 +139,8 @@ private:
   static constexpr uint16_t COLOR_MINT = 0x5F56;
   static constexpr uint16_t COLOR_AMBER = 0xFDC8;
   static constexpr uint16_t COLOR_MUTED = 0x8C51;
+  static constexpr uint16_t COLOR_BEAT = 0x2104;
+  static constexpr uint16_t COLOR_DOWNBEAT = 0x4A49;
 
   static uint16_t rgb565(uint32_t color) {
     // Production colors stay RGB888 until this existing color-depth conversion.
@@ -125,112 +151,317 @@ private:
     return static_cast<uint16_t>(((red & 0xF8) << 8) | ((green & 0xFC) << 3) | (blue >> 3));
   }
 
-  void drawChrome(const __FlashStringHelper *text, bool showHome) {
-    display.fillScreen(COLOR_BACKGROUND);
-    display.setTextWrap(false);
-    display.setTextColor(RGB565_WHITE);
+  // CO5300 drops one-pixel transparent writes, so TubeOS uses Arduino_GFX's
+  // built-in scaled font and always supplies a background color.
+  // https://github.com/moononournation/Arduino_GFX/issues/780
+  void setDetailFont() {
+    display.setFont(nullptr);
     display.setTextSize(2);
-    display.setCursor(24, 22);
-    display.println(text);
-    if (showHome) drawButton({{372, 12, 88, 48}, COLOR_SURFACE_RAISED, F("Home")});
+  }
+
+  void setBodyFont() {
+    display.setFont(nullptr);
+    display.setTextSize(2);
+  }
+
+  void setAppFont() {
+    display.setFont(nullptr);
+    display.setTextSize(3);
+  }
+
+  void setHeaderFont() {
+    display.setFont(nullptr);
+    display.setTextSize(5);
+  }
+
+  // Initializes the Waveshare ES7210 for its two onboard microphones. The register
+  // sequence follows Waveshare's 16 kHz slave-mode reference implementation:
+  // https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-2.16/tree/main/examples/arduino/06_ES7210
+  bool writeEs7210(uint8_t reg, uint8_t value) {
+    Wire.beginTransmission(0x40);
+    Wire.write(reg);
+    Wire.write(value);
+    return Wire.endTransmission() == 0;
+  }
+
+  bool initializeMicrophones() {
+    bool ok = true;
+    ok &= writeEs7210(0x00, 0xFF);
+    ok &= writeEs7210(0x00, 0x41);
+    ok &= writeEs7210(0x01, 0x1F);
+    ok &= writeEs7210(0x09, 0x30);
+    ok &= writeEs7210(0x0A, 0x30);
+    ok &= writeEs7210(0x40, 0xC3);
+    ok &= writeEs7210(0x41, 0x70);
+    ok &= writeEs7210(0x42, 0x70);
+    ok &= writeEs7210(0x02, 0xC1);
+    ok &= writeEs7210(0x07, 0x20);
+    ok &= writeEs7210(0x04, 0x01);
+    ok &= writeEs7210(0x05, 0x00);
+    ok &= writeEs7210(0x11, 0x80);
+    ok &= writeEs7210(0x12, 0x00);
+    ok &= writeEs7210(0x43, 0x00);
+    ok &= writeEs7210(0x44, 0x00);
+    ok &= writeEs7210(0x45, 0x1E);
+    ok &= writeEs7210(0x46, 0x1E);
+    ok &= writeEs7210(0x4B, 0xFF);
+    ok &= writeEs7210(0x4C, 0x00);
+    ok &= writeEs7210(0x01, 0x0A);
+    ok &= writeEs7210(0x06, 0x00);
+    ok &= writeEs7210(0x49, 0x00);
+    ok &= writeEs7210(0x4A, 0x00);
+    return ok;
+  }
+
+  uint16_t batteryPulseColor(uint32_t now) const {
+    const uint16_t phase = static_cast<uint32_t>(now % BATTERY_PULSE_CYCLE_MS) * 510
+        / BATTERY_PULSE_CYCLE_MS;
+    const uint8_t triangle = phase <= 255 ? phase : 510 - phase;
+    const uint8_t brightness = 188 + static_cast<uint16_t>(triangle) * 67 / 255;
+    return rgb565((static_cast<uint32_t>(brightness) << 16)
+        | (static_cast<uint32_t>(brightness) << 8) | brightness);
+  }
+
+  void drawBatteryIcon(uint16_t color, bool showChargingSymbol) {
+    constexpr int16_t iconX = 405;
+    constexpr int16_t iconY = 14;
+    constexpr int16_t iconWidth = 58;
+    constexpr int16_t iconHeight = 34;
+    display.fillRect(iconX - 2, iconY - 2, 77, iconHeight + 4, COLOR_BACKGROUND);
+    display.drawRoundRect(iconX, iconY, iconWidth, iconHeight, 5, color);
+    display.fillRect(iconX + iconWidth, iconY + 9, 6, 16, color);
+    const int16_t levelWidth = batteryPercent < 0 ? 0
+        : static_cast<int16_t>((iconWidth - 8) * batteryPercent / 100);
+    if (levelWidth > 0)
+      display.fillRect(iconX + 4, iconY + 4, levelWidth, iconHeight - 8, color);
+    if (!showChargingSymbol) return;
+
+    // A high-contrast bolt remains visible at every state of charge.
+    display.fillTriangle(iconX + 31, iconY + 5, iconX + 20, iconY + 19,
+                         iconX + 30, iconY + 19, RGB565_WHITE);
+    display.fillTriangle(iconX + 27, iconY + 15, iconX + 38, iconY + 15,
+                         iconX + 24, iconY + 29, RGB565_WHITE);
+  }
+
+  void drawBattery() {
+    display.fillRect(385, 0, 95, FIELD_OS_HEADER_HEIGHT, COLOR_BACKGROUND);
+    drawBatteryIcon(usbPresent ? COLOR_MINT : batteryPulseColor(millis()), usbPresent);
+  }
+
+  void drawHeader() {
+    display.fillRect(0, 0, DISPLAY_WIDTH, FIELD_OS_HEADER_HEIGHT, COLOR_BACKGROUND);
+    display.setTextWrap(false);
+    display.setTextColor(RGB565_WHITE, COLOR_BACKGROUND);
+    setHeaderFont();
+    display.setCursor(14, 12);
+    display.print(F("tubeOS"));
+    TubesS3FieldStatus status;
+    tubesS3ReadStatus(status);
+    setAppFont();
+    display.setTextColor(COLOR_MUTED, COLOR_BACKGROUND);
+    display.setCursor(220, 24);
+    display.printf("%04X v%u", status.localNodeId, status.tubesVersion);
+    drawBattery();
+  }
+
+  void drawChrome(const __FlashStringHelper *, bool) {
+    display.fillScreen(COLOR_BACKGROUND);
+    drawHeader();
+    stripComponent.draw(0, FIELD_OS_STRIP_TOP, DISPLAY_WIDTH, FIELD_OS_STRIP_HEIGHT, true);
   }
 
   void drawButton(const ButtonComponent &button) {
     const Rect &bounds = button.bounds;
     display.fillRoundRect(bounds.x, bounds.y, bounds.width, bounds.height, 20, button.color);
-    display.setTextColor(RGB565_WHITE);
-    display.setTextSize(2);
-    display.setCursor(bounds.x + 16, bounds.y + bounds.height / 2 - 8);
-    display.println(button.label);
+    display.setTextColor(RGB565_WHITE, button.color);
+    setAppFont();
+    int16_t textX = 0;
+    int16_t textY = 0;
+    uint16_t textWidth = 0;
+    uint16_t textHeight = 0;
+    display.getTextBounds(button.label, 0, 0, &textX, &textY, &textWidth, &textHeight);
+    display.setCursor(bounds.x + (bounds.width - textWidth) / 2 - textX,
+                      bounds.y + (bounds.height - textHeight) / 2 - textY);
+    display.print(button.label);
   }
 
   void drawHomeContent() {
-    display.setTextColor(COLOR_MUTED);
-    display.setTextSize(1);
-    display.setCursor(25, 51);
-    display.println(F("The flock stays live wherever you go"));
-    drawButton({{20, 84, 210, 150}, COLOR_PRIMARY, F("Conductor")});
-    drawButton({{250, 84, 210, 150}, COLOR_SURFACE_RAISED, F("Surveyor")});
-    drawButton({{20, 250, 210, 150}, COLOR_SURFACE_RAISED, F("Update")});
-    drawButton({{250, 250, 210, 150}, COLOR_SURFACE_RAISED, F("Channels")});
+    drawButton({{20, 128, 210, 150}, COLOR_PRIMARY, F("Patterns")});
+    drawButton({{250, 128, 210, 150}, COLOR_SURFACE_RAISED, F("Beats")});
+    drawButton({{20, 294, 210, 150}, COLOR_SURFACE_RAISED, F("Colors")});
+    drawButton({{250, 294, 210, 150}, COLOR_SURFACE_RAISED, F("Mesh")});
   }
 
   // Persistent Strip observes WLED's canonical, completed logical framebuffer.
   // The null bus supplies geometry only; it must not become a second pixel store.
   class Strip {
   public:
-    void draw(int16_t x, int16_t y, int16_t width, int16_t height, bool force = false) {
-      const int16_t cell = width / 60;
-      uint32_t colors[60];
-      const bool validTopology = ::strip.getLengthTotal() >= 60;
+    void draw(int16_t x, int16_t y, int16_t width, int16_t height, bool = false) {
+      TubesS3FieldStatus status;
+      tubesS3ReadStatus(status);
+      uint32_t colors[TUBES_S3_PREVIEW_PIXELS];
+      const bool validTopology = ::strip.getLengthTotal() >= TUBES_S3_PREVIEW_PIXELS;
       // draw() runs periodically, so this samples the previous completed show frame.
-      for (uint8_t i = 0; i < 60; i++) colors[i] = validTopology ? ::strip.getPixelColor(i) : 0;
-      for (uint8_t i = 0; i < 60; i++) {
-        if (force || !initialized || colors[i] != previous[i])
-          fillCell(x + i * cell, y, cell, height, colors[i]);
-        previous[i] = colors[i];
+      for (size_t i = 0; i < TUBES_S3_PREVIEW_PIXELS; i++)
+        colors[i] = validTopology ? ::strip.getPixelColor(i) : 0;
+      const uint8_t beat = status.beat & 0x0F;
+      const int16_t laneTop = height * 3 / 4;
+      for (int16_t row = 0; row < height; row++) {
+        for (int16_t column = 0; column < width; column++) {
+          if (row < laneTop) {
+            const size_t pixel = static_cast<uint32_t>(column)
+                * TUBES_S3_PREVIEW_PIXELS / width;
+            frame[row * width + column] = rgb565(colors[pixel]);
+            continue;
+          }
+          const uint8_t segment = static_cast<uint32_t>(column) * 16 / width;
+          frame[row * width + column] = segment == beat
+              ? RGB565_WHITE
+              : segment % 4 == 0 ? COLOR_DOWNBEAT : COLOR_BEAT;
+        }
       }
-      initialized = true;
+      // One opaque transfer avoids the CO5300's missing-column behavior on narrow writes.
+      display.draw16bitRGBBitmap(x, y, frame, width, height);
     }
   private:
-    uint32_t previous[60] = {};
-    bool initialized = false;
-
-    void fillCell(int16_t x, int16_t y, int16_t w, int16_t h, uint32_t color) {
-      display.fillRect(x, y, w - 1, h, rgb565(color));
-    }
+    uint16_t frame[DISPLAY_WIDTH * FIELD_OS_STRIP_HEIGHT] = {};
   };
 
   Strip stripComponent;
 
-  void drawConductorTelemetry(const TubesS3FieldStatus &status) {
-    display.fillRect(20, 68, 440, 108, COLOR_BACKGROUND);
-    drawDeviceCard(68, {status.localNodeId, status.tubesVersion, status.uplinkId,
-                       UINT32_MAX, "THIS DEVICE"});
-    display.setTextColor(RGB565_WHITE);
-    display.setTextSize(2);
-    display.setCursor(24, 132);
-    display.printf("%s\n", status.patternName);
-    display.setTextColor(COLOR_MUTED);
-    display.setTextSize(1);
-    display.setCursor(24, 154);
-    display.printf("%s  |  %u BPM  |  beat %u\n",
-                   status.isMaster ? "LEADING" : status.isFollowing ? "FOLLOWING" : "UNLINKED",
-                   status.bpm, status.beat + 1);
-    display.setCursor(260, 154);
-    if (!status.radioReady) {
-      display.setTextColor(RGB565_RED);
-      display.printf("Radio offline  |  channel %u\n", status.radioChannel);
-    } else {
-      display.setTextColor(COLOR_MINT);
-      const uint32_t targetFrame = static_cast<uint32_t>(status.nextPatternPhrase) << 12;
-      const int32_t remainingFrames = static_cast<int32_t>(targetFrame - status.beatFrame);
-      if (status.bpm == 0 || remainingFrames <= 0) {
-        display.printf("Live blend  |  next pattern %u\n", status.nextPatternId);
-      } else {
-        const uint32_t tenths = (static_cast<uint64_t>(remainingFrames) * 600U
-            + static_cast<uint32_t>(status.bpm) * 128U)
-            / (static_cast<uint32_t>(status.bpm) * 256U);
-        display.printf("Pattern %u in %lu.%lus  |  blending live\n", status.nextPatternId,
-            tenths / 10, tenths % 10);
-      }
+  void setScreenOn(bool enabled) {
+    if (!displayReady || screenOn == enabled) return;
+    screenOn = enabled;
+    if (!screenOn) {
+      display.displayOff();
+      return;
+    }
+    display.displayOn();
+    display.setBrightness(FIELD_OS_DEFAULT_BRIGHTNESS);
+    lastActivityMs = millis();
+    viewManager.redraw();
+  }
+
+  void samplePower(uint32_t now, bool force = false) {
+    if (!pmuReady || (!force && now - lastBatterySampleMs < SAMPLE_INTERVAL_MS)) return;
+    lastBatterySampleMs = now;
+    const bool wasUsbPresent = usbPresent;
+    const bool nextUsbPresent = pmu.isVbusIn();
+    const bool nextCharging = pmu.isCharging();
+    const uint16_t nextBatteryMv = pmu.getBattVoltage();
+    const int16_t nextBatteryPercent = pmu.isBatteryConnect()
+        ? constrain(static_cast<int16_t>(pmu.getBatteryPercent()), 0, 100) : -1;
+    const bool changed = nextUsbPresent != usbPresent || nextCharging != charging
+        || nextBatteryPercent != batteryPercent || nextBatteryMv != batteryMv;
+    usbPresent = nextUsbPresent;
+    charging = nextCharging;
+    batteryMv = nextBatteryMv;
+    batteryPercent = nextBatteryPercent;
+    if (wasUsbPresent && !usbPresent) lastActivityMs = now;
+    if (!wasUsbPresent && usbPresent && !screenOn) setScreenOn(true);
+    if (changed && displayReady && screenOn) drawBattery();
+  }
+
+  void handlePowerKey() {
+    if (!pmuReady) return;
+    const uint32_t now = millis();
+    if (now - lastPmuPollMs < 25) return;
+    lastPmuPollMs = now;
+    pmu.getIrqStatus();
+    if (pmu.isPekeyShortPressIrq()) {
+      lastActivityMs = now;
+      setScreenOn(!screenOn);
+    }
+    pmu.clearIrqStatus();
+  }
+
+  void tickShell(uint32_t now) {
+    handlePowerKey();
+    samplePower(now);
+    if (!screenOn) return;
+    if (!usbPresent && now - lastActivityMs >= FIELD_OS_IDLE_TIMEOUT_MS) {
+      setScreenOn(false);
+      return;
+    }
+    if (!usbPresent && now - lastBatteryPulseMs >= BATTERY_PULSE_INTERVAL_MS) {
+      lastBatteryPulseMs = now;
+      drawBatteryIcon(batteryPulseColor(now), false);
+    }
+    if (now - lastPreviewMs >= PREVIEW_INTERVAL_MS) {
+      lastPreviewMs = now;
+      stripComponent.draw(0, FIELD_OS_STRIP_TOP, DISPLAY_WIDTH, FIELD_OS_STRIP_HEIGHT);
     }
   }
 
-  void drawConductorContent(bool full) {
-    TubesS3FieldStatus status;
-    tubesS3ReadStatus(status);
-    drawConductorTelemetry(status);
-    stripComponent.draw(31, 178, 420, 110, full);
-    if (!status.canForceNext)
-      drawButton({{120, 328, 240, 70}, COLOR_MUTED, F("Next unavailable")});
-    else if (nextSendFailed)
-      drawButton({{120, 328, 240, 70}, RGB565_RED, F("Next failed")});
-    else
-      drawButton({{150, 328, 180, 70}, COLOR_PRIMARY, F("Next")});
+  static uint8_t patternChoiceId(uint8_t index) {
+    static constexpr uint8_t choices[] = {
+      20, 22, 25, 26, 28, 30, 33, 35, 40, 44, 47, 50
+    };
+    return choices[index % (sizeof(choices) / sizeof(choices[0]))];
   }
 
-  static bool surveyorBefore(const TubesS3PeerStatus &candidate, const TubesS3PeerStatus &prior) {
+  static const __FlashStringHelper *patternChoiceLabel(uint8_t index) {
+    switch (index) {
+      case 0: return F("Wave");
+      case 1: return F("Pulse");
+      case 2: return F("Chase");
+      case 3: return F("Aurora");
+      case 4: return F("Twinkle");
+      case 5: return F("Scanner");
+      case 6: return F("Fire");
+      case 7: return F("Noise");
+      case 8: return F("Lake");
+      case 9: return F("Burst");
+      case 10: return F("Popcorn");
+      default: return F("Pacifica");
+    }
+  }
+
+  // Draws a compact motion signature so patterns can be recognized before reading the label.
+  void drawPatternTile(uint8_t index, const TubesS3FieldStatus &status) {
+    constexpr int16_t tileWidth = 142;
+    constexpr int16_t tileHeight = 76;
+    const int16_t x = 20 + (index % 3) * 149;
+    const int16_t y = 148 + (index / 3) * 82;
+    const uint8_t patternId = patternChoiceId(index);
+    const bool isNext = patternId == status.nextPatternId;
+    const bool isCurrent = patternId == status.patternId;
+    const uint16_t background = isNext ? COLOR_PRIMARY
+        : isCurrent ? COLOR_MINT : COLOR_SURFACE_RAISED;
+    display.fillRoundRect(x, y, tileWidth, tileHeight, 12, background);
+    for (uint8_t bar = 0; bar < 6; bar++) {
+      const int16_t barHeight = 6 + ((index * 7 + bar * 11) % 23);
+      display.fillRoundRect(x + 12 + bar * 20, y + 34 - barHeight,
+                            12, barHeight, 4,
+                            isNext || isCurrent ? RGB565_WHITE : COLOR_MUTED);
+    }
+    display.setTextColor(RGB565_WHITE, background);
+    setDetailFont();
+    const __FlashStringHelper *label = patternChoiceLabel(index);
+    int16_t textX = 0;
+    int16_t textY = 0;
+    uint16_t textWidth = 0;
+    uint16_t textHeight = 0;
+    display.getTextBounds(label, 0, 0, &textX, &textY, &textWidth, &textHeight);
+    display.setCursor(x + (tileWidth - textWidth) / 2 - textX, y + 50);
+    display.print(label);
+  }
+
+  void drawPatternsContent(bool) {
+    TubesS3FieldStatus status;
+    tubesS3ReadStatus(status);
+    display.fillRect(0, FIELD_OS_APP_TOP, DISPLAY_WIDTH,
+                     DISPLAY_HEIGHT - FIELD_OS_APP_TOP, COLOR_BACKGROUND);
+    setDetailFont();
+    display.setTextColor(nextSendFailed ? RGB565_RED : COLOR_MUTED, COLOR_BACKGROUND);
+    display.setCursor(20, 110);
+    if (nextSendFailed) display.print(F("COULD NOT SET PATTERN"));
+    else display.printf("CURRENT %02u    NEXT %02u", status.patternId, status.nextPatternId);
+    for (uint8_t index = 0; index < 12; index++)
+      drawPatternTile(index, status);
+  }
+
+  static bool meshBefore(const TubesS3PeerStatus &candidate, const TubesS3PeerStatus &prior) {
     if (candidate.rssiKnown != prior.rssiKnown) return candidate.rssiKnown;
     if (candidate.rssiKnown && candidate.latestRssi != prior.latestRssi)
       return candidate.latestRssi > prior.latestRssi;
@@ -241,68 +472,102 @@ private:
     return (value ^ field) * 16777619UL;
   }
 
-  uint32_t conductorRevision(const TubesS3FieldStatus &status) {
-    uint32_t value = mixRevision(status.localNodeId, status.tubesVersion);
-    value = mixRevision(value, status.uplinkId);
-    value = mixRevision(value, status.patternId | (status.nextPatternId << 8));
-    value = mixRevision(value, status.paletteId | (status.nextPaletteId << 8));
-    value = mixRevision(value, status.bpm | (status.beat << 16));
+  uint32_t patternsRevision(const TubesS3FieldStatus &status) {
+    uint32_t value = mixRevision(status.patternId, status.nextPatternId);
     value = mixRevision(value, status.currentPatternPhrase);
     value = mixRevision(value, status.nextPatternPhrase);
-    value = mixRevision(value, status.radioReady | (status.radioChannel << 8));
-    value = mixRevision(value, status.isMaster | (status.isFollowing << 1));
     return value;
+  }
+
+  static const __FlashStringHelper *beatOverlayLabel(uint8_t choice) {
+    switch (choice) {
+      case 0: return F("Off");
+      case 1: return F("Stream");
+      case 2: return F("Boom");
+      case 3: return F("Spring");
+      case 4: return F("Ripple");
+      case 5: return F("Puddle");
+      case 6: return F("Falls");
+      case 7: return F("Center");
+      default: return F("Orbit");
+    }
+  }
+
+  // Draws a rhythmic signature for each curated audio overlay choice.
+  void drawBeatOverlayTile(uint8_t choice, const TubesS3FieldStatus &status) {
+    constexpr int16_t tileWidth = 142;
+    constexpr int16_t tileHeight = 78;
+    const int16_t x = 20 + (choice % 3) * 149;
+    const int16_t y = 210 + (choice / 3) * 86;
+    const bool isNext = choice == status.nextBeatOverlayChoice;
+    const bool isCurrent = choice == status.beatOverlayChoice;
+    const uint16_t background = isNext ? COLOR_PRIMARY
+        : isCurrent ? COLOR_MINT : COLOR_SURFACE_RAISED;
+    display.fillRoundRect(x, y, tileWidth, tileHeight, 12, background);
+    const uint16_t glyphColor = isNext || isCurrent ? RGB565_WHITE : COLOR_MUTED;
+    if (choice == 0) {
+      display.fillRoundRect(x + 34, y + 26, 74, 7, 3, glyphColor);
+    } else {
+      for (uint8_t bar = 0; bar < 7; bar++) {
+        const int16_t barHeight = 5 + ((choice * 9 + bar * 7) % 23);
+        display.fillRoundRect(x + 13 + bar * 17, y + 35 - barHeight,
+                              10, barHeight, 3, glyphColor);
+      }
+    }
+    display.setTextColor(RGB565_WHITE, background);
+    setDetailFont();
+    const __FlashStringHelper *label = beatOverlayLabel(choice);
+    int16_t textX = 0;
+    int16_t textY = 0;
+    uint16_t textWidth = 0;
+    uint16_t textHeight = 0;
+    display.getTextBounds(label, 0, 0, &textX, &textY, &textWidth, &textHeight);
+    display.setCursor(x + (tileWidth - textWidth) / 2 - textX, y + 52);
+    display.print(label);
+  }
+
+  void drawBeatsContent() {
+    TubesS3FieldStatus status;
+    tubesS3ReadStatus(status);
+    display.fillRect(0, FIELD_OS_APP_TOP, DISPLAY_WIDTH,
+                     DISPLAY_HEIGHT - FIELD_OS_APP_TOP, COLOR_BACKGROUND);
+    drawButton({{20, 112, 210, 78}, status.tempoListening ? COLOR_MINT : COLOR_SURFACE_RAISED,
+                status.tempoListening ? F("Listen ON") : F("Listen OFF")});
+    drawButton({{250, 112, 210, 78}, COLOR_AMBER, F("Downbeat")});
+    for (uint8_t choice = 0; choice < 9; choice++)
+      drawBeatOverlayTile(choice, status);
+  }
+
+  uint32_t beatsRevision(const TubesS3FieldStatus &status) {
+    uint32_t value = mixRevision(status.tempoListening, status.beatOverlayChoice);
+    return mixRevision(value, status.nextBeatOverlayChoice);
   }
 
   void drawDeviceCard(int16_t y, const DeviceCard &device,
                       uint16_t color = COLOR_SURFACE_RAISED) {
     display.fillRoundRect(20, y, 440, 62, 10, color);
-    display.setTextColor(RGB565_WHITE);
-    display.setTextSize(2);
-    display.setCursor(34, y + 7);
+    display.setTextColor(RGB565_WHITE, color);
+    setDetailFont();
+    display.setCursor(34, y + 5);
     display.printf("%s", device.kind);
-    display.setTextSize(1);
-    display.setCursor(34, y + 31);
-    if (device.id) display.printf("ID: %04X", device.id);
-    else display.print(F("ID: UNKNOWN"));
-    display.print(F(" | VERSION: "));
+    if (device.id) display.printf(" | %04X", device.id);
+    else display.print(F(" | UNKNOWN"));
+    display.print(F(" | "));
     if (device.version) display.printf("v%u", device.version);
     else display.print(F("UNKNOWN"));
-    display.setTextColor(COLOR_MUTED);
-    display.setTextSize(1);
-    display.setCursor(34, y + 49);
+    display.setTextColor(COLOR_MUTED, color);
+    display.setCursor(34, y + 32);
     if (device.uplinkId) display.printf("UPLINK: %04X", device.uplinkId);
     else display.print(F("UPLINK: NONE"));
     if (device.ageSeconds != UINT32_MAX)
       display.printf(" | HEARD: %lus AGO", device.ageSeconds);
   }
 
-  void drawChannelCard(int16_t y, const char *name, const TubesS3ChannelStatus &channel,
-                      const char *currentValue) {
-    display.fillRoundRect(20, y, 440, 70, 10, COLOR_SURFACE_RAISED);
-    display.setTextColor(COLOR_MUTED);
-    display.setTextSize(1);
-    display.setCursor(34, y + 10);
-    display.printf("%s CHANNEL  |  READ ONLY", name);
-    display.setTextColor(RGB565_WHITE);
-    display.setTextSize(2);
-    display.setCursor(34, y + 27);
-    display.printf("%s: %s", name, currentValue);
-    display.setTextColor(COLOR_MUTED);
-    display.setTextSize(1);
-    display.setCursor(34, y + 55);
-    if (channel.active)
-      display.printf("Owned by channel %03X / control %03X", channel.ownerChannelId,
-          channel.ownerControlId);
-    else
-      display.printf("Local channel %03X / unclaimed", channel.localChannelId);
-  }
-
-  void drawSurveyorContent() {
+  void drawMeshContent() {
     TubesS3FieldStatus status;
     tubesS3ReadStatus(status);
-    display.fillRect(20, 70, 440, 370, COLOR_BACKGROUND);
-    display.setTextSize(1);
+    display.fillRect(0, FIELD_OS_APP_TOP, DISPLAY_WIDTH,
+                     DISPLAY_HEIGHT - FIELD_OS_APP_TOP, COLOR_BACKGROUND);
     TubesS3PeerStatus sorted[4];
     size_t shown = 0;
     const uint32_t now = millis();
@@ -310,79 +575,202 @@ private:
       TubesS3PeerStatus candidate;
       if (!tubesS3ReadPeer(i, candidate) || candidate.nodeId == status.localNodeId
           || now - candidate.lastSeenMs > 60000) continue;
-      if (shown == 4 && !surveyorBefore(candidate, sorted[3])) continue;
+      if (shown == 4 && !meshBefore(candidate, sorted[3])) continue;
       size_t position = shown < 4 ? shown++ : 3;
-      while (position > 0 && surveyorBefore(candidate, sorted[position - 1])) {
+      while (position > 0 && meshBefore(candidate, sorted[position - 1])) {
         if (position < 4) sorted[position] = sorted[position - 1];
         position--;
       }
       if (position < 4) sorted[position] = candidate;
     }
-    display.setTextColor(COLOR_MUTED);
-    display.setTextSize(1);
-    display.setCursor(24, 76);
-    display.println(F("THIS S3"));
-    drawDeviceCard(92, {status.localNodeId, status.tubesVersion, status.uplinkId,
-                        UINT32_MAX, "THIS DEVICE"});
-    display.setTextColor(COLOR_MUTED);
-    display.setCursor(24, 160);
-    display.println(F("NEARBY DEVICES"));
     if (shown == 0) {
-      display.setTextColor(RGB565_WHITE);
-      display.setCursor(24, 190);
-      display.println(F("No other Tubes heard in the last 60 seconds."));
+      display.setTextColor(RGB565_WHITE, COLOR_BACKGROUND);
+      setDetailFont();
+      display.setCursor(24, 116);
+      display.println(F("No Tubes heard in 60 seconds."));
     }
     for (size_t i = 0; i < shown; i++) {
       const TubesS3PeerStatus &peer = sorted[i];
-      drawDeviceCard(178 + i * 66, {peer.nodeId, peer.tubesVersion, peer.uplinkId,
+      drawDeviceCard(106 + i * 70, {peer.nodeId, peer.tubesVersion, peer.uplinkId,
                      (now - peer.lastSeenMs) / 1000, "TUBES DEVICE"});
+    }
+    drawButton({{120, 408, 240, 56}, COLOR_PRIMARY, F("Update")});
+  }
+
+  static uint32_t blendColor(uint32_t first, uint32_t second, uint8_t amount) {
+    const uint8_t inverse = 255 - amount;
+    const uint8_t red = ((first >> 16) * inverse + (second >> 16) * amount) / 255;
+    const uint8_t green = (((first >> 8) & 0xFF) * inverse
+        + ((second >> 8) & 0xFF) * amount) / 255;
+    const uint8_t blue = ((first & 0xFF) * inverse + (second & 0xFF) * amount) / 255;
+    return (static_cast<uint32_t>(red) << 16)
+        | (static_cast<uint32_t>(green) << 8) | blue;
+  }
+
+  static uint32_t gradientColor(const uint32_t colors[3], uint8_t position) {
+    if (position < 128)
+      return blendColor(colors[0], colors[1], position * 2);
+    return blendColor(colors[1], colors[2],
+                      static_cast<uint16_t>(position - 128) * 255 / 127);
+  }
+
+  static uint8_t gradientBrightness(uint8_t index) {
+    static constexpr uint8_t levels[4] = {88, 144, 200, 255};
+    return levels[index % 4];
+  }
+
+  // Changes perceived brightness while preserving the selected stop's hue.
+  static uint32_t setColorBrightness(uint32_t color, uint8_t brightness) {
+    const uint8_t red = color >> 16;
+    const uint8_t green = color >> 8;
+    const uint8_t blue = color;
+    const uint8_t peak = max(red, max(green, blue));
+    if (peak == 0)
+      return static_cast<uint32_t>(brightness) * 0x010101UL;
+    return (static_cast<uint32_t>(red) * brightness / peak << 16)
+        | (static_cast<uint32_t>(green) * brightness / peak << 8)
+        | static_cast<uint32_t>(blue) * brightness / peak;
+  }
+
+  // Maps RGB to FastLED's circular hue scale so preset companions rotate with the anchor.
+  static uint8_t colorHue(uint32_t color) {
+    const uint8_t red = color >> 16;
+    const uint8_t green = color >> 8;
+    const uint8_t blue = color;
+    const uint8_t high = max(red, max(green, blue));
+    const uint8_t low = min(red, min(green, blue));
+    const uint8_t range = high - low;
+    if (range == 0)
+      return 0;
+    if (high == red)
+      return static_cast<uint8_t>(43 * static_cast<int16_t>(green - blue) / range);
+    if (high == green)
+      return static_cast<uint8_t>(85 + 43 * static_cast<int16_t>(blue - red) / range);
+    return static_cast<uint8_t>(171 + 43 * static_cast<int16_t>(red - green) / range);
+  }
+
+  static uint32_t colorFromHsv(uint8_t hue, uint8_t saturation, uint8_t value) {
+    const CRGB color = CHSV(hue, saturation, value);
+    return (static_cast<uint32_t>(color.r) << 16)
+        | (static_cast<uint32_t>(color.g) << 8) | color.b;
+  }
+
+  static uint8_t hueFromPaletteX(int16_t x) {
+    return static_cast<uint32_t>(constrain(x, 20, 459) - 20) * 255 / 439;
+  }
+
+  // Builds eight distinct relationships while preserving the chosen color at its stop.
+  void regenerateGradientPresets() {
+    static constexpr uint8_t hueLayouts[8][3] = {
+      {0, 18, 40}, {0, 85, 170}, {0, 105, 150}, {0, 128, 148},
+      {0, 28, 196}, {0, 58, 186}, {0, 42, 92}, {0, 230, 205}
+    };
+    const uint32_t anchor = gradientStops[selectedGradientStop];
+    const uint8_t red = anchor >> 16;
+    const uint8_t green = anchor >> 8;
+    const uint8_t blue = anchor;
+    const uint8_t high = max(red, max(green, blue));
+    const uint8_t low = min(red, min(green, blue));
+    const uint8_t saturation = high == 0 ? 0
+        : static_cast<uint16_t>(high - low) * 255 / high;
+    const uint8_t vividSaturation = saturation < 176 ? 176 : saturation;
+    const uint8_t vividValue = high < 176 ? 176 : high;
+    const uint8_t anchorHue = colorHue(anchor);
+    for (uint8_t preset = 0; preset < 8; preset++) {
+      const uint8_t anchorOffset = hueLayouts[preset][selectedGradientStop];
+      for (uint8_t stop = 0; stop < 3; stop++) {
+        if (stop == selectedGradientStop) {
+          gradientPresets[preset][stop] = anchor;
+          continue;
+        }
+        const uint8_t hue = anchorHue + hueLayouts[preset][stop] - anchorOffset;
+        const uint8_t valueDrop = ((preset + stop) % 3) * 20;
+        gradientPresets[preset][stop] = colorFromHsv(
+            hue, vividSaturation, vividValue - valueDrop);
+      }
     }
   }
 
-  void drawChannelsContent() {
-    TubesS3FieldStatus status;
-    tubesS3ReadStatus(status);
-    display.fillRect(20, 70, 440, 370, COLOR_BACKGROUND);
-    display.setTextSize(1);
-    drawDeviceCard(72, {status.localNodeId, status.tubesVersion, status.uplinkId,
-                        UINT32_MAX, "THIS DEVICE"});
-    display.setTextColor(COLOR_MUTED);
-    display.setCursor(24, 142);
-    display.println(F("LIVE CHANNEL AUTHORITY"));
-    char beatValue[32];
-    char patternValue[32];
-    char paletteValue[32];
-    snprintf(beatValue, sizeof(beatValue), "%u BPM", status.bpm);
-    snprintf(patternValue, sizeof(patternValue), "%s -> %u", status.patternName,
-        status.nextPatternId);
-    snprintf(paletteValue, sizeof(paletteValue), "%s -> %u", status.paletteName,
-        status.nextPaletteId);
-    drawChannelCard(156, "BEAT", status.beatChannel, beatValue);
-    drawChannelCard(232, "PATTERN", status.patternChannel, patternValue);
-    drawChannelCard(308, "PALETTE", status.paletteChannel, paletteValue);
+  void queueGradient() {
+    if (!tubesS3ScheduleGradient(gradientStops))
+      Serial.println(F("TubeOS: gradient queue rejected"));
+  }
+
+  void drawGradientPreview(const Rect &bounds, const uint32_t colors[3]) {
+    display.fillRoundRect(bounds.x, bounds.y, bounds.width, bounds.height, 12,
+                          COLOR_SURFACE_RAISED);
+    constexpr int16_t sliceWidth = 8;
+    for (int16_t offset = 4; offset < bounds.width - 4; offset += sliceWidth) {
+      const int16_t remaining = bounds.width - 4 - offset;
+      const int16_t width = remaining < sliceWidth ? remaining : sliceWidth;
+      const uint8_t position = static_cast<uint32_t>(offset - 4) * 255
+          / (bounds.width - 9);
+      display.fillRect(bounds.x + offset, bounds.y + 4, width,
+                       bounds.height - 8, rgb565(gradientColor(colors, position)));
+    }
+  }
+
+  void applyGradientPreset(uint8_t preset) {
+    for (uint8_t stop = 0; stop < 3; stop++)
+      gradientStops[stop] = gradientPresets[preset % 8][stop];
+    queueGradient();
+  }
+
+  void drawColorsContent() {
+    display.fillRect(0, FIELD_OS_APP_TOP, DISPLAY_WIDTH,
+                     DISPLAY_HEIGHT - FIELD_OS_APP_TOP, COLOR_BACKGROUND);
+    drawGradientPreview({20, 106, 440, 36}, gradientStops);
+    const int16_t stopCenters[3] = {80, 240, 400};
+    for (uint8_t stop = 0; stop < 3; stop++) {
+      display.fillCircle(stopCenters[stop], 162, selectedGradientStop == stop ? 20 : 16,
+                         selectedGradientStop == stop ? RGB565_WHITE : COLOR_MUTED);
+      display.fillCircle(stopCenters[stop], 162, selectedGradientStop == stop ? 14 : 11,
+                         rgb565(gradientStops[stop]));
+    }
+
+    display.fillRoundRect(20, 192, 440, 46, 10, COLOR_SURFACE_RAISED);
+    constexpr int16_t hueSliceWidth = 8;
+    for (int16_t x = 24; x < 456; x += hueSliceWidth) {
+      const int16_t width = min(hueSliceWidth, static_cast<int16_t>(456 - x));
+      display.fillRect(x, 196, width, 38,
+                       rgb565(colorFromHsv(hueFromPaletteX(x), 255, 255)));
+    }
+
+    for (uint8_t level = 0; level < 4; level++) {
+      const uint32_t color = setColorBrightness(
+          gradientStops[selectedGradientStop], gradientBrightness(level));
+      display.fillRoundRect(20 + level * 110, 252, 105, 42, 10, rgb565(color));
+    }
+
+    for (uint8_t preset = 0; preset < 8; preset++) {
+      const int16_t x = 20 + (preset % 4) * 110;
+      const int16_t y = 312 + (preset / 4) * 64;
+      drawGradientPreview({x, y, 105, 52}, gradientPresets[preset]);
+    }
   }
 
   void drawUpdateContent() {
-    display.fillRect(20, 68, 440, 372, COLOR_BACKGROUND);
+    display.fillRect(20, 104, 440, 376, COLOR_BACKGROUND);
 #ifdef TUBES_S3_FIRMWARE_CARRIER
     TubesS3FieldStatus status;
     tubesS3ReadStatus(status);
-    display.setTextColor(COLOR_MUTED);
-    display.setTextSize(1);
-    display.setCursor(24, 72);
+    display.setTextColor(COLOR_MUTED, COLOR_BACKGROUND);
+    setBodyFont();
+    display.setCursor(24, 112);
     display.println(F("THIS S3 UPDATE CARRIER"));
-    drawDeviceCard(88, {status.localNodeId, status.tubesVersion, status.uplinkId,
+    drawDeviceCard(136, {status.localNodeId, status.tubesVersion, status.uplinkId,
                         UINT32_MAX, "THIS DEVICE"});
-    display.setTextColor(COLOR_MUTED);
-    display.setCursor(24, 158);
+    display.setTextColor(COLOR_MUTED, COLOR_BACKGROUND);
+    setDetailFont();
+    display.setCursor(24, 204);
     display.println(F("EMBEDDED v47 FIRMWARE"));
     for (size_t index = 0; index < tubesS3CarrierArtifactCount(); index++) {
       TubesS3CarrierArtifact artifact;
-      const int16_t y = 174 + index * 38;
+      const int16_t y = 232 + index * 38;
       display.fillRoundRect(20, y, 440, 32, 8, COLOR_SURFACE_RAISED);
-      display.setTextColor(RGB565_WHITE);
-      display.setTextSize(2);
-      display.setCursor(32, y + 11);
+      display.setTextColor(RGB565_WHITE, COLOR_SURFACE_RAISED);
+      setDetailFont();
+      display.setCursor(32, y + 7);
       if (!tubesS3ReadCarrierArtifact(index, artifact)) {
         display.print(F("ARTIFACT UNAVAILABLE"));
       } else {
@@ -394,38 +782,38 @@ private:
         display.print(artifact.release);
       }
     }
-    drawButton({{20, 258, 150, 46}, COLOR_PRIMARY, F("Scan")});
+    drawButton({{20, 316, 150, 46}, COLOR_PRIMARY, F("Scan")});
     TubesS3CarrierStatus carrier;
     tubesS3ReadCarrierStatus(carrier);
-    display.setTextSize(1);
-    display.setTextColor(COLOR_MUTED);
-    display.setCursor(190, 276);
+    setDetailFont();
+    display.setTextColor(COLOR_MUTED, COLOR_BACKGROUND);
+    display.setCursor(190, 332);
     display.printf("Carrier state %u  |  release %u\n", carrier.state, carrier.release);
-    display.setCursor(24, 316);
+    display.setCursor(24, 372);
     display.println(F("DISCOVERED UPDATE TARGETS"));
     const size_t count = tubesS3CarrierTargetCount();
-    display.setTextColor(RGB565_WHITE);
+    display.setTextColor(RGB565_WHITE, COLOR_BACKGROUND);
     if (count == 0) {
-      display.setTextSize(2);
-      display.setCursor(24, 348);
+      setBodyFont();
+      display.setCursor(24, 412);
       display.println(F("NO DEVICES NEARBY"));
     }
     for (size_t index = 0; index < count && index < 2; index++) {
       TubesS3CarrierTarget target;
       if (!tubesS3ReadCarrierTarget(index, target)) continue;
-      const int16_t y = 332 + index * 66;
+      const int16_t y = 400 + index * 66;
       drawDeviceCard(y, {target.nodeId, target.release, target.uplinkId,
                      (millis() - target.lastSeenMs) / 1000,
                      target.family == 1 ? "DIG2GO" : "C3"});
     }
 #else
-    display.setTextColor(COLOR_MUTED);
-    display.setTextSize(2);
-    display.setCursor(36, 120);
+    display.setTextColor(COLOR_MUTED, COLOR_BACKGROUND);
+    setBodyFont();
+    display.setCursor(36, 136);
     display.println(F("Carrier build required"));
-    display.setTextSize(1);
-    display.setCursor(36, 166);
-    display.println(F("This base firmware does not carry device images."));
+    setDetailFont();
+    display.setCursor(36, 178);
+    display.println(F("This build has no embedded device images."));
 #endif
   }
 
@@ -470,66 +858,82 @@ private:
     explicit HomeView(WaveshareS3FieldOs &owner)
         : FieldView(owner, FieldViewId::Home, F("Tubes Field OS"), 0) {}
     FieldViewId tap(int16_t x, int16_t y) override {
-      if (Rect{20, 84, 210, 150}.contains(x, y)) return FieldViewId::Conductor;
-      if (Rect{250, 84, 210, 150}.contains(x, y)) return FieldViewId::Surveyor;
-      if (Rect{20, 250, 210, 150}.contains(x, y)) return FieldViewId::Update;
-      if (Rect{250, 250, 210, 150}.contains(x, y)) return FieldViewId::Channels;
+      if (Rect{20, 128, 210, 150}.contains(x, y)) return FieldViewId::Patterns;
+      if (Rect{250, 128, 210, 150}.contains(x, y)) return FieldViewId::Beats;
+      if (Rect{20, 294, 210, 150}.contains(x, y)) return FieldViewId::Colors;
+      if (Rect{250, 294, 210, 150}.contains(x, y)) return FieldViewId::Mesh;
       return FieldViewId::Home;
     }
   protected:
     void renderContent(bool) override { owner.drawHomeContent(); }
   };
 
-  class ConductorView final : public FieldView {
+  class PatternsView final : public FieldView {
   public:
-    explicit ConductorView(WaveshareS3FieldOs &owner)
-        : FieldView(owner, FieldViewId::Conductor, F("Conductor"), 0) {}
+    explicit PatternsView(WaveshareS3FieldOs &owner)
+        : FieldView(owner, FieldViewId::Patterns, F("Patterns"), SAMPLE_INTERVAL_MS) {}
     FieldViewId tap(int16_t x, int16_t y) override {
-      if (Rect{120, 315, 240, 100}.contains(x, y)) {
-        TubesS3FieldStatus status;
-        tubesS3ReadStatus(status);
-        if (status.canForceNext) {
-          owner.nextSendFailed = !tubesS3ForceNext();
-          owner.drawConductorContent(false);
+      if (x >= 20 && x < 460 && y >= 148 && y < 470) {
+        const uint8_t column = (x - 20) / 149;
+        const uint8_t row = (y - 148) / 82;
+        if (column < 3 && row < 4) {
+          const uint8_t index = row * 3 + column;
+          owner.nextSendFailed = !tubesS3SelectPattern(owner.patternChoiceId(index));
+          owner.drawPatternsContent(false);
         }
       }
-      return FieldViewId::Conductor;
-    }
-    void tick(uint32_t now) override {
-      if (now - lastPreviewMs >= PREVIEW_INTERVAL_MS) {
-        lastPreviewMs = now;
-        owner.stripComponent.draw(31, 178, 420, 110);
-      }
-      if (now - lastRefreshMs >= SAMPLE_INTERVAL_MS) {
-        TubesS3FieldStatus status;
-        tubesS3ReadStatus(status);
-        const uint32_t nextRevision = owner.conductorRevision(status);
-        if (nextRevision != lastTelemetryRevision) {
-          owner.drawConductorTelemetry(status);
-          lastTelemetryRevision = nextRevision;
-        }
-        lastRefreshMs = now;
-      }
+      return FieldViewId::Patterns;
     }
   protected:
-    void renderContent(bool full) override {
-      owner.drawConductorContent(full);
-      lastPreviewMs = millis();
+    void renderContent(bool full) override { owner.drawPatternsContent(full); }
+    uint32_t revision() override {
       TubesS3FieldStatus status;
       tubesS3ReadStatus(status);
-      lastTelemetryRevision = owner.conductorRevision(status);
+      return owner.patternsRevision(status);
     }
-  private:
-    uint32_t lastPreviewMs = 0;
-    uint32_t lastTelemetryRevision = 0;
   };
 
-  class SurveyorView final : public FieldView {
+  class BeatsView final : public FieldView {
   public:
-    explicit SurveyorView(WaveshareS3FieldOs &owner)
-        : FieldView(owner, FieldViewId::Surveyor, F("Surveyor"), SAMPLE_INTERVAL_MS) {}
+    explicit BeatsView(WaveshareS3FieldOs &owner)
+        : FieldView(owner, FieldViewId::Beats, F("Beats"), SAMPLE_INTERVAL_MS) {}
+    FieldViewId tap(int16_t x, int16_t y) override {
+      if (Rect{20, 112, 210, 78}.contains(x, y)) {
+        TubesS3FieldStatus status;
+        tubesS3ReadStatus(status);
+        tubesS3SetTempoListening(!status.tempoListening);
+        owner.drawBeatsContent();
+      } else if (Rect{250, 112, 210, 78}.contains(x, y)) {
+        tubesS3TapDownbeat();
+      } else if (x >= 20 && x < 460 && y >= 210 && y < 468) {
+        const uint8_t column = (x - 20) / 149;
+        const uint8_t row = (y - 210) / 86;
+        if (column < 3 && row < 3) {
+          tubesS3SelectBeatOverlay(row * 3 + column);
+          owner.drawBeatsContent();
+        }
+      }
+      return FieldViewId::Beats;
+    }
   protected:
-    void renderContent(bool) override { owner.drawSurveyorContent(); }
+    void renderContent(bool) override { owner.drawBeatsContent(); }
+    uint32_t revision() override {
+      TubesS3FieldStatus status;
+      tubesS3ReadStatus(status);
+      return owner.beatsRevision(status);
+    }
+  };
+
+  class MeshView final : public FieldView {
+  public:
+    explicit MeshView(WaveshareS3FieldOs &owner)
+        : FieldView(owner, FieldViewId::Mesh, F("Mesh"), SAMPLE_INTERVAL_MS) {}
+    FieldViewId tap(int16_t x, int16_t y) override {
+      if (Rect{120, 408, 240, 56}.contains(x, y)) return FieldViewId::Update;
+      return FieldViewId::Mesh;
+    }
+  protected:
+    void renderContent(bool) override { owner.drawMeshContent(); }
     uint32_t revision() override {
       TubesS3FieldStatus status;
       tubesS3ReadStatus(status);
@@ -545,6 +949,38 @@ private:
       }
       return value;
     }
+  };
+
+  class ColorsView final : public FieldView {
+  public:
+    explicit ColorsView(WaveshareS3FieldOs &owner)
+        : FieldView(owner, FieldViewId::Colors, F("Colors"), 0) {}
+    FieldViewId tap(int16_t x, int16_t y) override {
+      if (y >= 142 && y < 184) {
+        owner.selectedGradientStop = x < 160 ? 0 : x < 320 ? 1 : 2;
+        owner.regenerateGradientPresets();
+      } else if (x >= 20 && x < 460 && y >= 192 && y < 238) {
+        owner.gradientStops[owner.selectedGradientStop] = owner.colorFromHsv(
+            owner.hueFromPaletteX(x), 255, 255);
+        owner.regenerateGradientPresets();
+        owner.queueGradient();
+      } else if (x >= 20 && x < 460 && y >= 252 && y < 294) {
+        const uint8_t level = (x - 20) / 110;
+        owner.gradientStops[owner.selectedGradientStop] = owner.setColorBrightness(
+            owner.gradientStops[owner.selectedGradientStop], owner.gradientBrightness(level));
+        owner.regenerateGradientPresets();
+        owner.queueGradient();
+      } else if (x >= 20 && x < 460 && y >= 312 && y < 428) {
+        const uint8_t column = (x - 20) / 110;
+        const uint8_t row = (y - 312) / 64;
+        if (column < 4 && row < 2)
+          owner.applyGradientPreset(row * 4 + column);
+      }
+      owner.drawColorsContent();
+      return FieldViewId::Colors;
+    }
+  protected:
+    void renderContent(bool) override { owner.drawColorsContent(); }
   };
 
   class UpdateView final : public FieldView {
@@ -588,46 +1024,19 @@ private:
     }
   };
 
-  class ChannelsView final : public FieldView {
-  public:
-    explicit ChannelsView(WaveshareS3FieldOs &owner)
-        : FieldView(owner, FieldViewId::Channels, F("Channels"), SAMPLE_INTERVAL_MS) {}
-  protected:
-    void renderContent(bool) override { owner.drawChannelsContent(); }
-    uint32_t revision() override {
-      TubesS3FieldStatus status;
-      tubesS3ReadStatus(status);
-      uint32_t value = owner.mixRevision(status.bpm, status.beatChannel.active);
-      value = owner.mixRevision(value, status.patternId | (status.nextPatternId << 8));
-      value = owner.mixRevision(value, status.paletteId | (status.nextPaletteId << 8));
-      value = owner.mixRevision(value, status.beatChannel.ownerChannelId);
-      value = owner.mixRevision(value, status.beatChannel.ownerControlId);
-      value = owner.mixRevision(value, status.beatChannel.active);
-      value = owner.mixRevision(value, status.beatChannel.localChannelId);
-      value = owner.mixRevision(value, status.patternChannel.ownerChannelId);
-      value = owner.mixRevision(value, status.patternChannel.ownerControlId);
-      value = owner.mixRevision(value, status.patternChannel.active);
-      value = owner.mixRevision(value, status.patternChannel.localChannelId);
-      value = owner.mixRevision(value, status.paletteChannel.ownerChannelId);
-      value = owner.mixRevision(value, status.paletteChannel.ownerControlId);
-      value = owner.mixRevision(value, status.paletteChannel.active);
-      value = owner.mixRevision(value, status.paletteChannel.localChannelId);
-      return value;
-    }
-  };
-
   class ViewManager {
   public:
-    ViewManager(WaveshareS3FieldOs &owner, HomeView &home, ConductorView &conductor,
-                SurveyorView &surveyor, UpdateView &update, ChannelsView &channels)
-        : owner(owner), home(home), conductor(conductor), surveyor(surveyor),
-          update(update), channels(channels), active(&home) {}
+    ViewManager(WaveshareS3FieldOs &owner, HomeView &home, PatternsView &patterns,
+                BeatsView &beats, MeshView &mesh, ColorsView &colors, UpdateView &update)
+        : owner(owner), home(home), patterns(patterns), beats(beats), mesh(mesh),
+          colors(colors), update(update), active(&home) {}
 
     void begin() { active->render(true); }
+    void redraw() { active->render(true); }
     void tick(uint32_t now) { active->tick(now); }
     void tap(int16_t x, int16_t y) {
-      if (active->id() != FieldViewId::Home && Rect{360, 0, 120, 75}.contains(x, y)) {
-        navigate(FieldViewId::Home);
+      if (y < FIELD_OS_HEADER_HEIGHT) {
+        if (active->id() != FieldViewId::Home) navigate(FieldViewId::Home);
         return;
       }
       const FieldViewId destination = active->tap(x, y);
@@ -641,38 +1050,57 @@ private:
     }
     FieldView *view(FieldViewId id) {
       switch (id) {
-        case FieldViewId::Conductor: return &conductor;
-        case FieldViewId::Surveyor: return &surveyor;
+        case FieldViewId::Patterns: return &patterns;
+        case FieldViewId::Beats: return &beats;
+        case FieldViewId::Mesh: return &mesh;
+        case FieldViewId::Colors: return &colors;
         case FieldViewId::Update: return &update;
-        case FieldViewId::Channels: return &channels;
         case FieldViewId::Home: default: return &home;
       }
     }
 
     WaveshareS3FieldOs &owner;
     HomeView &home;
-    ConductorView &conductor;
-    SurveyorView &surveyor;
+    PatternsView &patterns;
+    BeatsView &beats;
+    MeshView &mesh;
+    ColorsView &colors;
     UpdateView &update;
-    ChannelsView &channels;
     FieldView *active;
   };
 
   HomeView homeView;
-  ConductorView conductorView;
-  SurveyorView surveyorView;
+  PatternsView patternsView;
+  BeatsView beatsView;
+  MeshView meshView;
+  ColorsView colorsView;
   UpdateView updateView;
-  ChannelsView channelsView;
   ViewManager viewManager;
 
 public:
   WaveshareS3FieldOs()
-      : homeView(*this), conductorView(*this), surveyorView(*this), updateView(*this),
-        channelsView(*this),
-        viewManager(*this, homeView, conductorView, surveyorView, updateView, channelsView) {}
+      : homeView(*this), patternsView(*this), beatsView(*this), meshView(*this),
+        colorsView(*this), updateView(*this),
+        viewManager(*this, homeView, patternsView, beatsView, meshView, colorsView,
+                    updateView) {}
 
   void setup() override {
     Wire.begin(PERIPHERAL_SDA, PERIPHERAL_SCL);
+    microphoneReady = initializeMicrophones();
+    pmuReady = pmu.begin(Wire, AXP2101_SLAVE_ADDRESS, PERIPHERAL_SDA, PERIPHERAL_SCL);
+    if (pmuReady) {
+      pmu.disableTSPinMeasure();
+      pmu.enableBattDetection();
+      pmu.enableBattVoltageMeasure();
+      pmu.enableVbusVoltageMeasure();
+      pmu.disableIRQ(XPOWERS_AXP2101_ALL_IRQ);
+      pmu.clearIrqStatus();
+      pmu.enableIRQ(XPOWERS_AXP2101_PKEY_SHORT_IRQ);
+      pmu.setPowerKeyPressOffTime(XPOWERS_POWEROFF_10S);
+      pmu.enableLongPressShutdown();
+      pmu.setLongPressRestart();
+      samplePower(millis(), true);
+    }
     displayReady = display.begin();
     if (displayReady) {
       display.setBrightness(
@@ -696,6 +1124,8 @@ public:
       touchInterruptPending = false;
       attachInterrupt(TOUCH_IRQ, handleTouchInterrupt, FALLING);
     }
+    lastActivityMs = millis();
+    regenerateGradientPresets();
     if (displayReady) viewManager.begin();
   }
 
@@ -705,10 +1135,27 @@ public:
       int16_t x = -1;
       int16_t y = -1;
       const bool pressed = touch.getPoint(&x, &y, 1) > 0;
-      if (pressed && !touchDown) viewManager.tap(x, y);
+      if (screenOn && pressed) {
+        lastActivityMs = millis();
+        if (!touchDown) viewManager.tap(x, y);
+      }
       touchDown = pressed;
     }
-    if (displayReady) viewManager.tick(millis());
+    if (!displayReady) return;
+    const uint32_t now = millis();
+    tickShell(now);
+    if (screenOn) viewManager.tick(now);
+  }
+
+  bool handleButton(uint8_t b) override {
+    if (b >= WLED_MAX_BUTTONS) return false;
+    const bool pressed = isButtonPressed(b);
+    if (pressed && !physicalButtonDown[b]) {
+      lastActivityMs = millis();
+      if (!screenOn) setScreenOn(true);
+    }
+    physicalButtonDown[b] = pressed;
+    return true;
   }
 
   void addToJsonInfo(JsonObject &root) override {
@@ -717,6 +1164,8 @@ public:
     JsonArray fieldOs = user.createNestedArray(F("S3 field OS"));
     fieldOs.add(displayReady ? F("display OK") : F("display FAIL"));
     fieldOs.add(touchReady ? F("touch OK") : F("touch FAIL"));
+    fieldOs.add(pmuReady ? F("PMU OK") : F("PMU FAIL"));
+    fieldOs.add(microphoneReady ? F("microphones OK") : F("microphones FAIL"));
   }
 };
 

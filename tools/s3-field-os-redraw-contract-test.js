@@ -8,31 +8,31 @@ const source = fs.readFileSync(
 );
 
 test('held touch is edge-triggered and cannot repeat actions', () => {
-  assert.match(source, /if \(pressed && !touchDown\) viewManager\.tap\(x, y\);\s*touchDown = pressed;/);
+  assert.match(source, /if \(screenOn && pressed\) \{\s*lastActivityMs = millis\(\);\s*if \(!touchDown\) viewManager\.tap\(x, y\);\s*\}\s*touchDown = pressed;/);
 });
 
 test('periodic refreshes update content without clearing whole screens', () => {
   const loop = source.match(/void loop\(\) override \{([\s\S]*?)\n  \}\n\n  void addToJsonInfo/)[1];
-  assert.doesNotMatch(loop, /fillScreen|drawSurveyorContent|drawUpdateContent|drawChannelsContent/);
-  assert.match(loop, /viewManager\.tick\(millis\(\)\)/);
+  assert.doesNotMatch(loop, /fillScreen|drawMeshContent|drawUpdateContent|drawColorsContent/);
+  assert.match(loop, /if \(screenOn\) viewManager\.tick\(now\)/);
   assert.match(source, /if \(nextRevision != lastRevision\) render\(false\)/);
-  assert.match(source, /if \(nextRevision != lastTelemetryRevision\)/);
   assert.doesNotMatch(source, /else active->render\(false\)/);
 });
 
 test('all workspaces share one inherited lifecycle and one view manager', () => {
   assert.match(source, /class FieldView \{/);
   assert.match(source, /class HomeView final : public FieldView/);
-  assert.match(source, /class ConductorView final : public FieldView/);
-  assert.match(source, /class SurveyorView final : public FieldView/);
+  assert.match(source, /class PatternsView final : public FieldView/);
+  assert.match(source, /class BeatsView final : public FieldView/);
+  assert.match(source, /class MeshView final : public FieldView/);
+  assert.match(source, /class ColorsView final : public FieldView/);
   assert.match(source, /class UpdateView final : public FieldView/);
-  assert.match(source, /class ChannelsView final : public FieldView/);
   assert.match(source, /class ViewManager \{/);
   assert.match(source, /viewManager\.tap\(x, y\)/);
 });
 
-test('Conductor redraws only changed canonical framebuffer cells', () => {
-  assert.match(source, /colors\[i\] != previous\[i\]/);
+test('strip redraws the canonical framebuffer in one opaque transfer', () => {
+  assert.match(source, /draw16bitRGBBitmap\(x, y, frame, width, height\)/);
   assert.match(source, /::strip\.getPixelColor\(i\)/);
   assert.doesNotMatch(source, /BusManager::getBus\([^)]*\)->getPixelColor/);
 });

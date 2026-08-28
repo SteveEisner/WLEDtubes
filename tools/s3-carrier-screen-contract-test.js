@@ -8,7 +8,7 @@ const path = require('node:path');
 const source = fs.readFileSync(path.resolve(__dirname, '..',
   'usermods/WaveshareS3TubesRemote/WaveshareS3TubesRemote.cpp'), 'utf8');
 
-it('offers scan and exact target arming from Update without touching Conductor controls', () => {
+it('offers scan and exact target arming from Update without touching pattern controls', () => {
   assert.match(source, /FieldViewId::Update/);
   assert.match(source, /class UpdateView final : public FieldView/);
   assert.match(source, /void drawUpdateContent\(\)/);
@@ -33,9 +33,8 @@ it('offers scan and exact target arming from Update without touching Conductor c
 });
 
 it('uses four focused home workspaces and removes the generic Status screen', () => {
-  for (const label of ['Conductor', 'Surveyor', 'Update', 'Channels'])
+  for (const label of ['Patterns', 'Beats', 'Colors', 'Mesh'])
     assert.match(source, new RegExp(`F\\("${label}"\\)`));
   assert.doesNotMatch(source, /FieldViewId::Status/);
-  assert.match(source, /class ChannelsView final : public FieldView/);
-  assert.match(source, /void drawChannelsContent\(\)/);
+  assert.doesNotMatch(source, /FieldViewId::Channels|class ChannelsView/);
 });

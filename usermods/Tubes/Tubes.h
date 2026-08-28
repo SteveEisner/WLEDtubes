@@ -312,6 +312,9 @@ class TubesUsermod : public Usermod {
       status.currentPalettePhrase = controller.current_state.palette_phrase;
       status.nextPalettePhrase = controller.next_state.palette_phrase;
       status.nextPaletteId = controller.next_state.palette_id;
+      status.tempoListening = controller.s3TempoListening();
+      status.beatOverlayChoice = controller.s3BeatOverlayChoice(false);
+      status.nextBeatOverlayChoice = controller.s3BeatOverlayChoice(true);
       const uint32_t now = millis();
       status.peerCount = controller.node.peerTelemetry.freshCount(now, 60000);
       fillS3ChannelStatus(status.beatChannel, BeatChannel, now);
@@ -357,6 +360,19 @@ class TubesUsermod : public Usermod {
     }
 
     bool s3ForceNext() { return controller.force_next_if_authoritative(); }
+    bool s3SelectPattern(uint8_t patternId) {
+      return controller.selectS3Pattern(patternId);
+    }
+    bool s3ScheduleGradient(const uint32_t colors[3]) {
+      return controller.scheduleS3Gradient(colors);
+    }
+    bool s3SetTempoListening(bool enabled) {
+      return controller.setS3TempoListening(enabled);
+    }
+    bool s3TapDownbeat() { return controller.tapS3Downbeat(); }
+    bool s3SelectBeatOverlay(uint8_t choice) {
+      return controller.selectS3BeatOverlay(choice);
+    }
     bool s3BroadcastFleetOffer(const FleetUpdateOffer &offer) {
       return controller.broadcastFleetUpdateOffer(offer);
     }
