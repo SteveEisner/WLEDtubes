@@ -18,7 +18,17 @@ test('authority gate precedes the only local canonical mutation', () => {
   assert.doesNotMatch(action, /COMMAND_ACTION|sendV3ControlCommand|request_next/);
 });
 
-test('Field OS disables followers and rechecks authority on touch', () => {
-  assert.match(ui, /if \(!status\.canForceNext\)/);
-  assert.match(ui, /if \(status\.canForceNext\) \{\s*owner\.nextSendFailed = !tubesS3ForceNext\(\)/);
+test('Field OS routes pattern tiles through the bounded S3 scheduling API', () => {
+  assert.match(ui, /owner\.nextSendFailed = !tubesS3SelectPattern\(owner\.patternChoiceId\(index\)\)/);
+  assert.match(controller, /if \(node\.isFollowing\(\) \|\| patternId >= gPatternCount\)/);
+  assert.match(controller, /PatternProgramEntry program = tablePatternProgram/);
+});
+
+test('TubeOS gradient success means the local next-phrase schedule exists', () => {
+  const schedule = controller.match(/bool scheduleS3Gradient\(const uint32_t colors\[3\]\) \{([\s\S]*?)\n  \}/)?.[1] || '';
+  assert.match(schedule, /const uint16_t effectivePhrase = nextPhraseBoundary\(\)/);
+  assert.match(schedule, /scheduleCustomGradient\(/);
+  assert.match(schedule, /return nextPalette16Valid/);
+  assert.match(schedule, /nextPalette16Phrase == effectivePhrase/);
+  assert.match(schedule, /nextPalette16Fallback == fallback/);
 });

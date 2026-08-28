@@ -7,13 +7,21 @@ const fs = require('node:fs');
 const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 
-test('Waveshare S3 alone enables a 60-pixel null logical output', () => {
+// Proves the field target owns a 128-pixel logical surface and is always a sound-reactive master.
+test('Waveshare S3 enables a 128-pixel null output as an audio-reactive master', () => {
   const ini = read('platformio_tubes.ini');
   const s3 = ini.match(/\[env:waveshare_s3_tubes_remote\]([\s\S]*?)(?=\n\[|$)/)[1];
   assert.match(s3, /-D TUBES_NULL_OUTPUT/);
   assert.match(s3, /-D LED_TYPES=TYPE_TUBES_NULL/);
-  assert.match(s3, /-D PIXEL_COUNTS=60/);
-  assert.doesNotMatch(s3, /-D MASTER(?:\s|$)/);
+  assert.match(s3, /-D PIXEL_COUNTS=128/);
+  assert.match(s3, /-D MASTER(?:\s|$)/);
+  assert.match(s3, /-D UM_AUDIOREACTIVE_ENABLE/);
+  assert.match(s3, /-D UM_AUDIOREACTIVE_SAMPLE_RATE=16000/);
+  assert.match(s3, /-D SR_DMTYPE=4/);
+  assert.match(s3, /-D I2S_SDPIN=10/);
+  assert.match(s3, /-D I2S_WSPIN=45/);
+  assert.match(s3, /-D I2S_CKPIN=9/);
+  assert.match(s3, /-D MCLK_PIN=42/);
   assert.match(s3, /-D DATA_PINS=255/); // sentinel pin; null-bus factory ignores it
   assert.doesNotMatch(s3, /(?:LEDPIN|TYPE_NET_)/);
   const dig2go = ini.match(/\[env:esp32_quinled_dig2go_tubes\]([\s\S]*?)(?=\n\[|$)/)[1];
@@ -51,7 +59,7 @@ test('S3 repairs a stale one-pixel segment before the Tubes renderer runs', () =
   assert.match(tubes, /makeAutoSegments\(true\)/);
 });
 
-test('compiled host proof preserves a nonuniform 60-pixel null-bus frame', () => {
+test('compiled host proof preserves a nonuniform 128-pixel null-bus frame', () => {
   const result = spawnSync('c++', ['-std=c++17', '-Wall', '-Wextra',
     'tools/tubes-null-bus-host-test.cpp', '-o', '/tmp/tubes-null-bus-host-test'],
     {cwd: root, encoding: 'utf8'});
@@ -62,9 +70,28 @@ test('compiled host proof preserves a nonuniform 60-pixel null-bus frame', () =>
 
 test('AMOLED strand reads the canonical WLED framebuffer, not the geometry-only bus', () => {
   const ui = read('usermods/WaveshareS3TubesRemote/WaveshareS3TubesRemote.cpp');
-  assert.match(ui, /::strip\.getLengthTotal\(\) >= 60/);
+  assert.match(ui, /::strip\.getLengthTotal\(\) >= TUBES_S3_PREVIEW_PIXELS/);
   assert.match(ui, /::strip\.getPixelColor\(i\)/);
   assert.doesNotMatch(ui, /BusManager::getBus|addressed->getPixelColor/);
   const tubes = read('usermods/Tubes/Tubes.h');
   assert.doesNotMatch(tubes, /TUBES_S3_FRAME_DIAGNOSTICS|TUBES_S3_FRAME/);
+});
+
+// Proves the master identity is generation-aware while legacy special builds keep their deployed ID.
+test('field OS master identity is fixed to 1FFF without changing legacy master IDs', () => {
+  const controller = read('usermods/Tubes/controller.h');
+  assert.match(controller, /#if defined\(TUBES_S3_FIELD_OS\)[\s\S]*makeDeviceId\(CURRENT_PROTOCOL_GENERATION, PROTOCOL_LOCAL_VALUE_MASK\)/);
+  assert.match(controller, /#elif defined\(GOLDEN\)[\s\S]*node\.reset\(0xFFF\)/);
+  assert.match(controller, /case NodeIdOperation:[\s\S]*#ifdef TUBES_S3_FIELD_OS[\s\S]*PROTOCOL_LOCAL_VALUE_MASK/);
+  assert.match(controller, /case RoleOperation:[\s\S]*#ifdef TUBES_S3_FIELD_OS[\s\S]*role = MasterRole/);
+  assert.match(controller, /MASTER listens for tempo at boot[\s\S]*sound\.setTempoTracking\(true\)/);
+  assert.match(controller, /case AutoTempoOperation:[\s\S]*sound\.setTempoTracking\(argument\)/);
+  assert.doesNotMatch(controller, /AUTO_TEMPO pinned on/);
+});
+
+// Proves TubeOS keeps the full framebuffer instead of inheriting physical MASTER half-strip compaction.
+test('field OS preview bypasses master half-strip compaction', () => {
+  const controller = read('usermods/Tubes/controller.h');
+  assert.match(controller, /#ifndef TUBES_S3_FIELD_OS\s*\/\/ Make the art half-size/);
+  assert.match(controller, /if \(role >= MasterRole \|\| role == SmallArtRole\)/);
 });

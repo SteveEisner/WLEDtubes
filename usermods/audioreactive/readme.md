@@ -44,6 +44,7 @@ If you want to define default GPIOs during compile time, use the following (defa
 * `-D I2S_WSPIN=x` : GPIO for WS pin on digital microphone (15)
 * `-D I2S_CKPIN=x` : GPIO for SCK pin on digital microphone (14)
 * `-D MCLK_PIN=x`  : GPIO for master clock pin on digital Line-In boards (-1)
+* `-D UM_AUDIOREACTIVE_SAMPLE_RATE=x` : overrides the default 22050 Hz input and FFT sample rate for codecs that require a specific MCLK/LRCK ratio
 * `-D ES7243_SDAPIN` : GPIO for I2C SDA pin on ES7243 microphone (-1)
 * `-D ES7243_SCLPIN` : GPIO for I2C SCL pin on ES7243 microphone (-1)
 
