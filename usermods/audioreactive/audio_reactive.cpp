@@ -1382,6 +1382,13 @@ class AudioReactive : public Usermod {
     void setup() override
     {
       disableSoundProcessing = true; // just to be sure
+#ifdef TUBES_S3_FIELD_OS
+      // The onboard ES7210 has a very low digital noise floor; the generic
+      // AudioReactive squelch hides nearby audio after its envelope smoothing.
+      soundSquelch = 2;
+      sampleGain = 120;
+      inputLevel = 128;
+#endif
       if (!initDone) {
         // usermod exchangeable data
         // we will assign all usermod exportable data here as pointers to original variables or arrays and allocate memory for pointers
@@ -1421,10 +1428,10 @@ class AudioReactive : public Usermod {
 #ifdef ARDUINO_ARCH_ESP32
 
       // Reset I2S peripheral for good measure
-      i2s_driver_uninstall(I2S_NUM_0);   // E (696) I2S: i2s_driver_uninstall(2006): I2S port 0 has not installed
+      i2s_driver_uninstall(AUDIOREACTIVE_I2S_PORT);
       #if !defined(CONFIG_IDF_TARGET_ESP32C3)
         delay(100);
-        periph_module_reset(PERIPH_I2S0_MODULE);   // not possible on -C3
+        periph_module_reset(AUDIOREACTIVE_I2S_PERIPHERAL);   // not possible on -C3
       #endif
       delay(100);         // Give that poor microphone some time to setup.
       useBandPassFilter = false; // filter cuts lowest and highest frequency bands from FFT result (use on very noisy mic inputs)
@@ -1462,7 +1469,11 @@ class AudioReactive : public Usermod {
           break;
         case 4:
           DEBUGSR_PRINT(F("AR: Generic I2S Microphone with Master Clock - ")); DEBUGSR_PRINTLN(F(I2S_MIC_CHANNEL_TEXT));
+#ifdef I2S_USE_16BIT_SAMPLES
+          audioSource = new I2SSource(SAMPLE_RATE, BLOCK_SIZE);
+#else
           audioSource = new I2SSource(SAMPLE_RATE, BLOCK_SIZE, 1.0f/24.0f);
+#endif
           useMicFilter = false; // I2S with Master Clock is mostly used for line-in, skip sample filtering
           delay(100);
           if (audioSource) audioSource->initialize(i2swsPin, i2ssdPin, i2sckPin, mclkPin);

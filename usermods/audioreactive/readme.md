@@ -45,6 +45,10 @@ If you want to define default GPIOs during compile time, use the following (defa
 * `-D I2S_CKPIN=x` : GPIO for SCK pin on digital microphone (14)
 * `-D MCLK_PIN=x`  : GPIO for master clock pin on digital Line-In boards (-1)
 * `-D UM_AUDIOREACTIVE_SAMPLE_RATE=x` : overrides the default 22050 Hz input and FFT sample rate for codecs that require a specific MCLK/LRCK ratio
+* `-D I2S_USE_16BIT_SAMPLES` : captures native 16-bit codec samples instead of the default 32-bit I2S words
+* `-D I2S_USE_STEREO_SLOTS` : keeps a complete two-slot I2S frame for codecs that require stereo clocking
+* `-D I2S_USE_256FS_MCLK` : requests a 256 × sample-rate master clock from the ESP32 I2S driver
+* `-D I2S_USE_PORT_1` : uses the second ESP32 I2S controller for boards whose vendor audio design requires it
 * `-D ES7243_SDAPIN` : GPIO for I2C SDA pin on ES7243 microphone (-1)
 * `-D ES7243_SCLPIN` : GPIO for I2C SCL pin on ES7243 microphone (-1)
 

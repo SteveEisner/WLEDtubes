@@ -35,6 +35,7 @@ class Sounder {
     float magnitude = 0.0f;
     uint8_t strongestBin = 0;
     uint8_t strongestBinLevel = 0;
+    uint8_t spectrumLevels[12] = {};
     uint8_t kickStrength = 0;
     uint8_t snareStrength = 0;
     uint8_t musicStrength = 0;
@@ -152,6 +153,7 @@ class Sounder {
           strongestBin = bin;
           strongestBinLevel = fftResult[bin];
         }
+        for (uint8_t bin = 0; bin < 12; bin++) spectrumLevels[bin] = fftResult[bin];
         if (overlay)
           updateTransientDetector(fftResult);
         else

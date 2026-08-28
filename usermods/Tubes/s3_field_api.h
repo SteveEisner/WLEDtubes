@@ -8,6 +8,7 @@ struct DeviceReportMessage;
 
 constexpr size_t TUBES_S3_PREVIEW_PIXELS = 128;
 constexpr size_t TUBES_S3_PATTERN_NAME_LENGTH = 24;
+constexpr size_t TUBES_S3_MICROPHONE_BINS = 12;
 
 struct TubesS3ChannelStatus {
   bool active = false;
@@ -79,6 +80,10 @@ struct TubesS3FieldStatus {
   uint16_t nextPalettePhrase = 0;
   uint8_t nextPaletteId = 0;
   bool tempoListening = false;
+  bool microphoneActive = false;
+  bool tempoLocked = false;
+  uint8_t microphoneLevel = 0;
+  uint8_t microphoneSpectrum[TUBES_S3_MICROPHONE_BINS] = {};
   uint8_t beatOverlayChoice = 0;
   uint8_t nextBeatOverlayChoice = 0;
   size_t peerCount = 0;

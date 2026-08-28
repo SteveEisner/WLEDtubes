@@ -53,6 +53,13 @@ test('Beats controls listening, downbeat, and a bounded overlay grid', () => {
   assert.match(ui, /tubesS3TapDownbeat\(\)/);
   assert.match(ui, /tubesS3SelectBeatOverlay\(row \* 3 \+ column\)/);
   assert.match(ui, /for \(uint8_t choice = 0; choice < 9; choice\+\+\)/);
+  assert.match(ui, /display\.printf\("%u BPM", status\.bpm\)/);
+  assert.match(ui, /bin < TUBES_S3_MICROPHONE_BINS/);
+  assert.match(ui, /status\.microphoneSpectrum\[bin\]/);
+  assert.match(ui, /F\("Listen"\)/);
+  assert.match(ui, /F\("1"\)/);
+  assert.doesNotMatch(ui, /F\("Listen ON"\)|F\("Listen OFF"\)|F\("Downbeat"\)/);
+  assert.match(tubes, /status\.microphoneSpectrum\[bin\] = controller\.sound\.spectrumLevels\[bin\]/);
   assert.match(bridge, /return tubes\.s3SetTempoListening\(enabled\)/);
   assert.match(bridge, /return tubes\.s3TapDownbeat\(\)/);
   assert.match(bridge, /return tubes\.s3SelectBeatOverlay\(choice\)/);

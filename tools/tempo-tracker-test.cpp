@@ -90,6 +90,22 @@ static TempoEstimate trackSnareMetronome(float bpm, uint32_t frames) {
   return tracker.currentEstimate();
 }
 
+// Reproduces the Waveshare S3's measured stereo FFT completion cadence. Tempo
+// must follow timestamps rather than the legacy 22.05 kHz mono frame constant.
+static TempoEstimate trackSnareMetronomeAtCadence(float bpm, float seconds,
+    float framesPerSecond) {
+  TempoTracker tracker;
+  SpectrumFixture fixture;
+  uint8_t spectrum[TempoTracker::SPECTRUM_BINS];
+  uint32_t frames = uint32_t(seconds * framesPerSecond);
+  for (uint32_t frame = 0; frame < frames; frame++) {
+    float at = frame / framesPerSecond;
+    fixture.frame(at, bpm, spectrum, true, false);
+    tracker.addSpectrumAt(spectrum, uint32_t(at * 1000000.0f + 0.5f));
+  }
+  return tracker.currentEstimate();
+}
+
 // Models the pre-visualization FFT export: a click can land outside the kick and
 // snare groups, retain floating-point magnitude, and still provide exact timing.
 static TempoEstimate trackRawMidbandMetronome(float bpm, float seconds) {
@@ -265,9 +281,59 @@ static uint8_t circularPhaseError(uint8_t left, uint8_t right) {
   return difference > 128 ? 256 - difference : difference;
 }
 
+static void requireMissingFrameCadence() {
+  TempoTracker tracker;
+  uint8_t spectrum[TempoTracker::SPECTRUM_BINS] = {0};
+  tracker.addSpectrumAt(spectrum, 100000U);
+  tracker.addSpectrumAt(spectrum, 188000U, 3);
+  if (tracker.currentDiagnostics().lastSpectrumIntervalUs != 22000U) {
+    fprintf(stderr, "missing-frame cadence: expected 22000 us, got %u us\n",
+        tracker.currentDiagnostics().lastSpectrumIntervalUs);
+    exit(1);
+  }
+}
+
+// Listen off/on calls reset(), so a mature lock must not retain its tempo hold,
+// challenger, cadence, phase, or confidence when listening starts again.
+static void requireListenRestartClearsTempoHold() {
+  constexpr float framesPerSecond = 45.5f;
+  TempoTracker tracker;
+  SpectrumFixture firstFixture;
+  uint8_t spectrum[TempoTracker::SPECTRUM_BINS];
+  for (uint32_t frame = 0; frame < uint32_t(40.0f * framesPerSecond); frame++) {
+    float at = frame / framesPerSecond;
+    firstFixture.frame(at, 130.0f, spectrum, true, false);
+    tracker.addSpectrumAt(spectrum, uint32_t(at * 1000000.0f + 0.5f));
+  }
+  requireTempo("listen restart initial lock", 130.0f,
+      tracker.currentEstimate(), 0.2f);
+
+  tracker.reset();
+  const TempoEstimate& cleared = tracker.currentEstimate();
+  if (cleared.locked || cleared.bpmQ8 || cleared.confidence
+      || tracker.currentDiagnostics().spectrumFrames) {
+    fprintf(stderr,
+        "listen restart: reset retained lock=%d bpm=%.2f confidence=%u frames=%u\n",
+        cleared.locked, cleared.bpmQ8 / 256.0f, cleared.confidence,
+        tracker.currentDiagnostics().spectrumFrames);
+    exit(1);
+  }
+
+  SpectrumFixture secondFixture(2);
+  for (uint32_t frame = 0; frame < uint32_t(40.0f * framesPerSecond); frame++) {
+    float at = frame / framesPerSecond;
+    secondFixture.frame(at, 100.0f, spectrum, true, false);
+    tracker.addSpectrumAt(spectrum, uint32_t(at * 1000000.0f + 0.5f));
+  }
+  requireTempo("listen restart new lock", 100.0f,
+      tracker.currentEstimate(), 0.2f);
+}
+
 int main() {
   requireBeatOneAlignment();
   requireNearestBarAlignment();
+  requireMissingFrameCadence();
+  requireListenRestartClearsTempoHold();
 
   // A plain four-on-the-floor kick must establish the primary use-case quickly.
   requireTempo("steady 120 BPM", 120.0f, track(120.0f, 12.0f), 1.5f);
@@ -302,6 +368,8 @@ int main() {
   constexpr uint32_t metronomeFrames = 2585; // Leaves the last frame on an estimator scan.
   TempoEstimate metronome = trackSnareMetronome(130.0f, metronomeFrames);
   requireTempo("snare-only 130 BPM", 130.0f, metronome, 0.15f);
+  requireTempo("S3 cadence 130 BPM", 130.0f,
+      trackSnareMetronomeAtCadence(130.0f, 60.0f, 45.5f), 0.15f);
   float metronomeTime = (metronomeFrames - 1) / TempoTracker::SPECTRUM_FRAMES_PER_SECOND;
   uint8_t expectedPhase = uint8_t(fmodf(metronomeTime * 130.0f / 60.0f, 1.0f) * 255.0f + 0.5f);
   if (!metronome.phaseTracked || metronome.timingEvents < 20

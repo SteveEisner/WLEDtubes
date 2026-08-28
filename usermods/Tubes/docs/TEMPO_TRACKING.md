@@ -12,11 +12,12 @@ disabled until explicitly requested.
 
 ## Signal path
 
-AudioReactive continues to own microphone capture and its 512-sample FFT at
-22,050 Hz. It double-buffers each newly mapped 16-band spectrum with a sequence
-number and microsecond timestamp before WLED applies visualization gain, decay,
-smoothing, and 8-bit scaling. Tubes therefore consumes each raw spectrum once
-without running another FFT or mistaking WLED's slow visual decay for new timing:
+AudioReactive continues to own microphone capture and its 512-sample FFT. Most
+devices sample at 22,050 Hz, while fixed codecs may require another rate and stereo
+slots. It double-buffers each newly mapped 16-band spectrum with a sequence number
+and microsecond timestamp before WLED applies visualization gain, decay, smoothing,
+and 8-bit scaling. Tubes therefore consumes each raw spectrum once without running
+another FFT or mistaking WLED's slow visual decay for new timing:
 
 ```text
 microphone -> WLED FFT -> raw 16 bands -> positive spectral change
@@ -31,8 +32,10 @@ also contributes, so a metronome click is not rejected solely because its pitch 
 outside the kick and snare groups. Missing FFT frames advance the history with zero
 evidence and suppress the unknown cross-gap transition.
 
-The tracker keeps 256 onset frames, about 5.9 seconds, and searches 70-180 BPM in
-0.5 BPM steps every eight FFT frames. Candidate scoring uses normalized
+The tracker keeps 256 onset frames and searches 70-180 BPM in 0.5 BPM steps every
+eight FFT frames. It measures the actual FFT completion cadence from AudioReactive
+timestamps, so sample rate, stereo slots, and FFT cost cannot scale the detected
+tempo. Candidate scoring uses normalized
 autocorrelation, adds weaker two-period evidence, and accumulates a decaying tempo
 histogram. A percussive crest gate and a separated winning peak are required before
 lock. Several observed onset intervals must also fit the winning beat or half-beat
@@ -41,6 +44,10 @@ The detector then reports 8.8 fixed-point BPM and confidence. A second fixed-siz
 timing history accepts local maxima from either the kick or snare path, matches them
 to the nearest predicted beat, and fits microphone time against beat number across
 up to 32 accepted events.
+
+Turning microphone listening off and back on resets the complete estimator state,
+including its held tempo, challenger, learned FFT cadence, phase, and confidence.
+The next listening session therefore starts with no resistance to a different BPM.
 
 When the tracker first locks, its most recent percussive onset establishes beat 1 through the
 same complete BPM-and-beat-frame state consumed from the mesh. The measured

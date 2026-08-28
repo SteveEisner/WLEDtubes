@@ -313,6 +313,11 @@ class TubesUsermod : public Usermod {
       status.nextPalettePhrase = controller.next_state.palette_phrase;
       status.nextPaletteId = controller.next_state.palette_id;
       status.tempoListening = controller.s3TempoListening();
+      status.microphoneActive = controller.sound.active;
+      status.tempoLocked = controller.sound.tempoLocked;
+      status.microphoneLevel = controller.sound.volume;
+      for (size_t bin = 0; bin < TUBES_S3_MICROPHONE_BINS; bin++)
+        status.microphoneSpectrum[bin] = controller.sound.spectrumLevels[bin];
       status.beatOverlayChoice = controller.s3BeatOverlayChoice(false);
       status.nextBeatOverlayChoice = controller.s3BeatOverlayChoice(true);
       const uint32_t now = millis();

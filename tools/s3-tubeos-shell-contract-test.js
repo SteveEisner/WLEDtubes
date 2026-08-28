@@ -92,5 +92,5 @@ test('onboard ES7210 microphones are initialized for 16 kHz beat tracking', () =
   assert.match(source, /writeEs7210\(0x02, 0xC1\)/);
   assert.match(source, /writeEs7210\(0x45, 0x1E\)/);
   assert.match(source, /writeEs7210\(0x46, 0x1E\)/);
-  assert.match(source, /writeEs7210\(0x11, 0x80\)/);
+  assert.match(source, /writeEs7210\(0x11, 0x60\)/);
 });
