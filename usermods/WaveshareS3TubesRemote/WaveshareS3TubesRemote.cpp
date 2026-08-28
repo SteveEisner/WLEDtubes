@@ -318,24 +318,31 @@ private:
 
   // Persistent Strip observes WLED's canonical, completed logical framebuffer.
   // The null bus supplies geometry only; it must not become a second pixel store.
+  // A small display-only glow models diffusion through a tube without changing
+  // the canonical pixels used by the pattern engine or mesh.
   class Strip {
   public:
     void draw(int16_t x, int16_t y, int16_t width, int16_t height, bool = false) {
       TubesS3FieldStatus status;
       tubesS3ReadStatus(status);
       uint32_t colors[TUBES_S3_PREVIEW_PIXELS];
+      uint32_t diffused[TUBES_S3_PREVIEW_PIXELS];
       const bool validTopology = ::strip.getLengthTotal() >= TUBES_S3_PREVIEW_PIXELS;
       // draw() runs periodically, so this samples the previous completed show frame.
       for (size_t i = 0; i < TUBES_S3_PREVIEW_PIXELS; i++)
         colors[i] = validTopology ? ::strip.getPixelColor(i) : 0;
+      for (size_t i = 0; i < TUBES_S3_PREVIEW_PIXELS; i++)
+        diffused[i] = diffusePixel(colors, i);
       const uint8_t beat = status.beat & 0x0F;
       const int16_t laneTop = height * 3 / 4;
       for (int16_t row = 0; row < height; row++) {
         for (int16_t column = 0; column < width; column++) {
           if (row < laneTop) {
-            const size_t pixel = static_cast<uint32_t>(column)
-                * TUBES_S3_PREVIEW_PIXELS / width;
-            frame[row * width + column] = rgb565(colors[pixel]);
+            const uint32_t sourceQ8 = width > 1
+                ? static_cast<uint32_t>(column)
+                    * ((TUBES_S3_PREVIEW_PIXELS - 1U) << 8) / (width - 1)
+                : 0;
+            frame[row * width + column] = rgb565(interpolatePixel(diffused, sourceQ8));
             continue;
           }
           const uint8_t segment = static_cast<uint32_t>(column) * 16 / width;
@@ -348,6 +355,49 @@ private:
       display.draw16bitRGBBitmap(x, y, frame, width, height);
     }
   private:
+    static uint8_t channel(uint32_t color, uint8_t shift) {
+      return static_cast<uint8_t>(color >> shift);
+    }
+
+    static uint8_t scaledChannel(uint32_t color, uint8_t shift, uint8_t scale) {
+      return static_cast<uint16_t>(channel(color, shift)) * scale / 255U;
+    }
+
+    static uint32_t diffusePixel(const uint32_t *colors, size_t pixel) {
+      uint8_t red = 0;
+      uint8_t green = 0;
+      uint8_t blue = 0;
+      for (int8_t offset = -2; offset <= 2; offset++) {
+        const int16_t source = static_cast<int16_t>(pixel) + offset;
+        if (source < 0 || source >= TUBES_S3_PREVIEW_PIXELS) continue;
+        const uint8_t distance = abs(offset);
+        const uint8_t scale = distance == 0 ? 255 : distance == 1 ? 112 : 48;
+        const uint32_t color = colors[source];
+        red = max(red, scaledChannel(color, 16, scale));
+        green = max(green, scaledChannel(color, 8, scale));
+        blue = max(blue, scaledChannel(color, 0, scale));
+      }
+      return (static_cast<uint32_t>(red) << 16)
+          | (static_cast<uint32_t>(green) << 8) | blue;
+    }
+
+    static uint32_t interpolatePixel(const uint32_t *colors, uint32_t sourceQ8) {
+      size_t left = sourceQ8 >> 8;
+      if (left >= TUBES_S3_PREVIEW_PIXELS) left = TUBES_S3_PREVIEW_PIXELS - 1U;
+      size_t right = left + 1U;
+      if (right >= TUBES_S3_PREVIEW_PIXELS) right = TUBES_S3_PREVIEW_PIXELS - 1U;
+      const uint8_t fraction = sourceQ8 & 0xFF;
+      const uint16_t inverse = 256U - fraction;
+      const uint8_t red = (channel(colors[left], 16) * inverse
+          + channel(colors[right], 16) * fraction) >> 8;
+      const uint8_t green = (channel(colors[left], 8) * inverse
+          + channel(colors[right], 8) * fraction) >> 8;
+      const uint8_t blue = (channel(colors[left], 0) * inverse
+          + channel(colors[right], 0) * fraction) >> 8;
+      return (static_cast<uint32_t>(red) << 16)
+          | (static_cast<uint32_t>(green) << 8) | blue;
+    }
+
     uint16_t frame[DISPLAY_WIDTH * FIELD_OS_STRIP_HEIGHT] = {};
   };
 
