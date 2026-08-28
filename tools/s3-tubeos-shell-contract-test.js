@@ -41,12 +41,15 @@ test('all TubeOS text supplies a background color', () => {
   assert.doesNotMatch(source, /class TubesCO5300/);
 });
 
-// Proves all 128 virtual pixels form one opaque bar above a complete 16-beat lane.
-test('live strip uses one gapless bitmap transfer with beat and downbeat shading', () => {
+// Proves all 128 virtual pixels diffuse across one opaque bar above a crisp 16-beat lane.
+test('live strip diffuses sparse patterns without softening beat shading', () => {
   assert.match(source, /FIELD_OS_STRIP_HEIGHT = 32/);
   assert.match(source, /PREVIEW_INTERVAL_MS = 50/);
   assert.match(source, /i < TUBES_S3_PREVIEW_PIXELS/);
-  assert.match(source, /static_cast<uint32_t>\(column\)\s*\* TUBES_S3_PREVIEW_PIXELS \/ width/);
+  assert.match(source, /diffused\[i\] = diffusePixel\(colors, i\)/);
+  assert.match(source, /distance == 0 \? 255 : distance == 1 \? 112 : 48/);
+  assert.match(source, /interpolatePixel\(diffused, sourceQ8\)/);
+  assert.match(source, /TUBES_S3_PREVIEW_PIXELS - 1U\) << 8/);
   assert.match(source, /const uint8_t beat = status\.beat & 0x0F/);
   assert.match(source, /const int16_t laneTop = height \* 3 \/ 4/);
   assert.match(source, /const uint8_t segment = static_cast<uint32_t>\(column\) \* 16 \/ width/);
