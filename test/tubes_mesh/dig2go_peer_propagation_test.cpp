@@ -69,7 +69,7 @@ static void laptopFleetToolCannotStartPropagation() {
 
 static void productionBuildHasNoBenchBootTriggers() {
   const std::string config = readSource("platformio_tubes.ini");
-  const auto begin = config.find("[env:esp32_quinled_dig2go_tubes_p2p]");
+  const auto begin = config.find("[env:esp32_quinled_dig2go_tubes]");
   const auto end = config.find("\n[env:", begin + 1);
   EXPECT(begin != std::string::npos && end != std::string::npos);
   const std::string environment = config.substr(begin, end - begin);
@@ -79,6 +79,8 @@ static void productionBuildHasNoBenchBootTriggers() {
   EXPECT(environment.find("AUTO_TRIGGER") == std::string::npos);
   EXPECT(environment.find("PRIME_MAC") == std::string::npos);
   EXPECT(environment.find("BOOT_FALLBACK_TEST") == std::string::npos);
+
+  EXPECT(config.find("[env:esp32_quinled_dig2go_tubes_p2p]") == std::string::npos);
 }
 
 static void oneTurnAdvertisesToLegacyAndCurrentPeers() {
