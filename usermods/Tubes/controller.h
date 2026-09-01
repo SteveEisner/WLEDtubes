@@ -5449,6 +5449,12 @@ class PatternController : public MessageReceiver {
             offer.ssidLength, offer.passwordLength);
         if (!valid)
           return false;
+#ifdef TUBES_S3_FIELD_OS
+        if (offer.flags & FleetUpdatePropagate) {
+          Serial.println(F("FLEET_RX propagation=rejected mode=s3_controller"));
+          return true;
+        }
+#endif
         const bool serveCurrent = (offer.flags & FleetUpdatePropagate)
             && offer.serverPort == 0;
         const bool legacyBootstrapBaton = (offer.flags & FleetUpdatePropagate)

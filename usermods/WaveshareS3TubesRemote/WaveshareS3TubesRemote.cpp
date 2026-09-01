@@ -135,6 +135,8 @@ private:
   bool drawnTempoListening = false;
   uint8_t drawnBeatOverlayChoice = UINT8_MAX;
   uint8_t drawnNextBeatOverlayChoice = UINT8_MAX;
+  bool propagationSeedAttempted = false;
+  bool propagationSeedSent = false;
 
   static constexpr uint16_t COLOR_BACKGROUND = 0x0863;
   static constexpr uint16_t COLOR_SURFACE = 0x10E7;
@@ -660,6 +662,18 @@ private:
     return value;
   }
 
+  bool isSeedableDig2GoTarget(const TubesS3CarrierTarget &target) {
+    if (!target.nodeId || target.family != TubeHardwareDig2Go
+        || target.variant != TubeVariantStandard) return false;
+    for (size_t index = 0; index < tubesS3CarrierArtifactCount(); index++) {
+      TubesS3CarrierArtifact artifact;
+      if (!tubesS3ReadCarrierArtifact(index, artifact)) continue;
+      if (artifact.family == target.family && artifact.variant == target.variant
+          && artifact.release == target.release && artifact.size > 0) return true;
+    }
+    return false;
+  }
+
   void drawDeviceCard(int16_t y, const DeviceCard &device,
                       uint16_t color = COLOR_SURFACE_RAISED) {
     display.fillRoundRect(20, y, 440, 62, 10, color);
@@ -894,7 +908,8 @@ private:
         if (artifact.family == TubeHardwareDig2Go) display.print(F("DIG2GO"));
         else if (artifact.family == TubeHardwareAthomC3) display.print(F("ATHOM C3"));
         else display.print(F("UNKNOWN TARGET"));
-        if (artifact.variant == TubeVariantStandard) display.print(F(" | STANDARD | v"));
+        if (artifact.peerPropagation) display.print(F(" | P2P | v"));
+        else if (artifact.variant == TubeVariantStandard) display.print(F(" | STANDARD | v"));
         else display.print(F(" | VARIANT UNKNOWN | v"));
         display.print(artifact.release);
       }
@@ -906,6 +921,12 @@ private:
     display.setTextColor(COLOR_MUTED, COLOR_BACKGROUND);
     display.setCursor(190, 332);
     display.printf("Carrier state %u  |  release %u\n", carrier.state, carrier.release);
+    if (propagationSeedAttempted) {
+      display.setCursor(190, 350);
+      display.setTextColor(propagationSeedSent ? COLOR_MINT : RGB565_RED,
+                           COLOR_BACKGROUND);
+      display.print(propagationSeedSent ? F("SEED REQUEST SENT") : F("SEED REQUEST FAILED"));
+    }
     display.setCursor(24, 372);
     display.println(F("DISCOVERED UPDATE TARGETS"));
     const size_t count = tubesS3CarrierTargetCount();
@@ -919,9 +940,12 @@ private:
       TubesS3CarrierTarget target;
       if (!tubesS3ReadCarrierTarget(index, target)) continue;
       const int16_t y = 400 + index * 66;
+      const bool seedable = isSeedableDig2GoTarget(target);
       drawDeviceCard(y, {target.nodeId, target.release, target.uplinkId,
                      (millis() - target.lastSeenMs) / 1000,
-                     target.family == 1 ? "DIG2GO" : "C3"});
+                     seedable ? "DIG2GO / TAP TO SEED P2P"
+                       : target.family == TubeHardwareDig2Go
+                         ? "DIG2GO / TAP TO UPDATE" : "C3 / TAP TO UPDATE"});
     }
 #else
     display.setTextColor(COLOR_MUTED, COLOR_BACKGROUND);
@@ -1111,8 +1135,14 @@ private:
       } else if (y >= 326) {
         const size_t index = (y - 332) / 66;
         TubesS3CarrierTarget target;
-        if (tubesS3ReadCarrierTarget(index, target))
-          tubesS3ArmCarrier(target.mac, target.family, target.variant, target.release);
+        if (tubesS3ReadCarrierTarget(index, target)) {
+          if (owner.isSeedableDig2GoTarget(target)) {
+            owner.propagationSeedAttempted = true;
+            owner.propagationSeedSent = tubesS3SeedDig2GoPropagation(target.nodeId);
+          } else {
+            tubesS3ArmCarrier(target.mac, target.family, target.variant, target.release);
+          }
+        }
       }
 #endif
       return FieldViewId::Update;
@@ -1124,6 +1154,8 @@ private:
       TubesS3CarrierStatus carrier;
       tubesS3ReadCarrierStatus(carrier);
       uint32_t value = owner.mixRevision(carrier.state, carrier.release);
+      value = owner.mixRevision(value, owner.propagationSeedAttempted);
+      value = owner.mixRevision(value, owner.propagationSeedSent);
       const size_t count = tubesS3CarrierTargetCount();
       value = owner.mixRevision(value, count);
       for (size_t index = 0; index < count; index++) {
