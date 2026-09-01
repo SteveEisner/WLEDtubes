@@ -1509,6 +1509,7 @@ activate field diagnostics as soon as it connects.
 | `y####` | Route an update-selection request to one four-digit hexadecimal Device ID. The matching device reports its stable MAC, then starts `WLED-UPDATE` without physical selection. |
 | `Y<release>,<IPv4>,<port>,<window>,<target>,<nonce>,<SSID>,<password>` | Emit one gen1 parallel-pull offer. `target=0000` addresses every compatible pole; normal operation uses `fleet_pull_update.py` so secrets are not printed. |
 | `P<offer>` | Send an exact-target `Fleet Update Propagate` command. The chosen current Dig2Go immediately serves its running image; this never enters `WLED-UPDATE` selection or requires a button. |
+| `P!` | Locally ask the USB-connected Dig2Go to serve its running image through the same exact-target `FleetUpdateOffer` path. This is the offline Easy Flash action; it does not broadcast a source-selection command. |
 | `O`, `O0`, `O1` | Locally ask the connected Beat owner to schedule toggle, disable, or rotating sound-overlay behavior. The resulting Beat state is the only wire message. |
 | `O<fx>,<pal>,<speed>,<intensity>,<c1>,<c2>,<c3>,<checks>,<blend>,<opacity>[,<chance>]` | Schedule an exact overlay on the connected Beat owner. The optional chance controls each pole's independent acceptance of an accent and defaults to 255 for the legacy ten-field form. |
 | `J1`, `J0` | Enter or leave the audio workshop. Entry holds a black base and makes the connected pole Beat Master; exit restores normal scheduled pattern, palette, and overlay behavior. |
