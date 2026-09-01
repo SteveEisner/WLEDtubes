@@ -48,16 +48,18 @@ decision is local to the devices. The seed and its children discover eligible
 receivers, serve the image, persist continuation, recover, and stop without a
 laptop roster or server.
 
-The production review environment is:
+The canonical v52 Dig2Go environment is:
 
 ```sh
-pio run -e esp32_quinled_dig2go_tubes_p2p
+pio run -e esp32_quinled_dig2go_tubes
 ```
 
-It retains the standard `DIG2GO_TUBES` firmware identity. It enables the host
-and dynamic Dig2Go enrollment, but contains no PRIME MAC, automatic source
-trigger, or test-only boot fallback. It does retain the bounded production
-first-boot marker described below for a just-migrated legacy receiver.
+It retains the standard `DIG2GO_TUBES` firmware identity and now enables the
+host and dynamic Dig2Go enrollment by default. A local `P!` command explicitly
+starts one turn; merely carrying the capability does not advertise or serve.
+The build contains no PRIME MAC, automatic source trigger, or test-only boot
+fallback. The old `_p2p` environment is removed so v52 has one canonical
+Dig2Go artifact and capability set.
 
 ## Evidence boundary
 
@@ -98,8 +100,7 @@ or final S3/Easy Flash activation UX.
 bash test/tubes_mesh/run.sh
 node --test tools/fleet-update-protocol-test.js
 pio run -e esp32_quinled_dig2go_tubes
-pio run -e esp32_quinled_dig2go_tubes_p2p
 ```
 
-The ordinary Dig2Go build remains a regression control with P2P disabled.
-C3 family propagation and its device flow are intentionally deferred.
+All canonical v52 Dig2Go images carry the same dormant propagation capability.
+C3 family serving and its device flow are intentionally deferred.

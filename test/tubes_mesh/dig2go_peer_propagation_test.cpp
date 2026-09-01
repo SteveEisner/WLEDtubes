@@ -39,9 +39,25 @@ static void explicitPropagationCommandIsSeparateFromOtaSelection() {
 
 static void barePowerSaveCommandRemainsIntact() {
   const std::string controller = readSource("usermods/Tubes/controller.h");
+  EXPECT(controller.find("key == 'P' && command[1] == '!' && !command[2]")
+      != std::string::npos);
+  EXPECT(controller.find("requestLocalPropagation();") != std::string::npos);
   EXPECT(controller.find("key == 'P' && strchr(command + 1, ',')")
       != std::string::npos);
   EXPECT(controller.find("else if (key == 'P')") != std::string::npos);
+}
+
+static void localPropagationUsesTheExactExistingFleetOffer() {
+  const std::string controller = readSource("usermods/Tubes/controller.h");
+  const auto begin = controller.find("void requestLocalPropagation()");
+  const auto end = controller.find("void requestFleetUpdate", begin);
+  EXPECT(begin != std::string::npos && end != std::string::npos);
+  const std::string trigger = controller.substr(begin, end - begin);
+  EXPECT(trigger.find("makeModernPropagationServeCommand") != std::string::npos);
+  EXPECT(trigger.find("node.header.id") != std::string::npos);
+  EXPECT(trigger.find("applyCommand(COMMAND_FLEET_UPGRADE, &offer)")
+      != std::string::npos);
+  EXPECT(trigger.find("sendV3ControlCommand") == std::string::npos);
 }
 
 static void laptopFleetToolCannotStartPropagation() {
@@ -53,7 +69,7 @@ static void laptopFleetToolCannotStartPropagation() {
 
 static void productionBuildHasNoBenchBootTriggers() {
   const std::string config = readSource("platformio_tubes.ini");
-  const auto begin = config.find("[env:esp32_quinled_dig2go_tubes_p2p]");
+  const auto begin = config.find("[env:esp32_quinled_dig2go_tubes]");
   const auto end = config.find("\n[env:", begin + 1);
   EXPECT(begin != std::string::npos && end != std::string::npos);
   const std::string environment = config.substr(begin, end - begin);
@@ -63,6 +79,8 @@ static void productionBuildHasNoBenchBootTriggers() {
   EXPECT(environment.find("AUTO_TRIGGER") == std::string::npos);
   EXPECT(environment.find("PRIME_MAC") == std::string::npos);
   EXPECT(environment.find("BOOT_FALLBACK_TEST") == std::string::npos);
+
+  EXPECT(config.find("[env:esp32_quinled_dig2go_tubes_p2p]") == std::string::npos);
 }
 
 static void oneTurnAdvertisesToLegacyAndCurrentPeers() {
@@ -129,6 +147,7 @@ static void failedPullKeepsRestoringUntilMeshIsStarted() {
 int main() {
   explicitPropagationCommandIsSeparateFromOtaSelection();
   barePowerSaveCommandRemainsIntact();
+  localPropagationUsesTheExactExistingFleetOffer();
   laptopFleetToolCannotStartPropagation();
   productionBuildHasNoBenchBootTriggers();
   oneTurnAdvertisesToLegacyAndCurrentPeers();
