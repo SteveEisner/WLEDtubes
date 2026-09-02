@@ -82,7 +82,9 @@ test('display power is controlled only by inactivity, USB, and the PMU key', () 
   assert.match(source, /if \(!screenOn\) \{[\s\S]*drawBatteryIcon\(batteryPulseColor\(now\), false, RGB565_BLACK\)/);
   assert.match(source, /samplePower\(now\);\s*if \(!screenOn\) \{/);
   assert.match(source, /if \(!wasUsbPresent && usbPresent && !screenOn\) setScreenOn\(true\)/);
-  assert.match(source, /if \(pmu\.isPekeyShortPressIrq\(\)\)[\s\S]*setScreenOn\(!screenOn\)/);
+  assert.match(source, /pmu\.enableIRQ\(XPOWERS_AXP2101_PKEY_SHORT_IRQ\s*\| XPOWERS_AXP2101_PKEY_POSITIVE_IRQ\)/);
+  assert.match(source, /const bool wakeReleasePending = pmu\.isPekeyPositiveIrq\(\)\s*\|\| pmu\.isPekeyShortPressIrq\(\);\s*suppressWakePowerKeyRelease = pmu\.isPwronLowOnSource\(\) && !wakeReleasePending;\s*pmu\.clearIrqStatus\(\)/);
+  assert.match(source, /if \(suppressWakePowerKeyRelease\) \{[\s\S]*if \(released \|\| shortPress\) suppressWakePowerKeyRelease = false;[\s\S]*\} else if \(shortPress\) \{[\s\S]*setScreenOn\(!screenOn\)/);
   assert.match(source, /bool handleButton\(uint8_t b\) override \{\s*return b < WLED_MAX_BUTTONS;\s*\}/);
   assert.match(source, /pmu\.setPowerKeyPressOnTime\(XPOWERS_POWERON_128MS\)/);
   assert.match(source, /pmu\.setPowerKeyPressOffTime\(XPOWERS_POWEROFF_10S\)/);

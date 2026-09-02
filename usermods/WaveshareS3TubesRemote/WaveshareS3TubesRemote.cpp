@@ -156,6 +156,7 @@ private:
   bool nextSendFailed = false;
   bool touchDown = false;
   bool screenOn = true;
+  bool suppressWakePowerKeyRelease = false;
   bool usbPresent = false;
   bool charging = false;
   int16_t batteryPercent = -1;
@@ -493,7 +494,12 @@ private:
     if (now - lastPmuPollMs < 25) return;
     lastPmuPollMs = now;
     pmu.getIrqStatus();
-    if (pmu.isPekeyShortPressIrq()) {
+    const bool shortPress = pmu.isPekeyShortPressIrq();
+    const bool released = pmu.isPekeyPositiveIrq();
+    if (suppressWakePowerKeyRelease) {
+      // The key release that follows a PMU wake is not a second display-toggle tap.
+      if (released || shortPress) suppressWakePowerKeyRelease = false;
+    } else if (shortPress) {
       lastActivityMs = now;
       setScreenOn(!screenOn);
     }
@@ -1485,8 +1491,13 @@ public:
       pmu.enableBattVoltageMeasure();
       pmu.enableVbusVoltageMeasure();
       pmu.disableIRQ(XPOWERS_AXP2101_ALL_IRQ);
+      pmu.enableIRQ(XPOWERS_AXP2101_PKEY_SHORT_IRQ
+                    | XPOWERS_AXP2101_PKEY_POSITIVE_IRQ);
+      pmu.getIrqStatus();
+      const bool wakeReleasePending = pmu.isPekeyPositiveIrq()
+          || pmu.isPekeyShortPressIrq();
+      suppressWakePowerKeyRelease = pmu.isPwronLowOnSource() && !wakeReleasePending;
       pmu.clearIrqStatus();
-      pmu.enableIRQ(XPOWERS_AXP2101_PKEY_SHORT_IRQ);
       pmu.setPowerKeyPressOnTime(XPOWERS_POWERON_128MS);
       pmu.setPowerKeyPressOffTime(XPOWERS_POWEROFF_10S);
       pmu.enableLongPressShutdown();
