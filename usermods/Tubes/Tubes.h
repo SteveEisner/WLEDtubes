@@ -271,10 +271,11 @@ class TubesUsermod : public Usermod {
 #else
       if (!needsSegments) {
         const Segment& seg = strip.getMainSegment();
-        // WLED may retain its one-pixel placeholder after the LED bus is restored.
+        // The sound overlay may exist before recovery, so detect WLED's
+        // restored-bus placeholder from the main segment bounds alone.
         needsSegments = seg.length() == 0
           || seg.start >= strip.getLengthTotal()
-          || (strip.getSegmentsNum() == 1 && seg.start == 0 && seg.stop == 1 && strip.getLengthTotal() > 1);
+          || (seg.start == 0 && seg.stop == 1 && strip.getLengthTotal() > 1);
       }
 #endif
 
@@ -367,6 +368,9 @@ class TubesUsermod : public Usermod {
     bool s3ForceNext() { return controller.force_next_if_authoritative(); }
     bool s3SelectPattern(uint8_t patternId) {
       return controller.selectS3Pattern(patternId);
+    }
+    bool s3ScheduleGradient(const TubesS3GradientStop *stops, size_t count) {
+      return controller.scheduleS3Gradient(stops, count);
     }
     bool s3ScheduleGradient(const uint32_t colors[3]) {
       return controller.scheduleS3Gradient(colors);

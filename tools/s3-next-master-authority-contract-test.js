@@ -25,10 +25,17 @@ test('Field OS routes pattern tiles through the bounded S3 scheduling API', () =
 });
 
 test('TubeOS gradient success means the local next-phrase schedule exists', () => {
-  const schedule = controller.match(/bool scheduleS3Gradient\(const uint32_t colors\[3\]\) \{([\s\S]*?)\n  \}/)?.[1] || '';
+  const schedule = controller.match(/bool scheduleS3Gradient\(const TubesS3GradientStop \*stops, size_t count\) \{([\s\S]*?)\n  \}/)?.[1] || '';
+  assert.match(schedule, /count < 2 \|\| count > 8/);
+  assert.match(schedule, /gradient\.count = static_cast<uint8_t>\(count\)/);
+  assert.match(schedule, /expandPaletteGradient\(gradient, expanded\)/);
   assert.match(schedule, /const uint16_t effectivePhrase = nextPhraseBoundary\(\)/);
   assert.match(schedule, /scheduleCustomGradient\(/);
   assert.match(schedule, /return nextPalette16Valid/);
   assert.match(schedule, /nextPalette16Phrase == effectivePhrase/);
   assert.match(schedule, /nextPalette16Fallback == fallback/);
+
+  const legacyWrapper = controller.match(/bool scheduleS3Gradient\(const uint32_t colors\[3\]\) \{([\s\S]*?)\n  \}/)?.[1] || '';
+  assert.match(legacyWrapper, /const uint8_t positions\[3\] = \{0, 128, 255\}/);
+  assert.match(legacyWrapper, /return scheduleS3Gradient\(stops, 3\)/);
 });

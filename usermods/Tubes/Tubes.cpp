@@ -21,6 +21,10 @@ bool tubesS3SelectPattern(uint8_t patternId) {
   return tubes.s3SelectPattern(patternId);
 }
 
+bool tubesS3ScheduleGradient(const TubesS3GradientStop *stops, size_t count) {
+  return tubes.s3ScheduleGradient(stops, count);
+}
+
 bool tubesS3ScheduleGradient(const uint32_t colors[3]) {
   return tubes.s3ScheduleGradient(colors);
 }

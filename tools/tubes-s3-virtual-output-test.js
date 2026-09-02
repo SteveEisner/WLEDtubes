@@ -66,6 +66,12 @@ test('S3 repairs a stale one-pixel segment before the Tubes renderer runs', () =
   assert.match(tubes, /makeAutoSegments\(true\)/);
 });
 
+test('Dig2Go repairs a stale one-pixel main segment after reserving the sound overlay', () => {
+  const tubes = read('usermods/Tubes/Tubes.h');
+  assert.match(tubes, /\|\| \(seg\.start == 0 && seg\.stop == 1 && strip\.getLengthTotal\(\) > 1\)/);
+  assert.doesNotMatch(tubes, /strip\.getSegmentsNum\(\) == 1 && seg\.start == 0 && seg\.stop == 1/);
+});
+
 test('compiled host proof preserves a nonuniform 128-pixel null-bus frame', () => {
   const result = spawnSync('c++', ['-std=c++17', '-Wall', '-Wextra',
     'tools/tubes-null-bus-host-test.cpp', '-o', '/tmp/tubes-null-bus-host-test'],

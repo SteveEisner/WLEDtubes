@@ -15,6 +15,7 @@
 #include "dig2go_peer_config.h"
 #include "node.h"
 #include "deferred_bpm_broadcast.h"
+#include "s3_field_api.h"
 #include "device_report_protocol.h"
 #include "v3_runtime.h"
 
@@ -4803,18 +4804,18 @@ class PatternController : public MessageReceiver {
     return true;
   }
 
-  // Schedules a three-stop editor gradient while retaining a legacy-safe palette fallback.
-  bool scheduleS3Gradient(const uint32_t colors[3]) {
-    if (colors == nullptr || node.isFollowing())
+  // Schedules an explicit editor gradient while retaining a legacy-safe palette fallback.
+  bool scheduleS3Gradient(const TubesS3GradientStop *stops, size_t count) {
+    if (stops == nullptr || count < 2 || count > 8 || node.isFollowing())
       return false;
     PaletteGradientDefinition gradient;
-    gradient.count = 3;
-    const uint8_t positions[3] = {0, 128, 255};
+    gradient.count = static_cast<uint8_t>(count);
     for (uint8_t index = 0; index < gradient.count; index++) {
-      gradient.stops[index].position = positions[index];
-      gradient.stops[index].red = colors[index] >> 16;
-      gradient.stops[index].green = colors[index] >> 8;
-      gradient.stops[index].blue = colors[index];
+      const uint32_t color = stops[index].color & 0xFFFFFFUL;
+      gradient.stops[index].position = stops[index].position;
+      gradient.stops[index].red = color >> 16;
+      gradient.stops[index].green = color >> 8;
+      gradient.stops[index].blue = color;
     }
     PaletteGradient16 expanded;
     if (!expandPaletteGradient(gradient, expanded))
@@ -4830,6 +4831,18 @@ class PatternController : public MessageReceiver {
     return nextPalette16Valid
         && nextPalette16Phrase == effectivePhrase
         && nextPalette16Fallback == fallback;
+  }
+
+  bool scheduleS3Gradient(const uint32_t colors[3]) {
+    if (colors == nullptr)
+      return false;
+    TubesS3GradientStop stops[3];
+    const uint8_t positions[3] = {0, 128, 255};
+    for (uint8_t index = 0; index < 3; index++) {
+      stops[index].position = positions[index];
+      stops[index].color = colors[index];
+    }
+    return scheduleS3Gradient(stops, 3);
   }
 
   bool s3TempoListening() const { return sound.tempoTracking; }

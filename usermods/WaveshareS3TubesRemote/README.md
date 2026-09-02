@@ -21,10 +21,11 @@ schedules one of twelve touch-sized choices at the next phrase boundary. Beats
 controls microphone tempo listening, shows live BPM plus a 12-band microphone
 spectrum, resets the shared downbeat, and queues one of eight curated audio overlays
 or turns the overlay off. Mesh shows up to four fresh
-nearby Tubes nodes and links to Update. Colors edits and schedules a three-stop
+nearby Tubes nodes and links to Update. Colors edits and schedules a positioned
 gradient as soon as its continuous hue sweep, brightness row, or a preset changes.
-Its eight two-row presets are regenerated around the selected color and preserve
-that color at the selected stop. The carrier build embeds the
+Its eight two-row suggestions are regenerated around the selected color, preserve
+that color at the selected stop, and can apply richer color-theory palettes with
+more than three stops. The carrier build embeds the
 standard Dig2Go and Athom C3 firmware and exposes the bounded one-device update baton.
 
 The field target bypasses the physical MASTER half-strip compaction so both halves
