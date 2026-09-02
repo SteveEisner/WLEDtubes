@@ -36,8 +36,10 @@ Both use the 128-pixel geometry-only null output and participate normally in the
 Tubes mesh; neither owns or drives a physical LED output pin. The field target is
 always the `1FFF` master and enables microphone tempo tracking at boot; the Beats
 workspace can turn listening off until it is enabled again. On battery,
-the AMOLED blanks after 30 seconds; the AXP2101 power key toggles it, either GPIO
-button wakes it, and a 10-second power-key hold restarts the board in hardware.
+the AMOLED drops to a black battery-meter-only screen after 30 seconds. A short
+tap on the AXP2101 power key toggles between that battery-only screen and the
+full TubeOS UI, and a 10-second power-key hold powers the PMU off until the key
+is tapped or held again. The other physical buttons are disabled.
 
 ## Tubes integration boundaries
 

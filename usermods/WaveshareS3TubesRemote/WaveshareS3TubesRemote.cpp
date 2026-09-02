@@ -50,6 +50,7 @@ constexpr uint8_t FIELD_OS_DEFAULT_BRIGHTNESS = 255;
 constexpr uint32_t FIELD_OS_IDLE_TIMEOUT_MS = 30000;
 constexpr uint32_t BATTERY_PULSE_INTERVAL_MS = 80;
 constexpr uint32_t BATTERY_PULSE_CYCLE_MS = 2400;
+constexpr uint8_t FIELD_OS_BATTERY_ONLY_BRIGHTNESS = 32;
 constexpr int16_t FIELD_OS_HEADER_HEIGHT = 64;
 constexpr int16_t FIELD_OS_STRIP_TOP = FIELD_OS_HEADER_HEIGHT;
 constexpr int16_t FIELD_OS_STRIP_HEIGHT = 32;
@@ -128,7 +129,6 @@ private:
   uint32_t lastPmuPollMs = 0;
   uint32_t lastPreviewMs = 0;
   uint32_t lastBatteryPulseMs = 0;
-  bool physicalButtonDown[WLED_MAX_BUTTONS] = {};
   uint8_t selectedGradientStop = 1;
   uint32_t gradientStops[3] = {0xFF3A7A, 0x7A5CFF, 0x28D7D0};
   uint32_t gradientPresets[8][3] = {};
@@ -246,12 +246,13 @@ private:
         | (static_cast<uint32_t>(brightness) << 8) | brightness);
   }
 
-  void drawBatteryIcon(uint16_t color, bool showChargingSymbol) {
+  void drawBatteryIcon(uint16_t color, bool showChargingSymbol,
+                       uint16_t background = COLOR_BACKGROUND) {
     constexpr int16_t iconX = 405;
     constexpr int16_t iconY = 14;
     constexpr int16_t iconWidth = 58;
     constexpr int16_t iconHeight = 34;
-    display.fillRect(iconX - 2, iconY - 2, 77, iconHeight + 4, COLOR_BACKGROUND);
+    display.fillRect(iconX - 2, iconY - 2, 77, iconHeight + 4, background);
     display.drawRoundRect(iconX, iconY, iconWidth, iconHeight, 5, color);
     display.fillRect(iconX + iconWidth, iconY + 9, 6, 16, color);
     const int16_t levelWidth = batteryPercent < 0 ? 0
@@ -270,6 +271,12 @@ private:
   void drawBattery() {
     display.fillRect(385, 0, 95, FIELD_OS_HEADER_HEIGHT, COLOR_BACKGROUND);
     drawBatteryIcon(usbPresent ? COLOR_MINT : batteryPulseColor(millis()), usbPresent);
+  }
+
+  void drawBatteryOnlyScreen() {
+    display.fillScreen(RGB565_BLACK);
+    drawBatteryIcon(usbPresent ? COLOR_MINT : batteryPulseColor(millis()), usbPresent,
+                    RGB565_BLACK);
   }
 
   void drawHeader() {
@@ -407,7 +414,8 @@ private:
     if (!displayReady || screenOn == enabled) return;
     screenOn = enabled;
     if (!screenOn) {
-      display.displayOff();
+      display.setBrightness(FIELD_OS_BATTERY_ONLY_BRIGHTNESS);
+      drawBatteryOnlyScreen();
       return;
     }
     display.displayOn();
@@ -433,7 +441,11 @@ private:
     batteryPercent = nextBatteryPercent;
     if (wasUsbPresent && !usbPresent) lastActivityMs = now;
     if (!wasUsbPresent && usbPresent && !screenOn) setScreenOn(true);
-    if (changed && displayReady && screenOn) drawBattery();
+    if (changed && displayReady) {
+      if (screenOn) drawBattery();
+      else drawBatteryIcon(usbPresent ? COLOR_MINT : batteryPulseColor(millis()),
+                           usbPresent, RGB565_BLACK);
+    }
   }
 
   void handlePowerKey() {
@@ -452,7 +464,13 @@ private:
   void tickShell(uint32_t now) {
     handlePowerKey();
     samplePower(now);
-    if (!screenOn) return;
+    if (!screenOn) {
+      if (!usbPresent && now - lastBatteryPulseMs >= BATTERY_PULSE_INTERVAL_MS) {
+        lastBatteryPulseMs = now;
+        drawBatteryIcon(batteryPulseColor(now), false, RGB565_BLACK);
+      }
+      return;
+    }
     if (!usbPresent && now - lastActivityMs >= FIELD_OS_IDLE_TIMEOUT_MS) {
       setScreenOn(false);
       return;
@@ -1213,9 +1231,10 @@ public:
       pmu.disableIRQ(XPOWERS_AXP2101_ALL_IRQ);
       pmu.clearIrqStatus();
       pmu.enableIRQ(XPOWERS_AXP2101_PKEY_SHORT_IRQ);
+      pmu.setPowerKeyPressOnTime(XPOWERS_POWERON_128MS);
       pmu.setPowerKeyPressOffTime(XPOWERS_POWEROFF_10S);
       pmu.enableLongPressShutdown();
-      pmu.setLongPressRestart();
+      pmu.setLongPressPowerOFF();
       samplePower(millis(), true);
     }
     displayReady = display.begin();
@@ -1265,14 +1284,7 @@ public:
   }
 
   bool handleButton(uint8_t b) override {
-    if (b >= WLED_MAX_BUTTONS) return false;
-    const bool pressed = isButtonPressed(b);
-    if (pressed && !physicalButtonDown[b]) {
-      lastActivityMs = millis();
-      if (!screenOn) setScreenOn(true);
-    }
-    physicalButtonDown[b] = pressed;
-    return true;
+    return b < WLED_MAX_BUTTONS;
   }
 
   void addToJsonInfo(JsonObject &root) override {

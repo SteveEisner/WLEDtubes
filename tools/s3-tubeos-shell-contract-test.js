@@ -70,18 +70,26 @@ test('header battery omits percent text but reports charging and unplugged pulse
   assert.doesNotMatch(source, /display\.printf\("%d%%"|F\("--%"\)/);
 });
 
-// Proves battery inactivity, physical wake, manual sleep, and hardware restart are wired.
-test('display power follows USB, inactivity, and physical-button policy', () => {
+// Proves battery inactivity, PMU display control, and disabled GPIO buttons are wired.
+test('display power is controlled only by inactivity, USB, and the PMU key', () => {
   assert.match(source, /FIELD_OS_IDLE_TIMEOUT_MS = 30000/);
+  assert.match(source, /FIELD_OS_BATTERY_ONLY_BRIGHTNESS = 32/);
   assert.match(source, /if \(wasUsbPresent && !usbPresent\) lastActivityMs = now/);
   assert.match(source, /if \(!usbPresent && now - lastActivityMs >= FIELD_OS_IDLE_TIMEOUT_MS\)/);
-  assert.match(source, /display\.displayOff\(\)/);
-  assert.match(source, /samplePower\(now\);\s*if \(!screenOn\) return;/);
+  assert.match(source, /void drawBatteryOnlyScreen\(\) \{\s*display\.fillScreen\(RGB565_BLACK\)/);
+  assert.match(source, /drawBatteryIcon\(usbPresent \? COLOR_MINT : batteryPulseColor\(millis\(\)\), usbPresent,\s*RGB565_BLACK\)/);
+  assert.match(source, /display\.setBrightness\(FIELD_OS_BATTERY_ONLY_BRIGHTNESS\);\s*drawBatteryOnlyScreen\(\)/);
+  assert.match(source, /if \(!screenOn\) \{[\s\S]*drawBatteryIcon\(batteryPulseColor\(now\), false, RGB565_BLACK\)/);
+  assert.match(source, /samplePower\(now\);\s*if \(!screenOn\) \{/);
   assert.match(source, /if \(!wasUsbPresent && usbPresent && !screenOn\) setScreenOn\(true\)/);
   assert.match(source, /if \(pmu\.isPekeyShortPressIrq\(\)\)[\s\S]*setScreenOn\(!screenOn\)/);
-  assert.match(source, /if \(pressed && !physicalButtonDown\[b\]\)[\s\S]*if \(!screenOn\) setScreenOn\(true\)/);
+  assert.match(source, /bool handleButton\(uint8_t b\) override \{\s*return b < WLED_MAX_BUTTONS;\s*\}/);
+  assert.match(source, /pmu\.setPowerKeyPressOnTime\(XPOWERS_POWERON_128MS\)/);
   assert.match(source, /pmu\.setPowerKeyPressOffTime\(XPOWERS_POWEROFF_10S\)/);
-  assert.match(source, /pmu\.setLongPressRestart\(\)/);
+  assert.match(source, /pmu\.setLongPressPowerOFF\(\)/);
+  assert.doesNotMatch(source, /display\.displayOff\(\)/);
+  assert.doesNotMatch(source, /pmu\.setLongPressRestart\(\)/);
+  assert.doesNotMatch(source, /physicalButtonDown|isButtonPressed/);
 });
 
 // Proves every detected touch refreshes inactivity while navigation remains edge-triggered.
