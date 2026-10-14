@@ -1542,3 +1542,7 @@ MAC; it repeats the request and merges replies because broadcast delivery is not
 guaranteed. Device IDs are intentionally reboot-scoped, so an operator must take `y####`
 from a fresh manifest; the updater still locks every HTTP write and post-reboot
 verification to the stable MAC reported by the selected device.
+
+## Immediate manual serial selection
+
+Prefix a pattern or gradient command with `!` (`!pW,…`, `!pT,…`, `!gH,…`) to schedule its validated program in the current 16-beat phrase. This applies on the next render loop and propagates through unchanged existing channel messages; it does not reset or advance the beat clock. Unprefixed commands keep next-phrase scheduling. Only p and g accept the prefix, and the help response advertises `!p/!g` for capability detection.
