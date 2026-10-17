@@ -4,10 +4,16 @@
 #include "wled.h"
 #include "../Tubes/s3_field_api.h"
 #include "../Tubes/s3_firmware_vault.h"
+#include "../Tubes/dig2go_peer_config.h"
+#include "../Tubes/modern_propagation_lease.h"
 #include "s3_vault_artifacts.h"
 
-extern const uint8_t dig2goStart[] asm("_binary_build_output_s3_vault_esp32_quinled_dig2go_tubes_bin_start");
-extern const uint8_t dig2goEnd[] asm("_binary_build_output_s3_vault_esp32_quinled_dig2go_tubes_bin_end");
+#if TUBES_ENABLE_DIG2GO_PEER_PROPAGATION
+#error "The S3 may seed Dig2Go propagation but must not enable the peer receiver/host"
+#endif
+
+extern const uint8_t dig2goStart[] asm("_binary_build_output_s3_vault_esp32_quinled_dig2go_tubes_p2p_bin_start");
+extern const uint8_t dig2goEnd[] asm("_binary_build_output_s3_vault_esp32_quinled_dig2go_tubes_p2p_bin_end");
 extern const uint8_t athomC3Start[] asm("_binary_build_output_s3_vault_esp32_c3_athom_tubes_bin_start");
 extern const uint8_t athomC3End[] asm("_binary_build_output_s3_vault_esp32_c3_athom_tubes_bin_end");
 
@@ -29,6 +35,7 @@ constexpr uint32_t TARGET_MAX_AGE_MS = 60000;
 
 S3FirmwareVaultPolicy policy;
 S3FirmwareVaultCatalog catalog;
+bool carrierCatalogReady = false;
 S3VaultObservedDevice armedDevice;
 bool probePending = false;
 uint8_t probeMac[6] = {0};
@@ -76,7 +83,9 @@ void responseFinished(bool acknowledged, const uint8_t mac[6]) {
 void rememberTarget(const DeviceReportMessage& report) {
   if (!S3FirmwareVaultPolicy::isSupportedProfile(report.hardwareFamily,
                                                   report.firmwareVariant)
-      || report.tubesVersion >= CARRIER_RELEASE) return;
+      || report.tubesVersion > CARRIER_RELEASE
+      || (report.tubesVersion == CARRIER_RELEASE
+          && report.hardwareFamily != TubeHardwareDig2Go)) return;
   size_t slot = targetCount;
   for (size_t index = 0; index < targetCount; index++)
     if (!memcmp(targets[index].mac, report.mac, 6)) { slot = index; break; }
@@ -175,6 +184,7 @@ void sendError(AsyncWebServerRequest* request, int code, const char* message) {
 class S3FirmwareCarrier : public Usermod {
 public:
   void setup() override {
+    carrierCatalogReady = false;
     S3VaultArtifact dig2go;
     dig2go.family = TubeHardwareDig2Go;
     dig2go.variant = TubeVariantStandard;
@@ -193,6 +203,7 @@ public:
       policy.arm(0, 0, millis());
       return;
     }
+    carrierCatalogReady = true;
 
     server.on(ARM_PATH, HTTP_POST, [](AsyncWebServerRequest* request) {
       static const char* const names[] = {"mac", "family", "variant", "current"};
@@ -405,19 +416,50 @@ size_t tubesS3CarrierArtifactCount() { return 2; }
 
 bool tubesS3ReadCarrierArtifact(size_t index, TubesS3CarrierArtifact& artifact) {
   artifact = TubesS3CarrierArtifact{};
+  if (!carrierCatalogReady) return false;
   artifact.variant = TubeVariantStandard;
   artifact.release = CARRIER_RELEASE;
   if (index == 0) {
     artifact.family = TubeHardwareDig2Go;
+    artifact.peerPropagation = true;
     artifact.size = S3_VAULT_DIG2GO_SIZE;
     return true;
   }
   if (index == 1) {
     artifact.family = TubeHardwareAthomC3;
+    artifact.peerPropagation = false;
     artifact.size = S3_VAULT_ATHOM_C3_SIZE;
     return true;
   }
   return false;
+}
+
+bool tubesS3SeedDig2GoPropagation(uint16_t nodeId) {
+  if (!nodeId || !carrierCatalogReady) return false;
+  TubesS3CarrierTarget target;
+  bool exactTarget = false;
+  for (size_t index = 0; index < tubesS3CarrierTargetCount(); index++) {
+    if (!tubesS3ReadCarrierTarget(index, target)) continue;
+    if (target.nodeId == nodeId && target.family == TubeHardwareDig2Go
+        && target.variant == TubeVariantStandard
+        && target.release == CARRIER_RELEASE) {
+      exactTarget = true;
+      break;
+    }
+  }
+  if (!exactTarget) return false;
+  const S3VaultArtifact* catalogArtifact = catalog.select(
+      target.family, target.variant, target.release);
+  size_t embeddedSize = 0;
+  const uint8_t* embeddedData = artifactData(target.family, embeddedSize);
+  if (!catalogArtifact || !embeddedData || embeddedSize != catalogArtifact->size
+      || embeddedSize != S3_VAULT_DIG2GO_SIZE) return false;
+  uint32_t nonce = esp_random();
+  if (!nonce) nonce = 1;
+  FleetUpdateOffer command;
+  return makeModernPropagationServeCommand(
+      command, catalogArtifact->tubesVersion, nonce, nodeId)
+      && tubesS3BroadcastFleetOffer(command);
 }
 
 #endif

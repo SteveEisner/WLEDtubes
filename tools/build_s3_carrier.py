@@ -17,7 +17,7 @@ FIRMWARE = REPO / "build_output" / "firmware"
 OTA_SLOT = 0x600000
 REQUIRED_HEADROOM = 0x40000
 PROFILES = (
-    ("esp32_quinled_dig2go_tubes", "esp32_quinled_dig2go_tubes.bin", "dig2go"),
+    ("esp32_quinled_dig2go_tubes_p2p", "esp32_quinled_dig2go_tubes_p2p.bin", "dig2go"),
     ("esp32-c3-athom_tubes", "esp32-c3-athom_tubes.bin", "athom-c3"),
 )
 
