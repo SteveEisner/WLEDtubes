@@ -1478,6 +1478,61 @@ preserved.
 The serial console is not part of the mesh protocol, but it is a common operator
 surface for producing mesh traffic.
 
+### Read-only active-palette query
+
+`QP1\n` requests a version-1 snapshot of the palette WLED most recently used to
+render the main segment. Unlike bare `g`, `QP1` does not claim Palette authority,
+publish a channel message, change a pattern, color, brightness, clock, Wi-Fi mode,
+or mesh state.
+
+The response is an immutable query-time snapshot framed for a reader that also sees
+ordinary serial telemetry:
+
+```text
+TUBES_PALETTE_V1_BEGIN f=0001 data=37
+TUBES_PALETTE_V1_META f=0001 pal=255 src=117 src_kind=retained fx=65 blend=3 trans=0 at=123456
+TUBES_PALETTE_V1_META f=0001 slots=16 stops=12 lookups=1 samples=256 domain=index8 rgb=wled8
+TUBES_PALETTE_V1_D f=0001 p=1/37 k=slots o=0 n=8 x=F47662F47662...
+TUBES_PALETTE_V1_D f=0001 p=3/37 k=stops o=0 n=4 x=00F476622AF47662...
+TUBES_PALETTE_V1_D f=0001 p=8/37 k=lookup m=noblend o=16 n=8 x=F47662F47662...
+TUBES_PALETTE_V1_END f=0001 data=37 status=ok
+```
+
+`f` is a nonzero 16-bit frame number shared by every record. `data` is the exact
+number of `D` records between the metadata and `END`; each `D` record also carries
+its one-based `p=current/total`, element offset `o`, and element count `n`. A parser
+must discard an incomplete frame or a frame whose number, part count, offsets, or
+end status do not agree. `TUBES_PALETTE_V1_ERROR code=busy` means an earlier dump is
+still draining; any other `Q` form returns `code=request expected=QP1`.
+
+The representations have different meanings:
+
+- `k=slots` is the exact 16-entry `CRGBPalette16` active at query time. It is
+  quantized WLED runtime state and may already contain a palette transition blend.
+- `k=lookup` contains 256 RGB samples, one for every eight-bit palette index, computed
+  from those captured runtime slots with WLED's `ColorFromPalette()` implementation.
+  `m` is `noblend`, `linear_wrap`, or `linear_nowrap`. Blend policies 1, 2, and 3
+  emit their single selected table. Policy 0 is call-dependent inside WLED, so it
+  emits both `linear_wrap` and `linear_nowrap` rather than guessing which an effect uses.
+- `k=stops` contains variable-length `position:u8, red:u8, green:u8, blue:u8` source
+  records when Tubes can identify them. `src_kind=retained` means the current runtime
+  palette retained a source table; `builtin` means it was recovered from the selected
+  compiled palette; `none` means no source table is available. `src=-1` means there is
+  no predefined source ID. Stops describe the selected source, while slots/lookups
+  describe the active rendered palette and therefore remain authoritative during a transition.
+
+`x` is uppercase hexadecimal with no separators: six characters per `slots` or
+`lookup` RGB value and eight characters per `stops` value. `rgb=wled8` identifies
+WLED's raw eight-bit palette space before segment brightness, RGBW white injection,
+framebuffer output gamma, and physical LED correction. The protocol does not infer
+higher precision from these bytes.
+
+Stop count is declared in each frame and is not tied to the 16 runtime slots. Records
+are chunked, so future firmware can report larger source tables without changing the
+framing. This firmware currently retains at most 18 source stops because that is the
+bound of its palette mesh representation. The dump is emitted one bounded line per
+controller update after normal mesh work, avoiding one large blocking serial write.
+
 Routine packet and status tracing is quiet until the device receives a serial
 character. Any command, including an empty newline, enables tracing for 60
 seconds; further input renews the lease. Startup messages and errors remain
@@ -1499,6 +1554,7 @@ activate field diagnostics as soon as it connects.
 | `g` | Make the connected pole Palette Master and immediately publish its current/next gradients. |
 | `g0:RRGGBB,...,255:RRGGBB` | Make the connected pole Palette Master and schedule a custom two-to-eight-stop gradient at the next phrase; the nearest fixed legacy fallback is selected automatically. |
 | `gH,<hold>,0:RRGGBB,...,255:RRGGBB` | Schedule the same custom gradient with an explicit phrase hold; zero pauses rotation. |
+| `QP1` | Read the active WLED palette snapshot described above. It emits no mesh message and changes no device state. |
 | `e###` | Schedule the next effect from the WLED `gEffects` table at the next phrase boundary. |
 | `%###` | Schedule the effect chance at the next phrase boundary. |
 | `D0`, `D1` | Broadcast a selected-scope `Action` that explicitly disables or enables debugging. Generation-0 poles ignore the unknown `D` key. |

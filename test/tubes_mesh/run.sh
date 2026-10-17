@@ -58,6 +58,7 @@ compile_and_run deferred_bpm_broadcast_test
 compile_and_run rubber_band_beat_clock_test
 compile_and_run downbeat_tracker_test
 compile_and_run effect_chance_test
+compile_and_run palette_serial_protocol_test
 compile_and_run v3_protocol_test
 compile_and_run dig2go_peer_propagation_test
 check_dig2go_peer_config

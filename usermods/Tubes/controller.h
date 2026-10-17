@@ -17,6 +17,7 @@
 #include "deferred_bpm_broadcast.h"
 #include "s3_field_api.h"
 #include "device_report_protocol.h"
+#include "palette_serial_protocol.h"
 #include "v3_runtime.h"
 
 #ifdef TUBES_S3_FIRMWARE_CARRIER
@@ -226,6 +227,30 @@ struct PaletteChannelDefinitionCacheEntry {
   PaletteGradient16 palette;
 };
 
+enum PaletteSerialSourceKind : uint8_t {
+  PaletteSerialSourceNone,
+  PaletteSerialSourceBuiltIn,
+  PaletteSerialSourceRetained,
+};
+
+// One immutable query-time snapshot is emitted incrementally so serial output
+// cannot mix colors from two palette states or monopolize the mesh loop.
+struct ActivePaletteSerialDump {
+  bool active = false;
+  uint16_t frame = 0;
+  uint16_t record = 0;
+  uint32_t capturedAtMs = 0;
+  uint8_t configuredPaletteId = 0;
+  int16_t sourcePaletteId = -1;
+  PaletteSerialSourceKind sourceKind = PaletteSerialSourceNone;
+  uint8_t effectId = 0;
+  uint8_t blendPolicy = 0;
+  bool transitioning = false;
+  CRGBPalette16 runtimePalette;
+  PaletteRawDefinition sourceStops;
+  PaletteSerialDumpPlan plan;
+};
+
 // AI: end
 
 #define TUBE_COMMAND(command, operation, scope) \
@@ -414,6 +439,12 @@ class PatternController : public MessageReceiver {
     bool nextPaletteRawValid = false;
     uint8_t activePaletteSourceId = PALETTE_PREDEFINED_ID_NONE;
     uint8_t nextPaletteSourceId = PALETTE_PREDEFINED_ID_NONE;
+    ActivePaletteSerialDump paletteSerialDump;
+    uint16_t paletteSerialFrameSequence = 0;
+    CRGBPalette16 lastRenderedMainPalette;
+    bool lastRenderedMainPaletteValid = false;
+    bool lastRenderedMainPaletteTransitioning = false;
+    uint32_t lastRenderedMainPaletteAtMs = 0;
     bool paletteScheduleHeld = false;
     uint16_t currentPaletteHoldPhrases = 1;
     uint16_t nextPaletteHoldPhrases = 1;
@@ -1578,6 +1609,232 @@ class PatternController : public MessageReceiver {
         && expandPaletteRaw(snapshot.nextDefinition, next);
   }
 
+  static const char* paletteSerialSourceName(PaletteSerialSourceKind kind) {
+    switch (kind) {
+      case PaletteSerialSourceBuiltIn: return "builtin";
+      case PaletteSerialSourceRetained: return "retained";
+      default: return "none";
+    }
+  }
+
+  static const char* paletteSerialLookupName(PaletteSerialLookupMode mode) {
+    switch (mode) {
+      case PaletteLookupLinearWrap: return "linear_wrap";
+      case PaletteLookupLinearNoWrap: return "linear_nowrap";
+      default: return "noblend";
+    }
+  }
+
+  static TBlendType paletteSerialBlendType(PaletteSerialLookupMode mode) {
+    switch (mode) {
+      case PaletteLookupLinearWrap: return LINEARBLEND;
+      case PaletteLookupLinearNoWrap: return LINEARBLEND_NOWRAP;
+      default: return NOBLEND;
+    }
+  }
+
+  static char paletteSerialHexDigit(uint8_t value) {
+    return value < 10 ? char('0' + value) : char('A' + value - 10);
+  }
+
+  static void appendPaletteSerialHexByte(char*& output, uint8_t value) {
+    *output++ = paletteSerialHexDigit(value >> 4);
+    *output++ = paletteSerialHexDigit(value & 0x0F);
+  }
+
+  static void encodePaletteSerialRgb(
+      const CRGB* colors,
+      uint8_t count,
+      char* output
+  ) {
+    char* cursor = output;
+    for (uint8_t index = 0; index < count; index++) {
+      appendPaletteSerialHexByte(cursor, colors[index].r);
+      appendPaletteSerialHexByte(cursor, colors[index].g);
+      appendPaletteSerialHexByte(cursor, colors[index].b);
+    }
+    *cursor = 0;
+  }
+
+  static void encodePaletteSerialStops(
+      const PaletteGradientStop* stops,
+      uint8_t count,
+      char* output
+  ) {
+    char* cursor = output;
+    for (uint8_t index = 0; index < count; index++) {
+      appendPaletteSerialHexByte(cursor, stops[index].position);
+      appendPaletteSerialHexByte(cursor, stops[index].red);
+      appendPaletteSerialHexByte(cursor, stops[index].green);
+      appendPaletteSerialHexByte(cursor, stops[index].blue);
+    }
+    *cursor = 0;
+  }
+
+  static bool writePaletteSerialLine(const char* line, size_t capacity) {
+    size_t length = strnlen(line, capacity);
+    if (length == capacity || Serial.availableForWrite() < int(length))
+      return false;
+    return Serial.write(reinterpret_cast<const uint8_t*>(line), length) == length;
+  }
+
+  void requestActivePaletteDump() {
+    if (paletteSerialDump.active) {
+      Serial.println(F("TUBES_PALETTE_V1_ERROR code=busy"));
+      return;
+    }
+
+    Segment& segment = strip.getMainSegment();
+    ActivePaletteSerialDump dump;
+    paletteSerialFrameSequence++;
+    if (!paletteSerialFrameSequence)
+      paletteSerialFrameSequence++;
+    dump.frame = paletteSerialFrameSequence;
+    dump.configuredPaletteId = segment.palette;
+    dump.effectId = segment.mode;
+    dump.blendPolicy = paletteBlend;
+    if (lastRenderedMainPaletteValid) {
+      dump.capturedAtMs = lastRenderedMainPaletteAtMs;
+      dump.transitioning = lastRenderedMainPaletteTransitioning;
+      dump.runtimePalette = lastRenderedMainPalette;
+    } else {
+      dump.capturedAtMs = millis();
+      dump.transitioning = segment.isInTransition();
+      segment.copyPalette(dump.runtimePalette, segment.palette);
+    }
+
+    if (v3RuntimePaletteActive
+        && segment.palette == v3RuntimePaletteId
+        && activePaletteRawValid) {
+      dump.sourceStops = activePaletteRaw;
+      dump.sourceKind = PaletteSerialSourceRetained;
+      if (activePaletteSourceId != PALETTE_PREDEFINED_ID_NONE)
+        dump.sourcePaletteId = activePaletteSourceId;
+    } else if (segment.palette < gBuiltInPaletteCount
+               && makePaletteRaw(segment.palette, dump.sourceStops)) {
+      dump.sourceKind = PaletteSerialSourceBuiltIn;
+      dump.sourcePaletteId = segment.palette;
+    }
+
+    dump.plan = makePaletteSerialDumpPlan(dump.sourceStops.count, dump.blendPolicy);
+    if (!dump.plan.lookupCount) {
+      Serial.println(F("TUBES_PALETTE_V1_ERROR code=blend_policy"));
+      return;
+    }
+    dump.active = true;
+    paletteSerialDump = dump;
+  }
+
+  bool emitPaletteSerialDataRecord(uint16_t dataIndex, char* line, size_t capacity) {
+    const PaletteSerialDumpPlan& plan = paletteSerialDump.plan;
+    uint16_t dataPart = dataIndex + 1;
+    if (dataIndex < plan.slotChunks) {
+      uint16_t offset = dataIndex * PALETTE_SERIAL_RGB_CHUNK_SIZE;
+      uint8_t count = min(
+          uint16_t(PALETTE_SERIAL_RGB_CHUNK_SIZE),
+          uint16_t(PALETTE_SERIAL_RUNTIME_SLOT_COUNT - offset));
+      char encoded[PALETTE_SERIAL_RGB_CHUNK_SIZE * 6 + 1];
+      encodePaletteSerialRgb(
+          &paletteSerialDump.runtimePalette.entries[offset], count, encoded);
+      snprintf(line, capacity,
+          "TUBES_PALETTE_V1_D f=%04X p=%u/%u k=slots o=%u n=%u x=%s\n",
+          paletteSerialDump.frame, dataPart, plan.dataParts, offset, count, encoded);
+      return writePaletteSerialLine(line, capacity);
+    }
+
+    dataIndex -= plan.slotChunks;
+    if (dataIndex < plan.stopChunks) {
+      uint16_t offset = dataIndex * PALETTE_SERIAL_STOP_CHUNK_SIZE;
+      uint8_t count = min(
+          uint16_t(PALETTE_SERIAL_STOP_CHUNK_SIZE),
+          uint16_t(paletteSerialDump.sourceStops.count - offset));
+      char encoded[PALETTE_SERIAL_STOP_CHUNK_SIZE * 8 + 1];
+      encodePaletteSerialStops(
+          &paletteSerialDump.sourceStops.stops[offset], count, encoded);
+      snprintf(line, capacity,
+          "TUBES_PALETTE_V1_D f=%04X p=%u/%u k=stops o=%u n=%u x=%s\n",
+          paletteSerialDump.frame, dataPart, plan.dataParts, offset, count, encoded);
+      return writePaletteSerialLine(line, capacity);
+    }
+
+    dataIndex -= plan.stopChunks;
+    uint8_t lookupIndex = dataIndex / plan.lookupChunks;
+    uint16_t lookupChunk = dataIndex % plan.lookupChunks;
+    uint16_t offset = lookupChunk * PALETTE_SERIAL_RGB_CHUNK_SIZE;
+    uint8_t count = min(
+        uint16_t(PALETTE_SERIAL_RGB_CHUNK_SIZE),
+        uint16_t(PALETTE_SERIAL_SAMPLE_COUNT - offset));
+    PaletteSerialLookupMode mode = plan.lookupModes[lookupIndex];
+    TBlendType blend = paletteSerialBlendType(mode);
+    CRGB colors[PALETTE_SERIAL_RGB_CHUNK_SIZE];
+    for (uint8_t index = 0; index < count; index++)
+      colors[index] = CRGB(ColorFromPalette(
+          paletteSerialDump.runtimePalette, offset + index, UINT8_MAX, blend));
+    char encoded[PALETTE_SERIAL_RGB_CHUNK_SIZE * 6 + 1];
+    encodePaletteSerialRgb(colors, count, encoded);
+    snprintf(line, capacity,
+        "TUBES_PALETTE_V1_D f=%04X p=%u/%u k=lookup m=%s o=%u n=%u x=%s\n",
+        paletteSerialDump.frame,
+        dataPart,
+        plan.dataParts,
+        paletteSerialLookupName(mode),
+        offset,
+        count,
+        encoded);
+    return writePaletteSerialLine(line, capacity);
+  }
+
+  // Emits at most one bounded line per controller update. The BEGIN/META/D/END
+  // markers and declared part count let a shared serial reader ignore other telemetry.
+  void emitActivePaletteDumpRecord() {
+    if (!paletteSerialDump.active)
+      return;
+
+    char line[160];
+    bool emitted = false;
+    if (paletteSerialDump.record == 0) {
+      snprintf(line, sizeof(line),
+          "TUBES_PALETTE_V1_BEGIN f=%04X data=%u\n",
+          paletteSerialDump.frame, paletteSerialDump.plan.dataParts);
+      emitted = writePaletteSerialLine(line, sizeof(line));
+    } else if (paletteSerialDump.record == 1) {
+      snprintf(line, sizeof(line),
+          "TUBES_PALETTE_V1_META f=%04X pal=%u src=%d src_kind=%s fx=%u blend=%u trans=%u at=%lu\n",
+          paletteSerialDump.frame,
+          paletteSerialDump.configuredPaletteId,
+          paletteSerialDump.sourcePaletteId,
+          paletteSerialSourceName(paletteSerialDump.sourceKind),
+          paletteSerialDump.effectId,
+          paletteSerialDump.blendPolicy,
+          paletteSerialDump.transitioning,
+          static_cast<unsigned long>(paletteSerialDump.capturedAtMs));
+      emitted = writePaletteSerialLine(line, sizeof(line));
+    } else if (paletteSerialDump.record == 2) {
+      snprintf(line, sizeof(line),
+          "TUBES_PALETTE_V1_META f=%04X slots=16 stops=%u lookups=%u samples=256 domain=index8 rgb=wled8\n",
+          paletteSerialDump.frame,
+          paletteSerialDump.sourceStops.count,
+          paletteSerialDump.plan.lookupCount);
+      emitted = writePaletteSerialLine(line, sizeof(line));
+    } else {
+      uint16_t dataIndex = paletteSerialDump.record - 3;
+      if (dataIndex < paletteSerialDump.plan.dataParts) {
+        emitted = emitPaletteSerialDataRecord(dataIndex, line, sizeof(line));
+      } else {
+        snprintf(line, sizeof(line),
+            "TUBES_PALETTE_V1_END f=%04X data=%u status=ok\n",
+            paletteSerialDump.frame, paletteSerialDump.plan.dataParts);
+        emitted = writePaletteSerialLine(line, sizeof(line));
+        if (emitted) {
+          paletteSerialDump.active = false;
+          return;
+        }
+      }
+    }
+    if (emitted)
+      paletteSerialDump.record++;
+  }
+
   // AI: end
 
   void storePaletteDefinition(
@@ -1946,6 +2203,11 @@ class PatternController : public MessageReceiver {
 
     // WLED state changes above may rebuild its stored segment list; reserve our runtime layer last.
     ensureSoundOverlaySegment();
+
+    // AI: below section was generated by an AI
+    // A palette query is read-only and yields one short record after normal mesh work.
+    emitActivePaletteDumpRecord();
+    // AI: end
 
 #ifdef USELCD
     if (lcd->active) {
@@ -3473,6 +3735,10 @@ class PatternController : public MessageReceiver {
     // AI: below section was generated by an AI
     // WLED shares its active palette across segments; restore segment 0 after the audio layer rendered.
     strip.getMainSegment().restoreDrawState();
+    lastRenderedMainPalette = Segment::getCurrentPalette();
+    lastRenderedMainPaletteValid = true;
+    lastRenderedMainPaletteTransitioning = strip.getMainSegment().isInTransition();
+    lastRenderedMainPaletteAtMs = millis();
     // AI: end
 
     uint8_t beat_pulse = 0;
@@ -3593,7 +3859,7 @@ class PatternController : public MessageReceiver {
 
   void printHelp() const {
     // AI: below section was generated by an AI
-    Serial.println(F("b###.# - set bpm\ns - start phrase\n!p/!g - immediate manual pattern/gradient\n\np### - preferred table pattern\npW,<fx>,<speed>,<intensity>,<c1>,<c2>,<c3>,<mask>,<values>,<sync>,<fallback>,<hold>\npT,<tubes>,<sync>,<fallback>,<hold>\nm### - sync mode\nc### - colors\nc<id>,<hold> - timed/held built-in palette\ne### - effects\nn - force next\n\ni### - set Control ID\nB/K/C### - set Beat/Pattern/Palette Channel ID\ng - become Palette Master\ng0:RRGGBB,...,255:RRGGBB - schedule a custom gradient\ngH,<hold>,0:RRGGBB,...,255:RRGGBB - timed/held gradient\nd0/1 - set local debugging\nD0/1 - set debugging on selected devices\nl### - brightness"));
+    Serial.println(F("b###.# - set bpm\ns - start phrase\n!p/!g - immediate manual pattern/gradient\n\np### - preferred table pattern\npW,<fx>,<speed>,<intensity>,<c1>,<c2>,<c3>,<mask>,<values>,<sync>,<fallback>,<hold>\npT,<tubes>,<sync>,<fallback>,<hold>\nm### - sync mode\nc### - colors\nc<id>,<hold> - timed/held built-in palette\ne### - effects\nn - force next\n\ni### - set Control ID\nB/K/C### - set Beat/Pattern/Palette Channel ID\ng - become Palette Master\ng0:RRGGBB,...,255:RRGGBB - schedule a custom gradient\ngH,<hold>,0:RRGGBB,...,255:RRGGBB - timed/held gradient\nQP1 - dump active palette without changing state\nd0/1 - set local debugging\nD0/1 - set debugging on selected devices\nl### - brightness"));
     Serial.println(F("@ - set power saving mode\nU - begin auto-update\nP - toggle all power saves\nO - locally schedule sound toggle on Beat owner\nO0 - locally schedule sound off\nO1 - locally schedule rotating sound programs\nO### - locally schedule raw WLED effect on Beat owner\nO<fx>,<pal>,<speed>,<intensity>,<c1>,<c2>,<c3>,<checks>,<blend>,<opacity>[,<chance>] - locally schedule all overlay settings\nJ1/J0 - enter/exit audio workshop; J+/J- vote, J>/J< browse\nj0/1 - local automatic microphone tempo off/on\n==== wifi ====\na - turn on access point\nq - turn off access point\nt0/1 - Tubes mode off/on"));
     Serial.println(F("==== selected actions ====\nD0/1 - set debugging\nU - begin auto-update\nX - restart\nf### - flash connected device\nF### - flash selected devices\nr/R### - set local/selected role\n==== mesh actions ====\n* - enter OTA select mode (double-click to Ready)\nP<offer> - explicitly start peer propagation\nA - turn on access point (Ready to update)\nW - forget WiFi client\nV### - auto-upgrade to version\nz - report all visible devices\nz############ - probe a device by MAC\nyhhhh - select one hexadecimal Device ID for update\n(hhhh/)hhhh - select/unselect a Device ID\nM - cancel manual pattern override"));
     // AI: end
@@ -4614,6 +4880,16 @@ class PatternController : public MessageReceiver {
       return;
     }
     // AI: below section was generated by an AI
+    if (key == 'Q') {
+      bool exactPaletteQuery = command[1] == 'P'
+          && command[2] == '1'
+          && (!command[3] || (command[3] == '\r' && !command[4]));
+      if (exactPaletteQuery)
+        requestActivePaletteDump();
+      else
+        Serial.println(F("TUBES_PALETTE_V1_ERROR code=request expected=QP1"));
+      return;
+    }
     if (key == 'v' && !command[1]) {
       verifyBuiltInPaletteRoundTrips();
       return;
